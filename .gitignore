@@ -1,0 +1,6 @@
+node_modules
+dist
+*.log
+# Originales comprimidos de itch.io (lo extraído sí se versiona: lo usa herramientas/preparar_sprites.py)
+recursos/descargas/
+__pycache__/

@@ -1,0 +1,19 @@
+{
+  "name": "ecos-el-pozo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ECOS: El Pozo que Recuerda — metroidvania roguelike sobre las mecánicas de minialu",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8"
+  }
+}
