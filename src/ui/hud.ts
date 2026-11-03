@@ -3,7 +3,9 @@
 import { INFO_TECNICA, alma } from "../contenido/almas.ts";
 import { bioma } from "../contenido/biomas.ts";
 import { OBJ_ETER, OBJ_POCION } from "../contenido/objetos.ts";
+import { SUBARMAS } from "../contenido/subarmas.ts";
 import { estrellas } from "../dominio/cartas.ts";
+import { dibujarIconoSubarma } from "../juego/entidades/objetos.ts";
 import { aperturas, type MapaPiso } from "../dominio/mundo/generador.ts";
 import type { Juego } from "../juego/juego.ts";
 
@@ -71,11 +73,25 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
   texto(g, `R ✦${p.mochila.contar(OBJ_ETER)}`, 50, 262, "#8ad8ff");
   texto(g, `◆ ${p.esquirlas}`, 94, 262, "#9fe8ff");
 
+  // Corazones y subarma (↑ + Patada)
+  texto(g, `♥ ${p.corazones}`, 150, 262, "#ff6a8a");
+  g.fillStyle = "#000000aa";
+  g.fillRect(186, 250, 16, 16);
+  g.strokeStyle = p.subarma !== null ? SUBARMAS[p.subarma].color : "#444455";
+  g.lineWidth = 1;
+  g.strokeRect(186.5, 250.5, 15, 15);
+  if (p.subarma !== null) {
+    dibujarIconoSubarma(g, p.subarma, 194, 258);
+    const puede = p.corazones >= SUBARMAS[p.subarma].costo;
+    texto(g, `↑K ${SUBARMAS[p.subarma].costo}♥`, 206, 262, puede ? "#ffd0d8" : "#776677");
+  }
+
   // Piso
   const b = bioma(p.piso);
   texto(g, `Piso ${p.piso} · ${b.nombre}`, 476, 262, b.acento, "right");
 
   dibujarMinimapa(g, juego.mapa, juego, 406, 4);
+  dibujarCombo(g, juego);
 
   // Jefe
   const jefe = juego.jefeActivo();
@@ -123,4 +139,38 @@ export function dibujarMinimapa(g: CanvasRenderingContext2D, mapa: MapaPiso, jue
       }
     }
   }
+}
+
+/** Medidor de estilo: golpes, rango (D → SSS) y la barrita que se vacía si dejás de pegar. */
+function dibujarCombo(g: CanvasRenderingContext2D, juego: Juego): void {
+  const c = juego.combo;
+  if (c.golpes < 2 && c.puntos < 1) return;
+  const r = c.rango;
+  const x = 476;
+  const y = 66;
+  const pulso = 1 + Math.max(0, Math.sin(performance.now() / 90)) * (c.indiceRango >= 4 ? 0.15 : 0);
+  g.save();
+  g.textAlign = "right";
+  g.font = `bold ${Math.round(20 * pulso)}px monospace`;
+  g.fillStyle = "#000000";
+  g.fillText(r.nombre, x + 1, y + 1);
+  g.fillStyle = r.color;
+  g.fillText(r.nombre, x, y);
+  g.font = "bold 8px monospace";
+  g.fillStyle = "#000000";
+  g.fillText(r.titulo, x + 1, y + 11);
+  g.fillStyle = r.color;
+  g.fillText(r.titulo, x, y + 10);
+  if (c.golpes >= 2) {
+    g.font = "bold 11px monospace";
+    g.fillStyle = "#000000";
+    g.fillText(`${c.golpes} golpes`, x + 1, y + 24);
+    g.fillStyle = "#ffffff";
+    g.fillText(`${c.golpes} golpes`, x, y + 23);
+  }
+  g.fillStyle = "#000000aa";
+  g.fillRect(x - 60, y + 27, 60, 3);
+  g.fillStyle = r.color;
+  g.fillRect(x - 60, y + 27, Math.round(60 * c.resto), 3);
+  g.restore();
 }

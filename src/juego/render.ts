@@ -22,13 +22,21 @@ function hash(a: number, b: number, c = 0): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-/** Sala con el tileset del castillo (teñido por bioma); si la imagen no está, versión procedural. */
-export function prerenderSala(t: Tiles, b: Bioma, semilla: number, especial = false): HTMLCanvasElement {
-  const atlas = sprites.tenida("castillo", b.tinte[0], b.tinte[1]);
-  return atlas !== null ? prerenderConAtlas(t, b, semilla, atlas, especial) : prerenderProcedural(t, b, semilla);
+export interface SalaDibujada {
+  readonly lienzo: HTMLCanvasElement;
+  /** Fuentes de luz del decorado (faroles, ventanas) para la iluminación dinámica. */
+  readonly luces: readonly Luz[];
 }
 
-function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, especial: boolean): HTMLCanvasElement {
+/** Sala con el tileset del castillo (teñido por bioma); si la imagen no está, versión procedural. */
+export function prerenderSala(t: Tiles, b: Bioma, semilla: number, especial = false): SalaDibujada {
+  const atlas = sprites.tenida("castillo", b.tinte[0], b.tinte[1]);
+  if (atlas === null) return { lienzo: prerenderProcedural(t, b, semilla), luces: [] };
+  const luces: Luz[] = [];
+  return { lienzo: prerenderConAtlas(t, b, semilla, atlas, especial, luces), luces };
+}
+
+function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, especial: boolean, luces: Luz[]): HTMLCanvasElement {
   const [c, g] = lienzo(ANCHO_SALA, ALTO_SALA);
   const solido = (x: number, y: number): boolean => x < 0 || y < 0 || x >= COLS || y >= FILAS ? true : esSolido(t.tile(x, y));
   const tile = (x: number, y: number): number => x < 0 || y < 0 || x >= COLS || y >= FILAS ? 1 : t.tile(x, y);
@@ -48,6 +56,7 @@ function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, e
     g.globalAlpha = 0.55;
     poner(DECORADO.ventana, ANCHO_SALA / 2 - 32, 3 * TILE);
     g.globalAlpha = 1;
+    luces.push({ x: ANCHO_SALA / 2, y: 6 * TILE, r: 70, fuerza: 0.35 });
   }
   for (let tx = 3; tx < COLS - 3; tx++) {
     if (!solido(tx, 1) || solido(tx, 2) || (tx >= 11 && tx <= 18)) continue;
@@ -58,6 +67,7 @@ function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, e
     };
     if (r < 0.07 && solido(tx + 1, 1) && libreAbajo(6)) {
       poner(DECORADO.farol, tx * TILE, 2 * TILE - 16);
+      luces.push({ x: tx * TILE + 16, y: 2 * TILE + 44, r: 46, fuerza: 0.75 });
       tx += 2;
     } else if (r < 0.16) {
       poner(DECORADO.cadena, tx * TILE, 2 * TILE);
@@ -257,11 +267,12 @@ export function fondoBioma(b: Bioma, capa: 0 | 1): HTMLCanvasElement {
   for (let i = 0; i < n; i++) {
     const x = (i / n) * W + hash(i, capa) * 40;
     const ancho = 30 + hash(i, 3, capa) * 40;
-    switch (b.particula) {
-      case "polvo": {
+    const H = ALTO_SALA;
+    switch (b.fondo) {
+      case "arcos": {
         // arcos y columnas de osario
-        g.fillRect(x, 40 + hash(i, 1) * 40, ancho * 0.4, ALTO_SALA);
-        g.fillRect(x + ancho, 40 + hash(i, 2) * 40, ancho * 0.4, ALTO_SALA);
+        g.fillRect(x, 40 + hash(i, 1) * 40, ancho * 0.4, H);
+        g.fillRect(x + ancho, 40 + hash(i, 2) * 40, ancho * 0.4, H);
         g.beginPath();
         g.arc(x + ancho * 0.7, 60 + hash(i, 4) * 30, ancho * 0.7, Math.PI, 0);
         g.lineWidth = 8;
@@ -270,21 +281,113 @@ export function fondoBioma(b: Bioma, capa: 0 | 1): HTMLCanvasElement {
         for (let k = 0; k < 4; k++) g.fillRect(x + k * 9, 30 + k * 13 + hash(i, k) * 20, 5, 4);
         break;
       }
-      case "esporas": {
-        // hongos gigantes
+      case "hongos": {
         const alto = 90 + hash(i, 5) * 100;
-        g.fillRect(x + ancho / 2 - 4, ALTO_SALA - alto, 8 + capa * 3, alto);
+        g.fillRect(x + ancho / 2 - 4, H - alto, 8 + capa * 3, alto);
         g.beginPath();
-        g.ellipse(x + ancho / 2, ALTO_SALA - alto, ancho * 0.9, 18 + capa * 4, 0, Math.PI, 0);
+        g.ellipse(x + ancho / 2, H - alto, ancho * 0.9, 18 + capa * 4, 0, Math.PI, 0);
         g.fill();
         break;
       }
-      case "brasas": {
-        // cadenas, tuberías y yunques
+      case "cadenas": {
         g.fillRect(x, 0, 6, 80 + hash(i, 6) * 120);
         for (let k = 0; k < 8; k++) g.fillRect(x - 2, k * 14, 10, 6);
-        g.fillRect(x + 20, ALTO_SALA - 80 - hash(i, 7) * 60, ancho, 14);
-        g.fillRect(x + 20 + ancho / 2 - 6, ALTO_SALA - 66 - hash(i, 7) * 60, 12, 200);
+        g.fillRect(x + 20, H - 80 - hash(i, 7) * 60, ancho, 14);
+        g.fillRect(x + 20 + ancho / 2 - 6, H - 66 - hash(i, 7) * 60, 12, 200);
+        break;
+      }
+      case "cristales": {
+        // estalagmitas y estalactitas de hielo
+        const alto = 60 + hash(i, 5) * 110;
+        g.beginPath();
+        g.moveTo(x, H);
+        g.lineTo(x + ancho / 2, H - alto);
+        g.lineTo(x + ancho, H);
+        g.fill();
+        const arriba = 30 + hash(i, 8) * 70;
+        g.beginPath();
+        g.moveTo(x + ancho * 0.6, 0);
+        g.lineTo(x + ancho * 0.8, arriba);
+        g.lineTo(x + ancho, 0);
+        g.fill();
+        break;
+      }
+      case "ruinas": {
+        // columnas partidas y arcos hundidos
+        const alto = 70 + hash(i, 5) * 120;
+        g.fillRect(x, H - alto, ancho * 0.35, alto);
+        g.fillRect(x - 4, H - alto, ancho * 0.35 + 8, 6);
+        g.fillRect(x + ancho * 0.5, H - alto * 0.5, ancho * 0.3, alto * 0.5);
+        g.beginPath();
+        g.arc(x + ancho * 0.3, H - alto * 0.8, ancho * 0.5, Math.PI, Math.PI * 1.6);
+        g.lineWidth = 6;
+        g.strokeStyle = color;
+        g.stroke();
+        break;
+      }
+      case "estantes": {
+        // estanterías altas con libros
+        const alto = 120 + hash(i, 5) * 120;
+        g.fillRect(x, H - alto, ancho, 4);
+        g.fillRect(x, H - alto, 4, alto);
+        g.fillRect(x + ancho - 4, H - alto, 4, alto);
+        for (let k = 1; k < alto / 22; k++) {
+          g.fillRect(x, H - alto + k * 22, ancho, 3);
+          for (let l = 4; l < ancho - 6; l += 5) g.fillRect(x + l, H - alto + k * 22 - 4 - (hash(k, l, i) * 8), 3, 4 + hash(l, k) * 8);
+        }
+        break;
+      }
+      case "espinas": {
+        // enredaderas con espinas que cuelgan y suben
+        for (let k = 0; k < H; k += 3) {
+          const ox = Math.sin(k * 0.05 + i) * 8;
+          g.fillRect(x + ox, k, 3, 3);
+          if (k % 15 === 0) g.fillRect(x + ox + (k % 30 === 0 ? 3 : -3), k, 3, 1);
+        }
+        g.beginPath();
+        g.arc(x + ancho * 0.5, H - 20 - hash(i, 9) * 40, 8 + hash(i, 3) * 6, 0, Math.PI * 2);
+        g.fill();
+        break;
+      }
+      case "engranajes": {
+        // ruedas dentadas y tubos
+        const cy = 40 + hash(i, 5) * (H - 80);
+        const radio = 14 + hash(i, 6) * 26;
+        g.beginPath();
+        g.arc(x + radio, cy, radio, 0, Math.PI * 2);
+        g.fill();
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2;
+          g.fillRect(x + radio + Math.cos(a) * (radio + 2) - 3, cy + Math.sin(a) * (radio + 2) - 3, 6, 6);
+        }
+        g.fillRect(x + radio * 2, cy - 3, ancho, 6);
+        break;
+      }
+      case "tumbas": {
+        // lápidas y estrellas
+        const alto = 18 + hash(i, 5) * 30;
+        g.fillRect(x, H - alto, 14 + capa * 4, alto);
+        g.beginPath();
+        g.arc(x + 7 + capa * 2, H - alto, 7 + capa * 2, Math.PI, 0);
+        g.fill();
+        g.fillRect(x + 30, H - alto * 1.6, 3, alto * 1.6);
+        g.fillRect(x + 25, H - alto * 1.3, 13, 3);
+        if (capa === 0) {
+          g.globalAlpha = 0.9;
+          g.fillStyle = "#ffffff";
+          for (let k = 0; k < 6; k++) g.fillRect(x + hash(i, k, 1) * 60, hash(k, i, 2) * H * 0.6, 1, 1);
+          g.fillStyle = color;
+          g.globalAlpha = 0.55;
+        }
+        break;
+      }
+      case "vacio": {
+        // rocas flotando y venas latiendo
+        const cy = 30 + hash(i, 5) * (H - 60);
+        g.beginPath();
+        g.ellipse(x + ancho / 2, cy, ancho * 0.6, ancho * 0.3, hash(i, 7), 0, Math.PI * 2);
+        g.fill();
+        g.fillRect(x + ancho / 2 - 1, cy, 2, 30 + hash(i, 8) * 60);
         break;
       }
     }
@@ -292,6 +395,64 @@ export function fondoBioma(b: Bioma, capa: 0 | 1): HTMLCanvasElement {
   g.globalAlpha = 1;
   cacheFondos.set(clave, c);
   return c;
+}
+
+/** Siluetas oscuras en primer plano (paralaje rápido): dan profundidad sin tapar el juego. */
+export function primerPlano(b: Bioma): HTMLCanvasElement {
+  const clave = `pp:${b.nombre}`;
+  const hecho = cacheFondos.get(clave);
+  if (hecho !== undefined) return hecho;
+  const W = ANCHO_SALA + 160;
+  const [c, g] = lienzo(W, 270);
+  g.fillStyle = "#050308";
+  for (let i = 0; i < 9; i++) {
+    const x = (i / 9) * W + hash(i, 7) * 30;
+    const largo = 6 + hash(i, 8) * 22;
+    const estilo = b.fondo === "hongos" || b.fondo === "espinas" ? "raices"
+      : b.fondo === "cadenas" || b.fondo === "engranajes" ? "ganchos" : "cadenas";
+    switch (estilo) {
+      case "cadenas":
+        // cadenas y huesos colgando
+        for (let k = 0; k < largo; k += 4) g.fillRect(x + (k % 8 === 0 ? 0 : 1), k, 2, 3);
+        g.fillRect(x - 3, largo, 8, 3);
+        break;
+      case "raices":
+        // raíces
+        for (let k = 0; k < largo + 6; k++) g.fillRect(x + Math.round(Math.sin(k * 0.4 + i) * 2), k, 2, 1);
+        g.fillRect(x - 1, largo + 6, 4, 4);
+        break;
+      case "ganchos":
+        // ganchos y cadenas de fragua
+        for (let k = 0; k < largo; k += 4) g.fillRect(x, k, 2, 3);
+        g.fillRect(x - 2, largo, 6, 2);
+        g.fillRect(x + 3, largo - 4, 2, 6);
+        break;
+    }
+    // escombros abajo: montículos escalonados, bajos para no tapar el piso
+    const ancho = 10 + Math.floor(hash(i, 10) * 16);
+    for (let k = 0; k < ancho; k++) {
+      const alto = Math.max(1, Math.round(4 * Math.sin((k / ancho) * Math.PI) + hash(i, k) * 1.5));
+      g.fillRect(x + 20 + k, 270 - alto, 1, alto);
+    }
+  }
+  cacheFondos.set(clave, c);
+  return c;
+}
+
+let vineta: HTMLCanvasElement | null = null;
+
+/** Viñeta: oscurece los bordes de la pantalla (encuadre cinematográfico). */
+export function dibujarVineta(g: CanvasRenderingContext2D): void {
+  if (vineta === null) {
+    const [c, v] = lienzo(ANCHO_SALA, 270);
+    const grad = v.createRadialGradient(ANCHO_SALA / 2, 135, 120, ANCHO_SALA / 2, 135, 290);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(1, "rgba(0,0,0,0.55)");
+    v.fillStyle = grad;
+    v.fillRect(0, 0, ANCHO_SALA, 270);
+    vineta = c;
+  }
+  g.drawImage(vineta, 0, 0);
 }
 
 export interface Luz {

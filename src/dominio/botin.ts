@@ -5,19 +5,25 @@
 // generador correspondiente. probabilidadReal() alimenta el Bestiario para que el jugador vea las chances.
 
 import { entero, probabilidadReal, tirarDrop, type Azar, type EntradaDrop } from "minialu";
-import { MAT_FRAGMENTO, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
+import { ORDEN_SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
+import { conjuntoDelPiso } from "../contenido/conjuntos.ts";
+import { MAT_FRAGMENTO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
 import { RAREZA_CARTA_JEFE, RAREZA_CARTA_PISO, cartaAleatoria, type Carta } from "./cartas.ts";
 import { crearUnico, generarEquipo, type ObjetoEquipo, type Rareza } from "./equipo.ts";
 
 export const FICHA_EQUIPO = 900;
 export const FICHA_CARTA = 901;
 export const FICHA_UNICO = 902;
+export const FICHA_RUNA = 903;
+export const FICHA_CONJUNTO = 904;
 
 export type Premio =
   | { readonly tipo: "esquirlas"; readonly cantidad: number }
   | { readonly tipo: "objeto"; readonly objeto: number; readonly cantidad: number }
   | { readonly tipo: "equipo"; readonly equipo: ObjetoEquipo }
-  | { readonly tipo: "carta"; readonly carta: Carta };
+  | { readonly tipo: "carta"; readonly carta: Carta }
+  | { readonly tipo: "corazones"; readonly cantidad: number }
+  | { readonly tipo: "subarma"; readonly subarma: IdSubarma };
 
 export type Categoria = "comun" | "elite" | "jefe" | "eco";
 
@@ -26,10 +32,11 @@ export const TABLA_COMUN: readonly EntradaDrop[] = [
 ];
 export const TABLA_ELITE: readonly EntradaDrop[] = [
   [OBJ_POCION, 0.15], [OBJ_ETER, 0.12], [OBJ_POLVO, 0.25], [FICHA_EQUIPO, 0.35], [FICHA_CARTA, 0.3], [FICHA_UNICO, 0.02],
+  [FICHA_RUNA, 0.04], [FICHA_CONJUNTO, 0.06],
 ];
 /** Cofre: pesos relativos (ponderado). */
 export const TABLA_COFRE: readonly EntradaDrop[] = [
-  [FICHA_EQUIPO, 52], [FICHA_CARTA, 33], [FICHA_UNICO, 9], [OBJ_LAGRIMA, 6],
+  [FICHA_EQUIPO, 46], [FICHA_CARTA, 30], [FICHA_UNICO, 8], [OBJ_LAGRIMA, 5], [FICHA_RUNA, 6], [FICHA_CONJUNTO, 9],
 ];
 
 const ESQUIRLAS_BASE: Readonly<Record<Categoria, readonly [number, number]>> = {
@@ -53,6 +60,10 @@ function resolverFicha(azar: Azar, piso: number, ficha: number, minima: Rareza =
       return { tipo: "carta", carta: cartaAleatoria(azar, (minima > 0 ? RAREZA_CARTA_JEFE : RAREZA_CARTA_PISO)[indicePiso(piso)]) };
     case FICHA_UNICO:
       return { tipo: "equipo", equipo: crearUnico(azar, piso) };
+    case FICHA_RUNA:
+      return { tipo: "objeto", objeto: RUNAS[entero(azar, RUNAS.length)].objeto, cantidad: 1 };
+    case FICHA_CONJUNTO:
+      return { tipo: "equipo", equipo: generarEquipo(azar, piso, 2, undefined, conjuntoDelPiso(piso).id) };
     default:
       return { tipo: "objeto", objeto: ficha, cantidad: 1 };
   }
@@ -92,6 +103,9 @@ export function botinEnemigo(azar: Azar, piso: number, categoria: Categoria, mod
     premios.push({ tipo: "objeto", objeto: OBJ_POLVO, cantidad: 2 + entero(azar, 3) });
     premios.push({ tipo: "objeto", objeto: materialDelPiso(piso), cantidad: 5 });
     premios.push({ tipo: "objeto", objeto: MAT_FRAGMENTO, cantidad: 3 });
+    // Cada guardián suelta una runa y una pieza del conjunto de su zona.
+    premios.push(resolverFicha(azar, piso, FICHA_RUNA));
+    premios.push(resolverFicha(azar, piso, FICHA_CONJUNTO));
     return premios;
   }
   const tabla = categoria === "comun" ? TABLA_COMUN : TABLA_ELITE;
@@ -110,6 +124,14 @@ export function botinCofre(azar: Azar, piso: number, mod: ModificadoresBotin = S
     { tipo: "objeto", objeto: entero(azar, 2) === 0 ? OBJ_POCION : OBJ_ETER, cantidad: 1 },
     { tipo: "objeto", objeto: materialDelPiso(piso), cantidad: 2 },
   ];
+}
+
+/** Vela rota (estilo Castlevania): casi siempre corazones; a veces una subarma o esquirlas. */
+export function botinVela(azar: Azar, piso: number): Premio[] {
+  const r = azar.siguiente();
+  if (r < 0.1) return [{ tipo: "subarma", subarma: ORDEN_SUBARMAS[entero(azar, ORDEN_SUBARMAS.length)] }];
+  if (r < 0.22) return [{ tipo: "esquirlas", cantidad: 2 + entero(azar, 4) * piso }];
+  return [{ tipo: "corazones", cantidad: r < 0.35 ? 5 : 1 }];
 }
 
 /** Probabilidades reales por muerte (para el Bestiario). */

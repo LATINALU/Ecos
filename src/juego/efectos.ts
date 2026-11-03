@@ -108,6 +108,17 @@ export class Efectos {
     g.globalAlpha = 1;
   }
 
+  /** Solo las partículas brillantes (capa emisiva del bloom). */
+  dibujarBrillos(g: CanvasRenderingContext2D): void {
+    for (const p of this.particulas) {
+      if (!p.brillo) continue;
+      g.globalAlpha = Math.max(0, Math.min(1, p.vida / p.vidaMax));
+      g.fillStyle = p.color;
+      g.fillRect(Math.round(p.x), Math.round(p.y), p.tam + 1, p.tam + 1);
+    }
+    g.globalAlpha = 1;
+  }
+
   dibujarTextos(g: CanvasRenderingContext2D): void {
     g.textAlign = "center";
     for (const t of this.textos) {

@@ -5,6 +5,7 @@ import { COLORES_RAREZA, apilable } from "../../contenido/objetos.ts";
 import type { Premio } from "../../dominio/botin.ts";
 import { INFO_RELIQUIA, type Reliquia } from "../../dominio/tipos.ts";
 import { COFRE } from "../../contenido/atlas.ts";
+import { SUBARMAS } from "../../contenido/subarmas.ts";
 import { mover, type Cuerpo, type Tiles } from "../../motor/fisica.ts";
 import { dibujarRecorte, sprites } from "../../motor/sprites.ts";
 import { iconoEquipo, iconoObjeto, imagenDe, type Icono } from "../iconos.ts";
@@ -16,6 +17,8 @@ export function colorPremio(p: Premio): string {
     case "objeto": return apilable(p.objeto)?.color ?? "#ffffff";
     case "equipo": return COLORES_RAREZA[p.equipo.rareza];
     case "carta": return p.carta.nivel >= 3 ? "#ffb23d" : COLOR_FAMILIA[p.carta.tipo];
+    case "corazones": return "#ff4d6d";
+    case "subarma": return SUBARMAS[p.subarma].color;
   }
 }
 
@@ -92,6 +95,23 @@ export class BotinSuelo implements Cuerpo {
       return;
     }
     switch (this.premio.tipo) {
+      case "corazones": {
+        // Corazón pixelado (grande si da 5)
+        const grande = this.premio.cantidad >= 5;
+        const s = grande ? 2 : 1;
+        g.fillStyle = color;
+        g.fillRect(x + 1 * s, y + 1, 2 * s, 2 * s);
+        g.fillRect(x + 4 * s - (grande ? 2 : 0), y + 1, 2 * s, 2 * s);
+        g.fillRect(x, y + 2 * s, 7 * s - (grande ? 1 : 0), 2 * s);
+        g.fillRect(x + 1 * s, y + 4 * s, 5 * s - (grande ? 2 : 0), 1 * s);
+        g.fillRect(x + 2 * s, y + 5 * s, 3 * s - (grande ? 2 : 0), 1 * s);
+        g.fillStyle = "#ffffff";
+        g.fillRect(x + 1 * s, y + 2 * s, 1, 1);
+        break;
+      }
+      case "subarma":
+        dibujarIconoSubarma(g, this.premio.subarma, x + 4, y + 4);
+        break;
       case "esquirlas":
         g.fillStyle = color;
         g.fillRect(x + 3, y + 1, 2, 6);
@@ -125,6 +145,42 @@ export class BotinSuelo implements Cuerpo {
         break;
     }
     g.restore();
+  }
+}
+
+/** Ícono procedural de cada subarma, centrado en (cx, cy). */
+export function dibujarIconoSubarma(g: CanvasRenderingContext2D, id: keyof typeof SUBARMAS, cx: number, cy: number): void {
+  const x = Math.round(cx);
+  const y = Math.round(cy);
+  const c = SUBARMAS[id].color;
+  switch (id) {
+    case "daga":
+      g.fillStyle = c;
+      g.fillRect(x - 4, y, 7, 1);
+      g.fillStyle = "#8a6a3a";
+      g.fillRect(x + 3, y - 1, 1, 3);
+      g.fillRect(x + 4, y, 2, 1);
+      break;
+    case "hacha":
+      g.fillStyle = "#8a6a3a";
+      g.fillRect(x, y - 4, 1, 9);
+      g.fillStyle = c;
+      g.fillRect(x - 3, y - 4, 3, 4);
+      g.fillRect(x + 1, y - 4, 3, 4);
+      break;
+    case "agua":
+      g.fillStyle = "#e8e8f0";
+      g.fillRect(x - 1, y - 4, 2, 2);
+      g.fillStyle = c;
+      g.fillRect(x - 2, y - 2, 4, 5);
+      g.fillStyle = "#ffffff";
+      g.fillRect(x - 1, y - 1, 1, 2);
+      break;
+    case "cruz":
+      g.fillStyle = c;
+      g.fillRect(x - 1, y - 4, 2, 8);
+      g.fillRect(x - 3, y - 2, 6, 2);
+      break;
   }
 }
 

@@ -6,7 +6,9 @@
 //           e caminante  s saltador  v volador  t torreta  g escudero
 //           C cofre  A altar  F faro  R reliquia  M mercader  J jefe  E eco  P inicio del jugador  Y yunque
 
+import { AzarSemilla } from "minialu";
 import type { TipoSala } from "../dominio/mundo/generador.ts";
+import { generarInterior } from "../dominio/mundo/interiores.ts";
 
 export interface Plantilla {
   readonly nombre: string;
@@ -26,7 +28,7 @@ export const PLANTILLAS_NORMALES: readonly Plantilla[] = [
       "#####..............#######",
       "..........................",
       "..........................",
-      "..........................",
+      "....====..........====....",
       "..........................",
       ".....e.....e......e.......",
     ],
@@ -37,13 +39,13 @@ export const PLANTILLAS_NORMALES: readonly Plantilla[] = [
       "..........................",
       "..........................",
       "...........v..............",
+      "..........................",
+      "..........................",
+      "..........................",
       "...=====..........=====...",
       "..........................",
       "..........................",
-      "..........................",
       ".......===......===.......",
-      "..........................",
-      "..........................",
       "..........................",
       "...e.^^^...s......^^^.e...",
     ],
@@ -274,9 +276,17 @@ const ESPECIALES: Readonly<Partial<Record<TipoSala, Plantilla>>> = {
   },
 };
 
+/**
+ * Salas normales: 1 de cada 4 es una plantilla hecha a mano; las demás se GENERAN (dominio/mundo/interiores.ts),
+ * así que el contenido no se repite. La semilla de la sala hace que la misma sala sea siempre igual.
+ */
 export function plantillaPara(tipo: TipoSala, semilla: number): Plantilla {
   const especial = ESPECIALES[tipo];
   if (especial !== undefined) return especial;
+  if (semilla % 4 !== 0) {
+    const generada = generarInterior(new AzarSemilla(semilla));
+    if (generada !== null) return generada;
+  }
   return PLANTILLAS_NORMALES[semilla % PLANTILLAS_NORMALES.length];
 }
 

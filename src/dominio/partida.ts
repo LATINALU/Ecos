@@ -13,7 +13,10 @@ import {
   CONSUMIBLES, MAT_FRAGMENTO, OBJ_CARTA, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, apilable, estiloDe, maxPila,
   type EstiloArma,
 } from "../contenido/objetos.ts";
+import { CORAZONES_INICIALES, CORAZONES_MAX, SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
 import { TALENTOS, talento, type IdTalento } from "../contenido/talentos.ts";
+import { CONJUNTOS, type BonoConjunto, type IdConjunto } from "../contenido/conjuntos.ts";
+import { RUNAS, runaDeObjeto, type IdRuna } from "../contenido/objetos.ts";
 import type { ModificadoresBotin, Premio } from "./botin.ts";
 import {
   COSTO_FUSION, capaForma, capaResonancia, crearCarta, fusionarCartas, mejorarCarta, nombreCarta, type Carta,
@@ -49,6 +52,21 @@ export interface OpcionesInicio {
 
 export type ErrorTalento = "sin-puntos" | "requisito" | "ya-aprendido";
 
+/** Modificadores de combate que no son stats: salen de rasgos del equipo, el rasgo de la carta y la pasiva. */
+export interface ModCombate {
+  /** Fracciones extra (0,2 = +20 %). */
+  readonly alcance: number;
+  readonly velocidad: number;
+  readonly critDanio: number;
+  readonly agilidad: number;
+  readonly tecnicaDanio: number;
+  readonly tecnicaCosto: number;
+  /** Fracción del daño hecho que cura. */
+  readonly robo: number;
+  /** Éter extra por golpe acertado. */
+  readonly eterGolpe: number;
+}
+
 /** Estado serializable de una partida (para "Continuar descenso"). */
 export interface DatosPartida {
   readonly version: 1;
@@ -70,6 +88,10 @@ export interface DatosPartida {
   readonly contadorCorazon: number;
   readonly puntos: Readonly<Partial<Record<Stat, number>>>;
   readonly talentos: readonly IdTalento[];
+  /** Opcionales: guardados anteriores a las subarmas no los tienen. */
+  readonly corazones?: number;
+  readonly subarma?: IdSubarma | null;
+  readonly runas?: readonly [IdRuna | null, IdRuna | null];
 }
 
 export interface ResumenPartida {
@@ -99,6 +121,10 @@ export class Partida {
   enemigos = 0;
   jefes = 0;
   ecosVencidos = 0;
+  corazones = CORAZONES_INICIALES;
+  subarma: IdSubarma | null = null;
+  /** Dos ranuras de runa (pasivas equipables). */
+  runas: [IdRuna | null, IdRuna | null] = [null, null];
   segundaVidaUsada = false;
   readonly puntos = new PuntosHabilidad(HABILIDADES_PORTADOR);
   readonly talentos = new Set<IdTalento>();
@@ -178,7 +204,105 @@ export class Partida {
   }
 
   costoTecnica(base: number): number {
-    return Math.max(1, Math.round(base * this.estilo().costoTecnica * (this.tieneTalento("ecoTecnica") ? 0.75 : 1)));
+    const m = this.combate();
+    return Math.max(1, Math.round(base * this.estilo().costoTecnica * (this.tieneTalento("ecoTecnica") ? 0.75 : 1) * (1 - m.tecnicaCosto)));
+  }
+
+  /** Suma de rasgos de equipo + rasgo de la Forma + pasiva. */
+  combate(): ModCombate {
+    const m = { alcance: 0, velocidad: 0, critDanio: 0, agilidad: 0, tecnicaDanio: 0, tecnicaCosto: 0, robo: 0, eterGolpe: 0 };
+    for (const r of RANURAS) {
+      const rasgos = this.equipo[r]?.rasgos;
+      if (rasgos === undefined) continue;
+      m.alcance += rasgos.alcance ?? 0;
+      m.velocidad += rasgos.velocidad ?? 0;
+      m.critDanio += rasgos.critDanio ?? 0;
+      m.agilidad += rasgos.agilidad ?? 0;
+      m.eterGolpe += rasgos.eterGolpe ?? 0;
+    }
+    switch (this.forma?.rasgo) {
+      case "veloz": m.velocidad += 0.12; break;
+      case "eterna": m.tecnicaCosto += 0.25; break;
+      case "furiosa": m.tecnicaDanio += 0.2; break;
+      case "vampirica": m.robo += 0.03; break;
+      default: break;
+    }
+    switch (this.pasiva()) {
+      case "chispa": m.critDanio += 0.5; break;
+      case "vendaval": m.velocidad += 0.2; m.agilidad += 0.08; break;
+      case "hambre": m.robo += 0.06; break;
+      default: break;
+    }
+    if (this.tieneTalento("sedSangre")) m.robo += 0.05;
+    if (this.tieneRuna("vampiro")) m.robo += 0.04;
+    if (this.tieneRuna("eco")) m.tecnicaCosto += 0.15;
+    for (const b of this.bonosConjunto()) {
+      m.velocidad += b.velocidad ?? 0;
+      m.robo += b.robo ?? 0;
+      m.tecnicaDanio += b.tecnicaDanio ?? 0;
+      m.tecnicaCosto += b.tecnicaCosto ?? 0;
+      m.critDanio += b.critDanio ?? 0;
+    }
+    m.tecnicaCosto = Math.min(0.75, m.tecnicaCosto);
+    return m;
+  }
+
+  // ---------------- Runas y conjuntos ----------------
+
+  tieneRuna(r: IdRuna): boolean {
+    return this.runas[0] === r || this.runas[1] === r;
+  }
+
+  /** Engarza una runa de la mochila en una ranura; la que estaba vuelve a la mochila. */
+  engarzarRuna(pos: Posicion, ranura: 0 | 1): Resultado<IdRuna, "casilla-vacia" | "no-es-runa" | "repetida"> {
+    const pila = this.mochila.en(pos);
+    if (pila === null) return fallo("casilla-vacia");
+    const def = runaDeObjeto(pila.objeto);
+    if (def === undefined) return fallo("no-es-runa");
+    if (this.runas[1 - ranura] === def.id) return fallo("repetida");
+    this.mochila.sacarDe(pos);
+    const anterior = this.runas[ranura];
+    this.runas[ranura] = def.id;
+    if (anterior !== null) this.mochila.ponerEn(pos, { objeto: RUNAS.find((r) => r.id === anterior)!.objeto, cantidad: 1 });
+    this.ajustarRecursos();
+    return exito(def.id);
+  }
+
+  quitarRuna(ranura: 0 | 1): Resultado<void, "vacia" | "sin-espacio"> {
+    const r = this.runas[ranura];
+    if (r === null) return fallo("vacia");
+    if (!this.mochila.agregar(RUNAS.find((x) => x.id === r)!.objeto, 1).ok) return fallo("sin-espacio");
+    this.runas[ranura] = null;
+    this.ajustarRecursos();
+    return exito(undefined);
+  }
+
+  /** Piezas equipadas por conjunto. */
+  piezasConjunto(): Map<IdConjunto, number> {
+    const cuenta = new Map<IdConjunto, number>();
+    for (const r of RANURAS) {
+      const c = this.equipo[r]?.conjunto;
+      if (c !== undefined) cuenta.set(c, (cuenta.get(c) ?? 0) + 1);
+    }
+    return cuenta;
+  }
+
+  /** Bonos activos (2 piezas, y 3 piezas además del de 2). */
+  bonosConjunto(): BonoConjunto[] {
+    const bonos: BonoConjunto[] = [];
+    for (const [id, n] of this.piezasConjunto()) {
+      const def = CONJUNTOS.find((c) => c.id === id)!;
+      if (n >= 2) bonos.push(def.dos);
+      if (n >= 3) bonos.push(def.tres);
+    }
+    return bonos;
+  }
+
+  bonoConjuntoActivo(efecto: keyof BonoConjunto): number {
+    return this.bonosConjunto().reduce((s, b) => {
+      const v = b[efecto];
+      return s + (typeof v === "number" ? v : v === true ? 1 : 0);
+    }, 0);
   }
 
   /** Daño bruto (antes de defensa) de cada ataque, para mostrar en la interfaz. */
@@ -192,7 +316,7 @@ export class Partida {
       golpe: Math.round(s.golpe * e.mults[0] * mult),
       combo: Math.round(s.golpe * combo * mult),
       patada: Math.round(s.patada * mult),
-      tecnica: tec === null ? 0 : Math.round(s.tecnica * tec.mult * tec.impactos * e.tecnica * mult * (this.pasiva() === "horno" ? 1.25 : 1)),
+      tecnica: tec === null ? 0 : Math.round(s.tecnica * tec.mult * tec.impactos * e.tecnica * mult * (this.pasiva() === "horno" ? 1.25 : 1) * (1 + this.combate().tecnicaDanio)),
       tecnicaNombre: tec?.nombre ?? null,
       costoTecnica: tec === null ? 0 : this.costoTecnica(tec.costo),
     };
@@ -230,6 +354,9 @@ export class Partida {
       ),
       Habilidades: this.puntos.capa(PORTADOR),
       Pasiva: this.pasiva() === "filo" ? { critico: 12 } : this.pasiva() === "raiz" ? { defensa: 6 + this.nivel() } : {},
+      Rasgo: this.forma?.rasgo === "afilada" ? { critico: 8 } : {},
+      Runas: { regen: this.tieneRuna("calma") ? 8 : 0, suerte: this.tieneRuna("coleccionista") ? 30 : 0 },
+      Conjuntos: { critico: this.bonoConjuntoActivo("critico"), hp: this.bonoConjuntoActivo("hp") },
       Equipo: capaEquipo(RANURAS.map((r) => this.equipo[r])),
     };
   }
@@ -237,23 +364,28 @@ export class Partida {
   stats(): Bloque {
     const b = bloque(Object.values(this.capas()));
     if (this.tiene("vidrio")) b.hp = Math.max(1, Math.round(b.hp * 0.65));
+    if (this.forma?.rasgo === "colosal") b.hp = Math.round(b.hp * 1.15);
+    const defensaPct = (this.tieneRuna("acero") ? 0.2 : 0) + this.bonoConjuntoActivo("defensaPct");
+    if (defensaPct > 0) b.defensa = Math.round(b.defensa * (1 + defensaPct));
     return b;
   }
 
   /** Multiplicador de daño infligido y recibido por efectos únicos. */
   multiplicadorDanio(): number {
-    return this.tiene("vidrio") ? 1.6 : 1;
+    const furia = this.tieneRuna("furia") && this.hp < this.stats().hp * 0.4 ? 1.3 : 1;
+    return (this.tiene("vidrio") ? 1.6 : 1) * furia;
   }
 
   multiplicadorRecibido(): number {
-    return (this.tiene("corona") ? 1.3 : 1) * (this.pasiva() === "muro" ? 0.85 : 1);
+    return (this.tiene("corona") ? 1.3 : 1) * (this.pasiva() === "muro" ? 0.85 : 1) * (1 - this.bonoConjuntoActivo("recibido"));
   }
 
   modificadoresBotin(): ModificadoresBotin {
     const corona = this.tiene("corona");
+    const suerte = this.stats().suerte;
     return {
-      suerte: corona ? 1.5 : 1,
-      codicia: (1 + 0.12 * this.meta.nivelMejora("codicia")) * (corona ? 1.6 : 1),
+      suerte: (corona ? 1.5 : 1) * (1 + suerte / 100),
+      codicia: (1 + 0.12 * this.meta.nivelMejora("codicia")) * (corona ? 1.6 : 1) * (this.tieneRuna("avaro") ? 1.35 : 1),
     };
   }
 
@@ -340,6 +472,12 @@ export class Partida {
         if (r.ok) this.meta.verAlma(p.carta.personaje);
         return r.ok ? exito(`Carta: ${nombreCarta(p.carta)}`) : fallo("sin-espacio");
       }
+      case "corazones":
+        this.corazones = Math.min(CORAZONES_MAX, this.corazones + p.cantidad);
+        return exito(`+${p.cantidad} ♥`);
+      case "subarma":
+        this.subarma = p.subarma;
+        return exito(`Subarma: ${SUBARMAS[p.subarma].nombre} (↑ + Patada)`);
     }
   }
 
@@ -485,6 +623,22 @@ export class Partida {
     return this.billetera.saldo("esquirlas");
   }
 
+  // ---------------- Subarmas ----------------
+
+  /** Gasta los corazones de la subarma equipada. */
+  costoSubarma(): number {
+    if (this.subarma === null) return 0;
+    return Math.max(1, SUBARMAS[this.subarma].costo - (this.tieneTalento("corazonValiente") ? 1 : 0));
+  }
+
+  gastarSubarma(): Resultado<IdSubarma, "sin-subarma" | "sin-corazones"> {
+    if (this.subarma === null) return fallo("sin-subarma");
+    const costo = this.costoSubarma();
+    if (this.corazones < costo) return fallo("sin-corazones");
+    this.corazones -= costo;
+    return exito(this.subarma);
+  }
+
   // ---------------- Guardado ----------------
 
   serializar(): DatosPartida {
@@ -499,7 +653,7 @@ export class Partida {
       forma: this.forma, resonancias: [this.resonancias[0], this.resonancias[1]], hp: this.hp, mp: this.mp,
       enemigos: this.enemigos, jefes: this.jefes, ecosVencidos: this.ecosVencidos,
       segundaVidaUsada: this.segundaVidaUsada, contadorCorazon: this.contadorCorazon,
-      puntos, talentos: [...this.talentos],
+      puntos, talentos: [...this.talentos], corazones: this.corazones, subarma: this.subarma, runas: [this.runas[0], this.runas[1]],
     };
   }
 
@@ -525,6 +679,9 @@ export class Partida {
       if (n !== undefined && n > 0) p.puntos.asignar(PORTADOR, stat, nivel, n);
     }
     for (const t of d.talentos) if (TALENTOS.some((x) => x.id === t)) p.talentos.add(t);
+    p.corazones = d.corazones ?? CORAZONES_INICIALES;
+    p.subarma = d.subarma ?? null;
+    p.runas = d.runas !== undefined ? [d.runas[0], d.runas[1]] : [null, null];
     p.hp = d.hp;
     p.mp = d.mp;
     p.ajustarRecursos();

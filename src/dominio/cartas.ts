@@ -20,6 +20,29 @@ export interface Carta {
   readonly personaje: number;
   readonly stats: Readonly<Record<string, number>>;
   readonly mejoras: number;
+  /** Rasgo al azar (solo actúa si la carta es tu Forma). */
+  readonly rasgo?: IdRasgoCarta;
+  /** Variante rara (3 %): +20 % a todos los stats y borde dorado. */
+  readonly brillante?: boolean;
+}
+
+export type IdRasgoCarta = "afilada" | "veloz" | "eterna" | "furiosa" | "vampirica" | "colosal";
+
+export const RASGOS_CARTA: Readonly<Record<IdRasgoCarta, { nombre: string; descripcion: string }>> = {
+  afilada: { nombre: "Afilada", descripcion: "+8 % de crítico." },
+  veloz: { nombre: "Veloz", descripcion: "+12 % de velocidad de ataque." },
+  eterna: { nombre: "Eterna", descripcion: "La técnica cuesta un 25 % menos de éter." },
+  furiosa: { nombre: "Furiosa", descripcion: "La técnica hace +20 % de daño." },
+  vampirica: { nombre: "Vampírica", descripcion: "Te curas un 3 % del daño que haces." },
+  colosal: { nombre: "Colosal", descripcion: "+15 % de vida máxima." },
+};
+
+const IDS_RASGO_CARTA = Object.keys(RASGOS_CARTA) as IdRasgoCarta[];
+export const PROB_BRILLANTE = 0.03;
+
+/** Probabilidad de tener rasgo: 25 % a 1★, +8 % por estrella. */
+export function probRasgoCarta(nivel: number): number {
+  return Math.min(0.85, 0.25 + nivel * 0.08);
 }
 
 export const NIVEL_MAX_CARTA = ESCALA_ESTRELLA.length - 1;
@@ -33,14 +56,28 @@ export const MEJORAS_MAX = 5;
 /** Rareza de las cartas que sueltan los monstruos, por piso (tabla acumulada de minialu). */
 export const RAREZA_CARTA_PISO: readonly TablaRareza[] = [
   [[0, 0.7], [1, 0.25], [2, 0.05]],
-  [[0, 0.45], [1, 0.38], [2, 0.14], [3, 0.03]],
-  [[0, 0.25], [1, 0.4], [2, 0.25], [3, 0.08], [4, 0.02]],
+  [[0, 0.55], [1, 0.33], [2, 0.1], [3, 0.02]],
+  [[0, 0.42], [1, 0.38], [2, 0.15], [3, 0.05]],
+  [[0, 0.32], [1, 0.4], [2, 0.2], [3, 0.07], [4, 0.01]],
+  [[0, 0.24], [1, 0.38], [2, 0.26], [3, 0.1], [4, 0.02]],
+  [[0, 0.17], [1, 0.35], [2, 0.3], [3, 0.14], [4, 0.04]],
+  [[0, 0.1], [1, 0.32], [2, 0.33], [3, 0.18], [4, 0.06], [5, 0.01]],
+  [[0, 0.06], [1, 0.26], [2, 0.35], [3, 0.22], [4, 0.09], [5, 0.02]],
+  [[1, 0.24], [2, 0.36], [3, 0.26], [4, 0.11], [5, 0.03]],
+  [[1, 0.18], [2, 0.34], [3, 0.3], [4, 0.14], [5, 0.04]],
 ];
 /** Jefes y cofres sueltan cartas mejores. */
 export const RAREZA_CARTA_JEFE: readonly TablaRareza[] = [
   [[1, 0.5], [2, 0.4], [3, 0.1]],
+  [[1, 0.3], [2, 0.5], [3, 0.2]],
   [[2, 0.5], [3, 0.38], [4, 0.12]],
+  [[2, 0.35], [3, 0.45], [4, 0.2]],
   [[3, 0.5], [4, 0.38], [5, 0.12]],
+  [[3, 0.4], [4, 0.42], [5, 0.18]],
+  [[3, 0.3], [4, 0.45], [5, 0.22], [6, 0.03]],
+  [[4, 0.5], [5, 0.42], [6, 0.08]],
+  [[4, 0.4], [5, 0.48], [6, 0.12]],
+  [[5, 0.75], [6, 0.25]],
 ];
 
 export function nuevoUid(azar: Azar): string {
@@ -61,23 +98,29 @@ export function rangoCarta(personaje: number, nivel: number): { minimos: Record<
 }
 
 /** Tope de mejora: 20 % por encima del máximo de la estrella. */
-export function topeMejora(personaje: number, nivel: number): Record<string, number> {
+export function topeMejora(personaje: number, nivel: number, brillante = false): Record<string, number> {
   const { maximos } = rangoCarta(personaje, nivel);
   const tope: Record<string, number> = {};
-  for (const [k, v] of Object.entries(maximos)) tope[k] = Math.ceil(v * 1.2) + MEJORAS_MAX;
+  for (const [k, v] of Object.entries(maximos)) tope[k] = Math.ceil(v * 1.2 * (brillante ? 1.2 : 1)) + MEJORAS_MAX;
   return tope;
 }
 
 export function crearCarta(azar: Azar, personaje: number, nivel: number): Carta {
   const n = Math.max(0, Math.min(nivel, NIVEL_MAX_CARTA));
   const { minimos, maximos } = rangoCarta(personaje, n);
+  const brillante = azar.siguiente() < PROB_BRILLANTE;
+  const stats = generarStats(azar, minimos, maximos);
+  if (brillante) for (const k of Object.keys(stats)) stats[k] = Math.round(stats[k] * 1.2);
+  const rasgo = azar.siguiente() < probRasgoCarta(n) ? elegirUno(azar, IDS_RASGO_CARTA) : undefined;
   return {
     uid: nuevoUid(azar),
     tipo: alma(personaje).tipo,
     nivel: n,
     personaje,
-    stats: generarStats(azar, minimos, maximos),
+    stats,
     mejoras: 0,
+    ...(rasgo !== undefined ? { rasgo } : {}),
+    ...(brillante ? { brillante } : {}),
   };
 }
 
@@ -104,7 +147,7 @@ export function mejorarCarta(carta: Carta, azar: Azar): Resultado<{ carta: Carta
   if (carta.mejoras >= MEJORAS_MAX) {
     return { ok: false, error: "al-maximo" };
   }
-  const r = mejorar({ ...carta.stats }, topeMejora(carta.personaje, carta.nivel), azar);
+  const r = mejorar({ ...carta.stats }, topeMejora(carta.personaje, carta.nivel, carta.brillante === true), azar);
   if (!r.ok) return r;
   return { ok: true, valor: { incremento: r.valor.incremento, carta: { ...carta, stats: r.valor.stats, mejoras: carta.mejoras + 1 } } };
 }
@@ -128,7 +171,9 @@ export function estrellas(carta: Carta): string {
 
 export function nombreCarta(carta: Carta): string {
   const a = alma(carta.personaje);
-  return `${a.nombre}, ${a.titulo}${carta.mejoras > 0 ? ` +${carta.mejoras}` : ""}`;
+  const prefijo = carta.brillante === true ? "✧ " : "";
+  const rasgo = carta.rasgo !== undefined ? ` (${RASGOS_CARTA[carta.rasgo].nombre})` : "";
+  return `${prefijo}${a.nombre}, ${a.titulo}${carta.mejoras > 0 ? ` +${carta.mejoras}` : ""}${rasgo}`;
 }
 
 /** Valor para comparar cartas (y elegir el legado del Eco). */

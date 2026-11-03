@@ -32,9 +32,12 @@ export const RECETAS: readonly Receta[] = [
   { id: "carta", nombre: "Invocar Carta de Alma", ingredientes: [[MAT_FRAGMENTO, 3], [MAT_HUESO, 2], [MAT_ESPORA, 2]], esquirlas: 30, resultado: { tipo: "carta" } },
 ];
 
-/** Refinar la pieza equipada: +12 % a todos sus stats, hasta +5. */
-export const REFINADO_MAX = 5;
+/** Refinar la pieza equipada: +12 % a todos sus stats, hasta +10. Del +6 en adelante puede fallar. */
+export const REFINADO_MAX = 10;
+
+/** Probabilidad de éxito para pasar de `nivelActual` al siguiente (como la mejora de MiniFighter). */
+export const EXITO_REFINADO: readonly number[] = [1, 1, 1, 1, 1, 0.75, 0.6, 0.45, 0.33, 0.22];
 
 export function costoRefinado(nivelActual: number): { fragmentos: number; esquirlas: number } {
-  return { fragmentos: 1 + Math.floor(nivelActual / 2), esquirlas: 50 * (nivelActual + 1) };
+  return { fragmentos: 1 + Math.floor(nivelActual / 2), esquirlas: 50 * (nivelActual + 1) * (nivelActual >= 5 ? 2 : 1) };
 }

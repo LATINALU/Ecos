@@ -18,7 +18,7 @@ function delAtlas(nombre: string): Icono | null {
 }
 
 const ARMA_POR_ESTILO: Readonly<Record<string, string>> = {
-  espada: "sword", pesada: "big_axe", baston: "magic_staff", punos: "cleaver",
+  espada: "sword", pesada: "big_axe", baston: "magic_staff", punos: "cleaver", arco: "arrow",
 };
 
 const APILABLES: Readonly<Record<number, string>> = {

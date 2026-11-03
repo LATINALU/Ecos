@@ -5,6 +5,7 @@ import type { Partida } from "../dominio/partida.ts";
 import type { Audio } from "../motor/audio.ts";
 import type { Tiles } from "../motor/fisica.ts";
 import type { Efectos } from "./efectos.ts";
+import type { MedidorCombo } from "./medidor-combo.ts";
 import type { Criatura } from "./entidades/criatura.ts";
 import type { Jugador } from "./entidades/jugador.ts";
 import type { Proyectil } from "./entidades/proyectil.ts";
@@ -27,6 +28,8 @@ export interface AtaqueJugador {
   readonly aturde?: number;
   /** Lanza al enemigo hacia arriba (golpe ascendente). */
   readonly lanzar?: boolean;
+  /** Golpe cuerpo a cuerpo (sostiene en el aire, cuenta para el estilo). */
+  readonly cuerpoACuerpo?: boolean;
 }
 
 /** Zona de peligro anunciada (raíces que brotan, lluvia de huesos): avisa y después daña. */
@@ -42,7 +45,18 @@ export interface Peligro {
   golpeo: boolean;
 }
 
+/** Cadena vertical para trepar entre salas (x del centro; extremos en píxeles; pueden salir de la sala). */
+export interface Cadena {
+  readonly x: number;
+  readonly arriba: number;
+  readonly abajo: number;
+}
+
 export interface Contexto {
+  /** Medidor de estilo (combo); opcional para poder probar al jugador sin el mundo completo. */
+  readonly combo?: MedidorCombo;
+  /** La cadena de la sala actual, si tiene pasaje vertical. */
+  readonly cadena?: Cadena | null;
   readonly partida: Partida;
   readonly tiles: Tiles;
   readonly jugador: Jugador;

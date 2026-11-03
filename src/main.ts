@@ -4,6 +4,7 @@ import { borrarDescenso, cargarDescenso, cargarMeta, guardarDescenso, guardarMet
 import { Juego, type EventosJuego, type InicioJuego } from "./juego/juego.ts";
 import { Audio } from "./motor/audio.ts";
 import { Entrada } from "./motor/entrada.ts";
+import { dibujarPortador, type Pose } from "./juego/render-portador.ts";
 import { sprites } from "./motor/sprites.ts";
 import { dibujarHud } from "./ui/hud.ts";
 import { Interfaz } from "./ui/interfaz.ts";
@@ -151,13 +152,43 @@ function dibujarTitulo(t: number, dt: number): void {
   g.globalCompositeOperation = "source-over";
 }
 
+// ---------------- Galería de poses (solo desarrollo: ?galeria) ----------------
+const galeria = import.meta.env.DEV && new URLSearchParams(location.search).has("galeria");
+if (galeria) ui.cerrarForzado();
+function dibujarGaleria(c: CanvasRenderingContext2D, t: number): void {
+  c.fillStyle = "#1a1428";
+  c.fillRect(0, 0, ANCHO, ALTO);
+  const poses: Pose[] = ["quieto", "correr", "saltar", "caer", "agachado", "deslizar", "atras", "pared", "patada", "lanzar", "trepar", "herido"];
+  const paletas = [["#9c8f7a", "#e0c48a"], ["#3b3550", "#b48cff"], ["#2f3a6e", "#9fe8ff"], ["#5b4636", "#ffe08a"]];
+  c.save();
+  c.scale(2, 2);
+  paletas.forEach(([cuerpo, acento], fila) => {
+    poses.forEach((pose, i) => {
+      dibujarPortador(c, 10 + i * 19, 30 + fila * 32, 1, pose, { cuerpo, acento }, t, { variante: fila });
+    });
+  });
+  c.restore();
+  // Golpe en 5 momentos (preparación -> remate) y golpe alto
+  c.save();
+  c.scale(2, 2);
+  for (let k = 0; k <= 4; k++) {
+    const m = dibujarPortador(c, 12 + k * 22, 128, 1, "golpe", { cuerpo: "#9c8f7a", acento: "#e0c48a" }, t, { variante: 0, progreso: k / 4 });
+    c.fillStyle = "#e8e8f0";
+    for (let d = 2; d < 14; d++) c.fillRect(Math.round(m.manoX + Math.cos(m.angulo) * d), Math.round(m.manoY + Math.sin(m.angulo) * d), 1, 1);
+  }
+  for (let k = 0; k <= 2; k++) dibujarPortador(c, 130 + k * 20, 128, 1, "golpeAlto", { cuerpo: "#3b3550", acento: "#b48cff" }, t, { variante: 1, progreso: k / 2 });
+  for (const [k, e] of [[0, 1.18], [1, 0.8]] as const) dibujarPortador(c, 200 + k * 20, 128, 1, "quieto", { cuerpo: "#2f3a6e", acento: "#9fe8ff" }, t, { variante: 2, estiramiento: e });
+  c.restore();
+}
+
 // ---------------- Bucle ----------------
 let acumulado = 0;
 let anterior = performance.now();
 let reloj = 0;
 
 function cuadro(ahora: number): void {
-  const dt = Math.min(0.1, (ahora - anterior) / 1000);
+  // El tiempo del primer cuadro puede ser anterior a la carga del script: nunca dejar que dt sea negativo.
+  const dt = Math.max(0, Math.min(0.1, (ahora - anterior) / 1000));
   anterior = ahora;
   reloj += dt;
 
@@ -177,7 +208,9 @@ function cuadro(ahora: number): void {
     entrada.finPaso();
   }
 
-  if (juego !== null) {
+  if (galeria) {
+    dibujarGaleria(g, reloj);
+  } else if (juego !== null) {
     juego.dibujar(g);
     if (!juego.terminado) dibujarHud(g, juego);
   } else {
@@ -188,14 +221,15 @@ function cuadro(ahora: number): void {
 
 // Los sprites cargan en paralelo; mientras tanto (o si fallan) se dibuja el arte procedural.
 void sprites.cargar().then(() => {
-  if (ui.abierto === "titulo") ui.mostrarTitulo();
+  if (ui.abierto === "titulo" && !galeria) ui.mostrarTitulo();
   // Solo en desarrollo: ?auto=<estilo> empieza una partida directa (para capturas y pruebas visuales).
   const auto = import.meta.env.DEV ? new URLSearchParams(location.search).get("auto") : null;
   if (auto !== null) {
     iniciar({ tipo: "nueva", opciones: { estilo: (["espada", "punos", "pesada", "baston"].includes(auto) ? auto : "espada") as "espada" } });
     const q = new URLSearchParams(location.search);
     if (q.has("sala") || q.has("piso")) juego?.depurarIr(Number(q.get("piso") ?? 1), Number(q.get("sala") ?? 0));
+    if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
   }
 });
-ui.mostrarTitulo();
+if (!galeria) ui.mostrarTitulo();
 requestAnimationFrame(cuadro);

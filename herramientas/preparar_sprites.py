@@ -33,13 +33,14 @@ ANIMACIONES = [
     "wizard_idle", "wizard_attack",
     "rhino_idle", "rhino_run", "rhino_attack",
     "mooseman_idle", "mooseman_run", "mooseman_attack",
-]
+] + [f"{p}_{a}" for p in ["knight_red", "knight_blue", "knight_green", "knight_yellow", "barbarian", "guard", "monk", "oldman"]
+     for a in ["idle", "run", "attack"]]
 
 ICONOS = [
     "sword", "big_axe", "magic_staff", "cleaver", "anime_sword", "halberd", "spear", "staff", "axe",
     "shield_blue", "shield_red", "shield_green", "shield_yellow",
     "potion_red", "potion_blue", "potion_green", "potion_yellow",
-    "key_gold", "key_silver",
+    "key_gold", "key_silver", "arrow",
 ]
 
 

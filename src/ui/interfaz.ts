@@ -5,14 +5,16 @@
 import type { Posicion } from "minialu";
 import { ALMAS, COLOR_FAMILIA, FAMILIAS, INFO_PASIVA, INFO_TECNICA, alma } from "../contenido/almas.ts";
 import { ESTILOS, ORDEN_ESTILOS } from "../contenido/armas.ts";
-import { REFINADO_MAX, RECETAS, costoRefinado } from "../contenido/recetas.ts";
+import { EXITO_REFINADO, REFINADO_MAX, RECETAS, costoRefinado } from "../contenido/recetas.ts";
+import { CONJUNTOS, conjunto as defConjunto } from "../contenido/conjuntos.ts";
+import { RUNAS, runaDeObjeto } from "../contenido/objetos.ts";
 import { SENDAS, TALENTOS, type Senda } from "../contenido/talentos.ts";
 import { craftear, faltantes, puedeCraftear, refinarEquipado } from "../dominio/crafteo.ts";
 import { bioma, type Bioma } from "../contenido/biomas.ts";
 import {
-  COLORES_RAREZA, CONSUMIBLES, MAT_FRAGMENTO, MATERIALES, NOMBRES_RAREZA, OBJ_LAGRIMA, OBJ_POLVO, apilable, unico, type EstiloArma,
+  COLORES_RAREZA, CONSUMIBLES, MAT_FRAGMENTO, MATERIALES, NOMBRES_RAREZA, OBJ_LAGRIMA, OBJ_POLVO, RASGOS_EQUIPO, apilable, unico, type EstiloArma,
 } from "../contenido/objetos.ts";
-import { COSTO_FUSION, MEJORAS_MAX, NIVEL_MAX_CARTA, PROB_FUSION, estrellas, nombreCarta, type Carta } from "../dominio/cartas.ts";
+import { COSTO_FUSION, MEJORAS_MAX, NIVEL_MAX_CARTA, PROB_FUSION, RASGOS_CARTA, estrellas, nombreCarta, type Carta } from "../dominio/cartas.ts";
 import type { Eco } from "../dominio/eco.ts";
 import { valorDesguace, type ObjetoEquipo } from "../dominio/equipo.ts";
 import { MEJORAS_SANTUARIO, type Meta } from "../dominio/meta.ts";
@@ -63,6 +65,8 @@ const ERRORES: Readonly<Record<string, string>> = {
   "ya-aprendido": "Ya lo aprendiste",
   "sin-puntos": "No tienes puntos libres",
   "al-tope": "Ese stat llegó a su tope para tu nivel",
+  "fallo-refinado": "El refinado falló: se perdieron los materiales (la pieza está intacta)",
+  "no-es-runa": "Eso no es una runa",
 };
 
 function textoError(e: string): string {
@@ -87,8 +91,20 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
     h("div", { class: "nombre", style: `color:${COLORES_RAREZA[o.rareza]}` }, o.nombre),
     h("div", { class: "sub" }, `${NOMBRES_RAREZA[o.rareza]} · ${NOMBRE_RANURA[o.ranura]} · Nv ${o.nivel}`),
     formatoStats(o.stats),
+    o.calidad !== undefined ? h("div", { class: o.calidad >= 1.1 ? "sube" : o.calidad < 0.9 ? "baja" : "sub" }, `Calidad de forja: ${Math.round(o.calidad * 100)} %`) : null,
+    ...Object.entries(o.rasgos ?? {}).map(([id, v]) => {
+      const def = RASGOS_EQUIPO.find((r) => r.id === id);
+      return def === undefined || v === undefined ? null : h("div", { class: "rasgo" }, `◈ ${def.nombre} ${def.formato(v)}`);
+    }),
     u !== undefined ? h("div", { class: "efecto" }, `✦ ${u.descripcion}`) : null,
     u !== undefined ? h("div", { class: "cita" }, `«${u.cita}»`) : null,
+    o.conjunto !== undefined ? (() => {
+      const c = defConjunto(o.conjunto);
+      return h("div", { class: "conjunto", style: `--c:${c.color}` },
+        h("b", {}, `Conjunto: ${c.nombre}`),
+        h("div", {}, `(2) ${c.dos.descripcion}`),
+        h("div", {}, `(3) ${c.tres.descripcion}`));
+    })() : null,
     dif);
 }
 
@@ -99,6 +115,8 @@ function fichaCarta(c: Carta): HTMLElement {
     h("div", { class: "nombre", style: `color:${a.colorSec}` }, nombreCarta(c)),
     h("div", { class: "sub" }, h("span", { style: `color:${COLOR_FAMILIA[c.tipo]}` }, FAMILIAS[c.tipo]), ` · ${estrellas(c)} · mejoras ${c.mejoras}/${MEJORAS_MAX}`),
     formatoStats(c.stats),
+    c.brillante === true ? h("div", { class: "brillo" }, "✧ Resplandeciente: +20 % a todos sus stats") : null,
+    c.rasgo !== undefined ? h("div", { class: "rasgo" }, `◈ Rasgo ${RASGOS_CARTA[c.rasgo].nombre}: ${RASGOS_CARTA[c.rasgo].descripcion} (solo como Forma)`) : null,
     h("div", { class: "efecto" }, `Técnica: ${t.nombre} (${t.costo} éter, ${Math.round(t.mult * 100)} % de Técnica${t.impactos > 1 ? ` ×${t.impactos}` : ""}) — ${t.descripcion}`),
     h("div", { class: "pasiva" }, `Pasiva · ${INFO_PASIVA[a.pasiva].nombre}: ${INFO_PASIVA[a.pasiva].descripcion}`),
     h("div", { class: "cita" }, `«${a.lore}»`));
@@ -107,11 +125,12 @@ function fichaCarta(c: Carta): HTMLElement {
 function miniCarta(c: Carta | null, etiqueta: string, sel: boolean, onclick: () => void): HTMLElement {
   if (c === null) return h("button", { class: `carta vacia${sel ? " sel" : ""}`, onclick }, h("small", {}, etiqueta), "—");
   const a = alma(c.personaje);
-  return h("button", { class: `carta${sel ? " sel" : ""}`, style: `--c1:${a.color};--c2:${a.colorSec};--fam:${COLOR_FAMILIA[c.tipo]}`, onclick },
+  return h("button", { class: `carta${sel ? " sel" : ""}${c.brillante === true ? " brillante" : ""}`, style: `--c1:${a.color};--c2:${a.colorSec};--fam:${COLOR_FAMILIA[c.tipo]}`, onclick },
     h("small", {}, etiqueta),
     h("span", { class: "retrato" }),
     h("b", {}, a.nombre),
-    h("span", { class: "estrellas" }, estrellas(c) + (c.mejoras > 0 ? ` +${c.mejoras}` : "")));
+    h("span", { class: "estrellas" }, estrellas(c) + (c.mejoras > 0 ? ` +${c.mejoras}` : "")),
+    c.rasgo !== undefined ? h("small", { class: "rasgo" }, RASGOS_CARTA[c.rasgo].nombre) : null);
 }
 
 export class Interfaz {
@@ -259,7 +278,7 @@ export class Interfaz {
       h("div", { class: "consejos" },
         h("p", {}, "La ", h("b", {}, "patada"), " rompe la guardia de los escuderos. El ", h("b", {}, "golpe"), " es rápido y da éter al acertar."),
         h("p", {}, "Junta tres ", h("b", {}, "Cartas de Alma"), " de la misma familia y estrellas y fusiónalas en el ", h("b", {}, "Altar"), "."),
-        h("p", {}, "Las ", h("b", {}, "reliquias"), " son permanentes: abren cristales, raíces y pozos en todas tus bajadas.")),
+        h("p", {}, "Las ", h("b", {}, "reliquias"), " son permanentes: abren cristales y raíces en todas tus bajadas. Los pasajes verticales tienen cadenas: ↑/↓ para trepar.")),
       h("button", { class: "principal", onclick: volver }, "Volver"));
   }
 
@@ -395,11 +414,34 @@ export class Interfaz {
               },
             }, `Desguazar (+${valorDesguace(eq)} ◆)`)));
       } else if (cons !== undefined && pila !== null) {
+        const runa = runaDeObjeto(pila.objeto);
         detalle = h("div", { class: "detalle" },
-          h("div", { class: "ficha" }, h("div", { class: "nombre", style: `color:${cons.color}` }, `${cons.nombre} ×${pila.cantidad}`), h("div", { class: "sub" }, cons.descripcion)));
+          h("div", { class: "ficha" }, h("div", { class: "nombre", style: `color:${cons.color}` }, `${cons.nombre} ×${pila.cantidad}`), h("div", { class: "sub" }, cons.descripcion)),
+          runa !== undefined ? h("div", { class: "botones" }, ...([0, 1] as const).map((k) => h("button", {
+            class: k === 0 ? "principal" : "",
+            onclick: () => {
+              const res = p.engarzarRuna(sel, k);
+              if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
+              else this.audio.reproducir("raro");
+              this.abrirInventario(juego, "equipo");
+            },
+          }, `Engarzar en Runa ${k === 0 ? "I" : "II"}`))) : null);
       }
     }
-    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipado"), ranuras, h("h3", {}, `Mochila · ◆ ${p.esquirlas}`), grilla), detalle);
+    const runas = h("div", { class: "ranuras" }, ...([0, 1] as const).map((k) => {
+      const r = p.runas[k];
+      const def = r !== null ? RUNAS.find((x) => x.id === r) : undefined;
+      return h("button", {
+        class: "ranura", style: def !== undefined ? `border-color:${def.color}` : "", title: def?.descripcion ?? "Engarza una runa desde la mochila",
+        onclick: () => {
+          if (r === null) return;
+          const res = p.quitarRuna(k);
+          if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
+          this.abrirInventario(juego, "equipo");
+        },
+      }, h("small", {}, `Runa ${k === 0 ? "I" : "II"}`), def !== undefined ? h("span", { style: `color:${def.color}` }, def.nombre) : "—");
+    }));
+    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipado"), ranuras, runas, h("h3", {}, `Mochila · ◆ ${p.esquirlas}`), grilla), detalle);
   }
 
   private vistaCartas(juego: Juego, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
@@ -536,21 +578,43 @@ export class Interfaz {
     });
     const sinVidrio = bloque(Object.values(capas)).hp;
     const pot = p.potencias();
+    const mods = p.combate();
     const estilo = p.estilo();
     const pasiva = p.pasiva();
     const danio = h("div", { class: "danios" },
       h("div", {}, h("small", {}, `Golpe (${estilo.nombre})`), h("b", {}, `${pot.golpe}`), h("small", {}, `combo completo ${pot.combo}`)),
       h("div", {}, h("small", {}, "Patada"), h("b", {}, `${pot.patada}`), h("small", {}, "rompe guardias")),
       h("div", {}, h("small", {}, pot.tecnicaNombre ?? "Técnica"), h("b", {}, pot.tecnicaNombre === null ? "—" : `${pot.tecnica}`), h("small", {}, pot.tecnicaNombre === null ? "sin Forma" : `${pot.costoTecnica} éter`)),
-      h("div", {}, h("small", {}, "Crítico"), h("b", {}, `${total.critico} %`), h("small", {}, "×1,75 de daño")));
+      h("div", {}, h("small", {}, "Crítico"), h("b", {}, `${total.critico} %`), h("small", {}, `×${(1.75 + mods.critDanio).toFixed(2).replace(".", ",")} de daño`)));
+    const filaMod = (nombre: string, v: number, sufijo = " %"): HTMLElement | null =>
+      v === 0 ? null : h("span", { class: "stat" }, `${nombre} `, h("b", {}, `+${sufijo === " %" ? Math.round(v * 100) : v}${sufijo}`));
+    const modsUi = h("div", { class: "stats" },
+      h("span", { class: "stat" }, "Alcance ", h("b", {}, estilo.id === "arco" ? `${Math.round(estilo.alcance * (1 + mods.alcance))} px` : `${Math.round(estilo.alcance * (1 + mods.alcance))} px`)),
+      filaMod("Vel. de ataque", mods.velocidad), filaMod("Daño crítico", mods.critDanio), filaMod("Movimiento", mods.agilidad),
+      filaMod("Daño de técnica", mods.tecnicaDanio), filaMod("Ahorro de éter", mods.tecnicaCosto), filaMod("Robo de vida", mods.robo),
+      filaMod("Éter por golpe", mods.eterGolpe, ""));
     return h("div", { class: "vista una" },
-      h("h3", {}, "Daño por ataque (antes de la defensa enemiga)"),
+      h("h3", {}, `Daño por ataque (antes de la defensa enemiga) · ${estilo.nombre}`),
       danio,
+      modsUi,
       pasiva !== null ? h("div", { class: "pasiva" }, `Pasiva de tu Forma · ${INFO_PASIVA[pasiva].nombre}: ${INFO_PASIVA[pasiva].descripcion}`) : null,
       h("h3", {}, "Desglose de stats"),
       tabla,
       total.hp !== sinVidrio ? h("div", { class: "sub" }, `Sangre de Vidrio reduce tu vida de ${sinVidrio} a ${total.hp}.`) : null,
       ...efectos,
+      h("h3", {}, "Conjuntos y runas"),
+      ...[...p.piezasConjunto()].map(([id, n]) => {
+        const c = CONJUNTOS.find((x) => x.id === id)!;
+        return h("div", { class: "conjunto", style: `--c:${c.color}` },
+          h("b", {}, `${c.nombre} (${n}/3)`),
+          h("div", { class: n >= 2 ? "sube" : "sub" }, `(2) ${c.dos.descripcion}`),
+          h("div", { class: n >= 3 ? "sube" : "sub" }, `(3) ${c.tres.descripcion}`));
+      }),
+      ...p.runas.filter((r) => r !== null).map((r) => {
+        const def = RUNAS.find((x) => x.id === r)!;
+        return h("div", { style: `color:${def.color}` }, `◆ ${def.nombre}: ${def.descripcion}`);
+      }),
+      p.piezasConjunto().size === 0 && p.runas.every((r) => r === null) ? h("p", { class: "sub" }, "Sin conjuntos ni runas. Las piezas de conjunto caen en cada zona y los guardianes siempre sueltan una.") : null,
       h("h3", {}, "Reliquias"),
       h("div", { class: "reliquias" }, ...RELIQUIAS.map((r) =>
         h("span", { class: this.meta.tieneReliquia(r) ? "rel si" : "rel no", style: `--c:${INFO_RELIQUIA[r].color}`, title: INFO_RELIQUIA[r].descripcion },
@@ -683,7 +747,7 @@ export class Interfaz {
       const costo = costoRefinado(nivel);
       return h("div", { class: "receta" },
         h("b", { style: o !== null ? `color:${COLORES_RAREZA[o.rareza]}` : "" }, o?.nombre ?? `${NOMBRE_RANURA[ranura]}: nada equipado`),
-        h("span", { class: "sub" }, o === null ? "" : nivel >= REFINADO_MAX ? "Refinado al máximo" : `+12 % a todo · Fragmento de Eco ${p.mochila.contar(MAT_FRAGMENTO)}/${costo.fragmentos} · ◆ ${costo.esquirlas}`),
+        h("span", { class: "sub" }, o === null ? "" : nivel >= REFINADO_MAX ? "Refinado al máximo" : `+12 % a todo · Fragmento de Eco ${p.mochila.contar(MAT_FRAGMENTO)}/${costo.fragmentos} · ◆ ${costo.esquirlas} · éxito ${Math.round((EXITO_REFINADO[nivel] ?? 0) * 100)} %`),
         h("button", {
           disabled: o === null || nivel >= REFINADO_MAX,
           onclick: () => {
@@ -766,7 +830,7 @@ export class Interfaz {
       h("h2", {}, `Piso ${juego.partida.piso} · ${bioma(juego.partida.piso).nombre}`),
       c,
       h("div", { class: "leyenda" }, ...leyenda.map(([col, t]) => h("span", {}, h("i", { style: `background:${col}` }), t))),
-      h("p", { class: "sub" }, "Las líneas de color en los bordes son barreras: celeste = cristal (Embestida), naranja = raíces (Garra Ígnea). Subir por un pozo requiere Doble Salto."),
+      h("p", { class: "sub" }, "Las líneas de color en los bordes son barreras: celeste = cristal (Embestida), naranja = raíces (Garra Ígnea). Los pasajes verticales tienen cadenas para subir y bajar (↑/↓)."),
       h("button", { onclick: () => { this.cerrar(); juego.volverAlFaro(); } }, "Volver al Faro"));
   }
 

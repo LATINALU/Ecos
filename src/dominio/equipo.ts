@@ -2,7 +2,8 @@
 // El azar es el de minialu (inyectable): con semilla, el mismo cofre da siempre lo mismo en los tests.
 
 import { elegirPorPeso, elegirUno, entero, type Azar, type Capa } from "minialu";
-import { AFIJOS, BASES, NOMBRES_RAREZA, UNICOS, type DefUnico } from "../contenido/objetos.ts";
+import { AFIJOS, BASES, NOMBRES_RAREZA, RASGOS_EQUIPO, UNICOS, type DefUnico, type IdRasgoEquipo } from "../contenido/objetos.ts";
+import { conjunto as defConjunto, type IdConjunto } from "../contenido/conjuntos.ts";
 import { nuevoUid } from "./cartas.ts";
 import type { EfectoUnico, Ranura } from "./tipos.ts";
 
@@ -21,13 +22,52 @@ export interface ObjetoEquipo {
   readonly efecto?: EfectoUnico;
   /** Veces que se refinó en el Yunque (0~5). */
   readonly refinado?: number;
+  /** Calidad de la forja (0,75~1,3): multiplica los stats. */
+  readonly calidad?: number;
+  /** Rasgos al azar (alcance, velocidad de ataque, daño crítico...). */
+  readonly rasgos?: Readonly<Partial<Record<IdRasgoEquipo, number>>>;
+  /** Pieza de un conjunto (2 y 3 piezas dan bonos). */
+  readonly conjunto?: IdConjunto;
+}
+
+/** Cantidad de rasgos según rareza: común (a veces 1), raro 1, épico 2, legendario 3, único 1. */
+const RASGOS_POR_RAREZA = [0, 1, 2, 3, 1];
+
+export function tirarRasgos(azar: Azar, ranura: Ranura, rareza: Rareza): Partial<Record<IdRasgoEquipo, number>> {
+  const cantidad = RASGOS_POR_RAREZA[rareza] + (rareza === 0 && azar.siguiente() < 0.3 ? 1 : 0);
+  const posibles = RASGOS_EQUIPO.filter((r) => !r.soloArma || ranura === "arma");
+  const rasgos: Partial<Record<IdRasgoEquipo, number>> = {};
+  for (let i = 0; i < cantidad && posibles.length > 0; i++) {
+    const r = posibles.splice(entero(azar, posibles.length), 1)[0];
+    const v = r.min + azar.siguiente() * (r.max - r.min) * (1 + rareza * 0.1);
+    rasgos[r.id] = r.id === "eterGolpe" ? Math.round(v) : Math.round(v * 100) / 100;
+  }
+  return rasgos;
+}
+
+/** Calidad de forja: la mayoría ronda el 100 %; las piezas raras salen mejores. */
+export function tirarCalidad(azar: Azar, rareza: Rareza): number {
+  const v = 0.75 + (azar.siguiente() + azar.siguiente()) / 2 * 0.45 + rareza * 0.025;
+  return Math.round(Math.min(1.3, v) * 100) / 100;
+}
+
+export function etiquetaCalidad(c: number | undefined): string | null {
+  if (c === undefined) return null;
+  return c >= 1.18 ? "Magistral" : c <= 0.85 ? "Endeble" : null;
 }
 
 /** Pesos de rareza (común, raro, épico, legendario) según el piso. */
 export const PESOS_RAREZA: readonly (readonly number[])[] = [
   [62, 28, 9, 1],
-  [48, 34, 15, 3],
-  [34, 38, 22, 6],
+  [52, 32, 13, 3],
+  [44, 35, 17, 4],
+  [38, 37, 20, 5],
+  [32, 38, 23, 7],
+  [27, 38, 26, 9],
+  [22, 37, 29, 12],
+  [18, 35, 32, 15],
+  [14, 33, 35, 18],
+  [10, 30, 38, 22],
 ];
 
 /** Afijos extra según rareza. */
@@ -52,12 +92,13 @@ function sumar(stats: Record<string, number>, porNivel: Readonly<Record<string, 
   }
 }
 
-export function generarEquipo(azar: Azar, piso: number, minima: Rareza = 0, ranura?: Ranura): ObjetoEquipo {
+export function generarEquipo(azar: Azar, piso: number, minima: Rareza = 0, ranura?: Ranura, deConjunto?: IdConjunto): ObjetoEquipo {
   const rareza = tirarRarezaEquipo(azar, piso, minima);
   const nivel = nivelObjeto(piso, azar);
   const def = elegirUno(azar, ranura === undefined ? BASES : BASES.filter((b) => b.ranura === ranura));
   const stats: Record<string, number> = {};
-  sumar(stats, def.porNivel, nivel, MULT_RAREZA[rareza] * (0.85 + azar.siguiente() * 0.3));
+  const calidad = tirarCalidad(azar, rareza);
+  sumar(stats, def.porNivel, nivel, MULT_RAREZA[rareza] * calidad);
   const disponibles = [...AFIJOS];
   const nombres: string[] = [];
   for (let i = 0; i < AFIJOS_POR_RAREZA[rareza] && disponibles.length > 0; i++) {
@@ -65,8 +106,21 @@ export function generarEquipo(azar: Azar, piso: number, minima: Rareza = 0, ranu
     sumar(stats, { [afijo.stat]: afijo.porNivel }, nivel, 0.6 + azar.siguiente() * 0.6);
     nombres.push(afijo.nombre);
   }
-  const nombre = nombres.length === 0 ? def.nombre : `${def.nombre} ${nombres[0]}`;
-  return { uid: nuevoUid(azar), base: def.id, ranura: def.ranura, nombre, rareza, nivel, stats };
+  const etiqueta = etiquetaCalidad(calidad);
+  const rasgos = tirarRasgos(azar, def.ranura, rareza);
+  // La base aporta sus rasgos propios (el Estoque siempre es rápido, el Arco Largo siempre llega lejos).
+  for (const [id, v] of Object.entries(def.rasgos ?? {}) as [IdRasgoEquipo, number][]) {
+    rasgos[id] = Math.round(((rasgos[id] ?? 0) + v) * 100) / 100;
+  }
+  if (deConjunto !== undefined) {
+    const c = defConjunto(deConjunto);
+    return {
+      uid: nuevoUid(azar), base: def.id, ranura: def.ranura, nombre: `${def.nombre} · ${c.nombre}`,
+      rareza: Math.max(rareza, 2) as Rareza, nivel, stats, calidad, rasgos, conjunto: deConjunto,
+    };
+  }
+  const nombre = (etiqueta !== null ? `${etiqueta} · ` : "") + (nombres.length === 0 ? def.nombre : `${def.nombre} ${nombres[0]}`);
+  return { uid: nuevoUid(azar), base: def.id, ranura: def.ranura, nombre, rareza, nivel, stats, calidad, rasgos };
 }
 
 export function crearUnico(azar: Azar, piso: number, def?: DefUnico): ObjetoEquipo {
@@ -75,7 +129,10 @@ export function crearUnico(azar: Azar, piso: number, def?: DefUnico): ObjetoEqui
   const stats: Record<string, number> = {};
   sumar(stats, u.porNivel, nivel, MULT_RAREZA[RAREZA_UNICA]);
   if (u.efecto === "ojo") stats.critico = (stats.critico ?? 0) + 20;
-  return { uid: nuevoUid(azar), base: u.id, ranura: u.ranura, nombre: u.nombre, rareza: RAREZA_UNICA, nivel, stats, efecto: u.efecto };
+  return {
+    uid: nuevoUid(azar), base: u.id, ranura: u.ranura, nombre: u.nombre, rareza: RAREZA_UNICA, nivel, stats, efecto: u.efecto,
+    calidad: 1.1, rasgos: tirarRasgos(azar, u.ranura, RAREZA_UNICA),
+  };
 }
 
 /** Arma común de nivel 1 de una base concreta (el arma inicial elegida). */
@@ -92,6 +149,7 @@ export function refinar(o: ObjetoEquipo): ObjetoEquipo {
   const stats: Record<string, number> = {};
   for (const [k, v] of Object.entries(o.stats)) stats[k] = Math.max(v + 1, Math.round(v * 1.12));
   const nombre = o.nombre.replace(/ \+\d+$/, "") + ` +${n}`;
+  // (los rasgos y la calidad se conservan: refinar mejora los números, no cambia la pieza)
   return { ...o, stats, refinado: n, nombre };
 }
 

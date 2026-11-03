@@ -12,7 +12,7 @@ export const INFO_RELIQUIA: Readonly<Record<Reliquia, { nombre: string; descripc
   },
   dobleSalto: {
     nombre: "Alas de Ceniza",
-    descripcion: "Salta otra vez en el aire. Permite subir por los pozos verticales.",
+    descripcion: "Salta otra vez en el aire: alcanzas cornisas altas, escapas de los jefes y saltas desde las cadenas.",
     color: "#ffe27a",
   },
   garraIgnea: {
@@ -34,7 +34,8 @@ export type EfectoUnico =
   | "estela-ignea"
   | "ojo"
   | "onda"
-  | "corona";
+  | "corona"
+  | "perforante";
 
 export type Dir = "izq" | "der" | "arr" | "aba";
 export const OPUESTA: Readonly<Record<Dir, Dir>> = { izq: "der", der: "izq", arr: "aba", aba: "arr" };

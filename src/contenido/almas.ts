@@ -3,7 +3,7 @@
 
 import type { Stat } from "../dominio/stats.ts";
 
-export type Tecnica = "orbe" | "tajo" | "terremoto" | "zarpazo" | "lanza";
+export type Tecnica = "orbe" | "tajo" | "terremoto" | "zarpazo" | "lanza" | "rayo" | "remolino";
 
 /** `mult`: multiplicador sobre el stat Técnica por impacto (`impactos` = golpes típicos de una ejecución). */
 export const INFO_TECNICA: Readonly<Record<Tecnica, { nombre: string; costo: number; mult: number; impactos: number; descripcion: string }>> = {
@@ -12,6 +12,8 @@ export const INFO_TECNICA: Readonly<Record<Tecnica, { nombre: string; costo: num
   terremoto: { nombre: "Terremoto", costo: 18, mult: 1.45, impactos: 1, descripcion: "Golpeas el suelo: dos ondas recorren el piso hacia ambos lados." },
   zarpazo: { nombre: "Zarpazo Voraz", costo: 13, mult: 0.75, impactos: 3, descripcion: "Tres garras rápidas; cada impacto te devuelve vida." },
   lanza: { nombre: "Lanza Glacial", costo: 15, mult: 1.35, impactos: 1, descripcion: "Una lanza de hielo que atraviesa y ralentiza." },
+  rayo: { nombre: "Rayo del Abismo", costo: 16, mult: 2.1, impactos: 1, descripcion: "Un rayo cae sobre el enemigo más cercano (o delante de ti) y aturde." },
+  remolino: { nombre: "Remolino de Hojas", costo: 17, mult: 0.55, impactos: 6, descripcion: "Tres hojas giran a tu alrededor durante 4 s cortando todo lo que tocan." },
 };
 
 export const FAMILIAS = ["Hoja", "Sombra", "Arcano", "Bestia"] as const;
@@ -33,7 +35,7 @@ export interface DefAlma {
   readonly pasiva: Pasiva;
 }
 
-export type Pasiva = "muro" | "filo" | "sombra" | "humo" | "horno" | "escarcha" | "hambre" | "raiz";
+export type Pasiva = "muro" | "filo" | "sombra" | "humo" | "horno" | "escarcha" | "hambre" | "raiz" | "chispa" | "vendaval" | "espinas";
 
 export const INFO_PASIVA: Readonly<Record<Pasiva, { nombre: string; descripcion: string }>> = {
   muro: { nombre: "Muralla", descripcion: "Recibes un 15 % menos de daño." },
@@ -44,6 +46,9 @@ export const INFO_PASIVA: Readonly<Record<Pasiva, { nombre: string; descripcion:
   escarcha: { nombre: "Escarcha", descripcion: "Tus golpes ralentizan a los enemigos." },
   hambre: { nombre: "Voracidad", descripcion: "Te curas un 6 % del daño que haces." },
   raiz: { nombre: "Raíz Firme", descripcion: "Tus patadas aturden y tienes +6 de defensa (+1 por nivel)." },
+  chispa: { nombre: "Chispa Letal", descripcion: "Tus críticos hacen +50 % de daño." },
+  vendaval: { nombre: "Vendaval", descripcion: "Atacas un 20 % más rápido y te mueves un 8 % más rápido." },
+  espinas: { nombre: "Espinas", descripcion: "Devuelves el 35 % del daño que recibes al atacante cercano." },
 };
 
 export const ALMAS: readonly DefAlma[] = [
@@ -94,6 +99,30 @@ export const ALMAS: readonly DefAlma[] = [
     pesos: { hp: 2.8, golpe: 0.8, patada: 1.3, tecnica: 0.8, defensa: 0.8, mp: 0.4, critico: 0.05 },
     lore: "Durmió tanto en el Micelio que le crecieron bosques en la espalda.",
     pasiva: "raiz",
+  },
+  {
+    id: 8, nombre: "Iskra", titulo: "Tormenta Viva", tipo: 2, tecnica: "rayo", color: "#2f3a6e", colorSec: "#9fe8ff",
+    pesos: { hp: 1.3, golpe: 0.7, patada: 0.6, tecnica: 1.6, defensa: 0.4, mp: 1.1, critico: 0.35 },
+    lore: "Cayó durante una tormenta. Dicen que el rayo la siguió hasta el fondo.",
+    pasiva: "chispa",
+  },
+  {
+    id: 9, nombre: "Morrigan", titulo: "Cuervo de Ceniza", tipo: 1, tecnica: "remolino", color: "#1e1a24", colorSec: "#ff6a8a",
+    pesos: { hp: 1.3, golpe: 1.0, patada: 0.8, tecnica: 1.2, defensa: 0.4, mp: 0.8, critico: 0.4 },
+    lore: "Sus plumas cortan. Sus promesas, más.",
+    pasiva: "vendaval",
+  },
+  {
+    id: 10, nombre: "Bruno", titulo: "Martillo de Raíz", tipo: 0, tecnica: "remolino", color: "#6a5a3a", colorSec: "#c4ff7a",
+    pesos: { hp: 2.6, golpe: 1.1, patada: 1.0, tecnica: 0.7, defensa: 0.9, mp: 0.4, critico: 0.1 },
+    lore: "Forjaba en el Micelio con un martillo que todavía echa brotes.",
+    pasiva: "espinas",
+  },
+  {
+    id: 11, nombre: "Fenra", titulo: "Loba Blanca", tipo: 3, tecnica: "lanza", color: "#c8c8d8", colorSec: "#7fe3ff",
+    pesos: { hp: 1.9, golpe: 1.3, patada: 1.1, tecnica: 0.8, defensa: 0.5, mp: 0.5, critico: 0.35 },
+    lore: "Aulló una sola vez en el Pozo. El eco todavía no termina.",
+    pasiva: "vendaval",
   },
 ];
 

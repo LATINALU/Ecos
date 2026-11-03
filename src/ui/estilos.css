@@ -274,3 +274,18 @@ canvas.icono-sprite { image-rendering: pixelated; width: 80%; height: auto; max-
 .con-icono { display: flex; align-items: center; gap: 0.3em; }
 .con-icono canvas.icono-sprite { width: 1.6em; }
 .creditos { margin-top: 0.6em; color: #6a6280; font-size: 0.75em; }
+
+/* ---------- Rasgos, calidad y cartas resplandecientes ---------- */
+.rasgo { color: #9fe8ff; }
+.brillo { color: #ffd27a; text-shadow: 0 0 8px #ffb23d; }
+.carta small.rasgo { color: #9fe8ff; font-size: 0.65em; text-transform: none; letter-spacing: 0; }
+.carta.brillante { border-color: #ffd27a; box-shadow: 0 0 10px #ffb23d88, inset 0 0 12px #ffd27a44; animation: brillar 2.4s ease-in-out infinite; }
+@keyframes brillar { 50% { box-shadow: 0 0 18px #ffd27acc, inset 0 0 18px #ffd27a66; } }
+.icono-estilo.arco { clip-path: polygon(30% 0, 45% 0, 70% 25%, 75% 50%, 70% 75%, 45% 100%, 30% 100%, 55% 75%, 60% 50%, 55% 25%); }
+.estilos { grid-template-columns: repeat(5, 1fr); }
+
+/* ---------- Conjuntos, runas, sendas 4×4 ---------- */
+.conjunto { border-left: 3px solid var(--c); padding: 0.3em 0.6em; margin: 0.4em 0; background: #120e1c; font-size: 0.9em; }
+.conjunto b { color: var(--c); }
+.ranuras + .ranuras { margin-top: 0.4em; grid-template-columns: repeat(2, 1fr); }
+.sendas { grid-template-columns: repeat(4, 1fr); }

@@ -75,9 +75,10 @@ describe("cartas", () => {
       for (let n = 0; n <= NIVEL_MAX_CARTA; n++) {
         const c = crearCarta(azar, a.id, n);
         const { minimos, maximos } = rangoCarta(a.id, n);
+        const f = c.brillante === true ? 1.2 : 1; // las Resplandecientes llevan +20 %
         for (const k of Object.keys(maximos)) {
-          expect(c.stats[k]).toBeGreaterThanOrEqual(minimos[k]);
-          expect(c.stats[k]).toBeLessThanOrEqual(maximos[k]);
+          expect(c.stats[k]).toBeGreaterThanOrEqual(Math.floor(minimos[k] * f));
+          expect(c.stats[k]).toBeLessThanOrEqual(Math.round(maximos[k] * f));
         }
       }
     }

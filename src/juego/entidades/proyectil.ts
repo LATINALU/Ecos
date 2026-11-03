@@ -4,7 +4,9 @@ import { mover, solidoEnPunto, type Rect } from "../../motor/fisica.ts";
 import type { AtaqueJugador, Contexto } from "../contexto.ts";
 import type { Criatura } from "./criatura.ts";
 
-export type TipoProyectil = "orbe" | "lanza" | "onda" | "espora" | "hueso" | "bala" | "fuego" | "sombra";
+export type TipoProyectil =
+  | "orbe" | "lanza" | "onda" | "espora" | "hueso" | "bala" | "fuego" | "sombra"
+  | "daga" | "hacha" | "agua" | "cruz" | "llama" | "flecha" | "hoja" | "rayo";
 
 export interface OpcionesProyectil {
   readonly tipo: TipoProyectil;
@@ -25,6 +27,12 @@ export interface OpcionesProyectil {
   readonly color: string;
   readonly ataqueJugador?: AtaqueJugador;
   readonly ataqueEnemigo?: number;
+  /** Vuelve hacia quien lo lanzó (cruz). Golpea de nuevo a la vuelta. */
+  readonly boomerang?: boolean;
+  /** Gira alrededor del jugador (Remolino). Vuelve a golpear cada `rehit` segundos. */
+  readonly orbita?: { readonly radio: number; readonly fase: number; readonly velocidad: number; readonly rehit: number };
+  /** Qué pasa cuando se rompe (el agua bendita deja llamas). */
+  readonly alMorir?: (ctx: Contexto, x: number, y: number) => void;
 }
 
 export class Proyectil implements Rect {
@@ -63,7 +71,29 @@ export class Proyectil implements Rect {
       this.morir(ctx);
       return;
     }
+    if (this.op.orbita !== undefined) {
+      const o = this.op.orbita;
+      const a = o.fase + this.t * o.velocidad;
+      const j = ctx.jugador;
+      this.x = j.cx + Math.cos(a) * o.radio - this.w / 2;
+      this.y = j.cy + Math.sin(a) * o.radio * 0.8 - this.h / 2;
+      if (Math.floor(this.t / o.rehit) !== Math.floor((this.t - dt) / o.rehit)) this.golpeados.clear();
+      if (Math.random() < 0.6) ctx.fx.chispas(this.x + this.w / 2, this.y + this.h / 2, this.op.color, 1, { velocidad: 10, vida: 0.25, gravedad: 0, brillo: true });
+      return;
+    }
     this.vy += (this.op.gravedad ?? 0) * dt;
+    if (this.op.boomerang === true) {
+      const ida = Math.sign(this.op.vx) || 1;
+      const antes = Math.sign(this.vx);
+      this.vx -= ida * 420 * dt;
+      if (Math.sign(this.vx) !== antes) this.golpeados.clear();
+      // De vuelta: muere al llegar al jugador.
+      const j = ctx.jugador;
+      if (Math.sign(this.vx) === -ida && Math.abs(this.x + this.w / 2 - j.cx) < 10 && Math.abs(this.y - j.cy) < 20) {
+        this.muerto = true;
+        return;
+      }
+    }
     if (this.op.rastrero === true) {
       const c = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: 400, enSuelo: false };
       const contacto = mover(c, ctx.tiles, dt);
@@ -95,6 +125,7 @@ export class Proyectil implements Rect {
     this.muerto = true;
     const cx = this.x + this.w / 2;
     const cy = this.y + this.h / 2;
+    this.op.alMorir?.(ctx, cx, cy);
     const r = this.op.explota ?? 0;
     ctx.fx.chispas(cx, cy, this.op.color, r > 0 ? 26 : 6, { velocidad: r > 0 ? 140 : 60, vida: 0.4, brillo: true });
     if (r > 0) {
@@ -133,6 +164,77 @@ export class Proyectil implements Rect {
         g.fillRect(cx - 3, Math.round(this.y + this.h - alto), 6, alto);
         g.globalAlpha = 0.5;
         g.fillRect(cx - 6, Math.round(this.y + this.h - alto * 0.6), 12, alto * 0.6);
+        break;
+      }
+      case "flecha": {
+        const ang = Math.atan2(this.vy, this.vx);
+        g.globalCompositeOperation = "source-over";
+        g.translate(cx, cy);
+        g.rotate(ang);
+        g.fillStyle = "#8a6a3a";
+        g.fillRect(-6, 0, 10, 1);
+        g.fillStyle = c;
+        g.fillRect(4, -1, 3, 3);
+        g.fillStyle = "#e8e8f0";
+        g.fillRect(-7, -1, 2, 1);
+        g.fillRect(-7, 1, 2, 1);
+        break;
+      }
+      case "hoja": {
+        g.translate(cx, cy);
+        g.rotate(this.t * 20);
+        g.fillStyle = c;
+        g.fillRect(-4, -1, 8, 2);
+        g.fillRect(-1, -3, 2, 6);
+        g.fillStyle = "#ffffff";
+        g.fillRect(-1, -1, 2, 2);
+        break;
+      }
+      case "daga": {
+        const d = Math.sign(this.vx) || 1;
+        g.globalCompositeOperation = "source-over";
+        g.fillStyle = c;
+        g.fillRect(cx - 5, cy, 10, 1);
+        g.fillStyle = "#ffffff";
+        g.fillRect(cx + (d > 0 ? 3 : -5), cy - 1, 2, 3);
+        g.fillStyle = "#8a6a3a";
+        g.fillRect(cx + (d > 0 ? -6 : 4), cy - 1, 2, 3);
+        break;
+      }
+      case "hacha":
+      case "cruz": {
+        g.globalCompositeOperation = "source-over";
+        g.translate(cx, cy);
+        g.rotate(this.t * (this.op.tipo === "hacha" ? 14 : 18) * (Math.sign(this.vx) || 1));
+        g.fillStyle = c;
+        if (this.op.tipo === "hacha") {
+          g.fillStyle = "#8a6a3a";
+          g.fillRect(-1, -6, 2, 12);
+          g.fillStyle = c;
+          g.fillRect(-5, -6, 4, 5);
+          g.fillRect(1, -6, 4, 5);
+        } else {
+          g.fillRect(-1, -6, 3, 12);
+          g.fillRect(-5, -2, 11, 3);
+          g.fillStyle = "#ffffff";
+          g.fillRect(0, -1, 1, 1);
+        }
+        break;
+      }
+      case "agua":
+        g.globalCompositeOperation = "source-over";
+        g.fillStyle = "#e8e8f0";
+        g.fillRect(cx - 1, cy - 4, 2, 2);
+        g.fillStyle = c;
+        g.fillRect(cx - 2, cy - 2, 4, 5);
+        break;
+      case "llama": {
+        const alto = 8 + Math.sin(this.t * 25 + this.x) * 3;
+        g.fillStyle = c;
+        g.globalAlpha = 0.8;
+        g.fillRect(cx - 3, Math.round(this.y + this.h - alto), 6, alto);
+        g.fillStyle = "#ffffff";
+        g.fillRect(cx - 1, Math.round(this.y + this.h - alto * 0.6), 2, alto * 0.6);
         break;
       }
       case "hueso":

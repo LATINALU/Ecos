@@ -9,10 +9,12 @@ import { solapan } from "../../motor/fisica.ts";
 import type { Contexto } from "../contexto.ts";
 import { Criatura, GRAVEDAD } from "./criatura.ts";
 import { Enemigo } from "./enemigo.ts";
+import { dibujarPortador, type Pose } from "../render-portador.ts";
 import { Proyectil } from "./proyectil.ts";
 
 const SUELO = 14 * TILE;
-const TECNICAS: readonly Tecnica[] = ["orbe", "lanza", "terremoto", "tajo", "zarpazo"];
+const TECNICAS: readonly Tecnica[] = ["orbe", "lanza", "terremoto", "tajo", "zarpazo", "rayo", "remolino"];
+export const TECNICAS_ENEMIGAS = TECNICAS;
 
 abstract class Jefe extends Criatura {
   protected estado = "intro";
@@ -253,7 +255,7 @@ export class MadreMicelio extends Jefe {
       this.raices(ctx, j.cx);
       this.estado = "pausa";
       this.tiempo = 1.6;
-    } else if (r < 0.75 && ctx.criaturas.filter((c) => !c.esJefe && !c.muerto).length < 4) {
+    } else if (r < 0.75 && ctx.criaturas.filter((c) => !c.esJefe && !c.muerto && !("esObjeto" in c)).length < 4) {
       this.invocar(ctx);
       this.estado = "pausa";
       this.tiempo = 1.4;
@@ -351,7 +353,7 @@ export class MadreMicelio extends Jefe {
 // ======================================================================================
 // Técnicas en manos enemigas (las usan El Que Recuerda y los Ecos).
 // ======================================================================================
-function tecnicaEnemiga(t: Tecnica, quien: Criatura, ctx: Contexto, potencia: number, color: string): void {
+export function tecnicaEnemiga(t: Tecnica, quien: Criatura, ctx: Contexto, potencia: number, color: string): void {
   const j = ctx.jugador;
   const dir = j.cx < quien.cx ? -1 : 1;
   ctx.audio.reproducir("tecnica");
@@ -382,6 +384,21 @@ function tecnicaEnemiga(t: Tecnica, quien: Criatura, ctx: Contexto, potencia: nu
     case "tajo":
       ctx.agregarPeligro({ x: 0, y: j.y + j.h / 2 - 6, w: ANCHO_SALA, h: 12, aviso: 0.7, activo: 0.2, danio: potencia * 1.3, color, golpeo: false });
       break;
+    case "rayo":
+      // Columna anunciada sobre el jugador.
+      ctx.agregarPeligro({ x: j.cx - 9, y: 0, w: 18, h: j.y + j.h, aviso: 0.75, activo: 0.18, danio: potencia * 1.4, color: "#9fe8ff", golpeo: false });
+      break;
+    case "remolino": {
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        ctx.agregarProyectil(new Proyectil({
+          tipo: "hoja", x: quien.cx, y: quien.cy, vx: Math.cos(a) * 90, vy: Math.sin(a) * 90, w: 8, h: 8, vida: 2.5,
+          atraviesaParedes: true, color, ataqueEnemigo: potencia * 0.7,
+        }));
+      }
+      break;
+    }
     case "zarpazo":
       for (let i = 0; i < 3; i++) {
         ctx.agregarPeligro({ x: j.cx - 18 + (i - 1) * 14, y: j.y - 6, w: 22, h: j.h + 12, aviso: 0.55 + i * 0.12, activo: 0.12, danio: potencia * 0.7, color: "#ffe08a", golpeo: false });
@@ -605,7 +622,8 @@ export class EcoRival extends Criatura {
   dibujar(g: CanvasRenderingContext2D): void {
     g.save();
     g.globalAlpha = 0.8 + Math.sin(this.t * 8) * 0.15;
-    dibujarFigura(g, this.x, this.y, this.dir, this.color(this.colores[0]), this.colores[1], this.t, this.estado === "golpe", Math.abs(this.vx) > 10);
+    dibujarFigura(g, this.x, this.y, this.dir, this.color(this.colores[0]), this.colores[1], this.t, this.estado === "golpe", Math.abs(this.vx) > 10,
+      this.eco.forma !== null ? alma(this.eco.forma.personaje).tipo : 1);
     g.globalCompositeOperation = "lighter";
     g.globalAlpha = 0.25;
     g.fillStyle = this.colores[1];
@@ -618,38 +636,14 @@ export class EcoRival extends Criatura {
   }
 }
 
-/** Figura humanoide del Portador (la usan el jugador y los Ecos). */
+/** Figura humanoide del Portador para los Ecos (mismo dibujo que el jugador). */
 export function dibujarFigura(
   g: CanvasRenderingContext2D, px: number, py: number, dir: number, cuerpo: string, acento: string,
-  t: number, atacando: boolean, corriendo: boolean,
+  t: number, atacando: boolean, corriendo: boolean, variante = 1,
 ): void {
-  const x = Math.round(px);
-  const y = Math.round(py);
-  const paso = corriendo ? Math.floor(t * 12) % 2 : 0;
-  // piernas
-  g.fillStyle = "#1a1622";
-  g.fillRect(x + 2 + paso, y + 17, 3, 5);
-  g.fillRect(x + 7 - paso, y + 17, 3, 5);
-  // cuerpo
-  g.fillStyle = cuerpo;
-  g.fillRect(x + 1, y + 7, 10, 11);
-  // cabeza (capucha)
-  g.fillRect(x + 2, y, 8, 8);
-  g.fillStyle = "#0d0b12";
-  g.fillRect(dir > 0 ? x + 5 : x + 2, y + 3, 5, 3);
-  g.fillStyle = acento;
-  g.fillRect(dir > 0 ? x + 8 : x + 3, y + 4, 1, 1);
-  // bufanda
-  g.fillStyle = acento;
-  g.fillRect(x + 1, y + 7, 10, 2);
-  // brazo / arma
-  if (atacando) {
-    g.fillStyle = "#e8e8f0";
-    g.fillRect(dir > 0 ? x + 11 : x - 9, y + 9, 10, 2);
-  } else {
-    g.fillStyle = cuerpo;
-    g.fillRect(dir > 0 ? x + 9 : x, y + 10, 3, 6);
-  }
+  const pose: Pose = atacando ? "golpe" : corriendo ? "correr" : "quieto";
+  const mano = dibujarPortador(g, px + 6, py + 22, dir, pose, { cuerpo, acento }, t, { variante, progreso: 0.8 });
+  g.fillStyle = "#e8e8f0";
+  if (atacando) g.fillRect(dir > 0 ? mano.manoX + 1 : mano.manoX - 11, mano.manoY - 1, 10, 1);
+  else g.fillRect(mano.manoX, mano.manoY + 1, 1, 7);
 }
-
-

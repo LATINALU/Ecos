@@ -6,7 +6,7 @@
 //   5. VALIDA con un punto fijo: desde el inicio, con las reliquias que el jugador tiene, junta las que encuentra
 //      y vuelve a explorar hasta que no cambie nada. Si el jefe o el altar no quedan alcanzables, se reintenta.
 //
-// Reglas de paso: lateral = libre (salvo barrera); bajar = siempre (caída); subir = requiere Doble Salto.
+// Reglas de paso: lateral = libre (salvo barrera); vertical = libre en ambos sentidos (cadena para trepar).
 
 import { elegirPorPeso, elegirUno, entero, type Azar } from "minialu";
 import { DELTA, OPUESTA, RELIQUIA_DE_BARRERA, type Barrera, type Dir, type Reliquia } from "../tipos.ts";
@@ -54,11 +54,9 @@ export interface OpcionesGenerador {
 
 const PESO_DIR: ReadonlyArray<readonly [Dir, number]> = [["aba", 1.1], ["izq", 1.3], ["der", 1.3], ["arr", 0.35]];
 
-export function puedeCruzar(c: Conexion, desde: number, reliquias: ReadonlySet<Reliquia>): boolean {
-  const dir = desde === c.a ? c.dir : OPUESTA[c.dir];
-  if (c.barrera !== undefined && !reliquias.has(RELIQUIA_DE_BARRERA[c.barrera])) return false;
-  if (dir === "arr" && !reliquias.has("dobleSalto")) return false;
-  return true;
+/** Toda conexión se cruza en ambos sentidos (las verticales tienen cadena); solo las barreras piden reliquia. */
+export function puedeCruzar(c: Conexion, _desde: number, reliquias: ReadonlySet<Reliquia>): boolean {
+  return c.barrera === undefined || reliquias.has(RELIQUIA_DE_BARRERA[c.barrera]);
 }
 
 export function vecinos(mapa: MapaPiso, sala: number): { sala: number; dir: Dir; conexion: Conexion }[] {

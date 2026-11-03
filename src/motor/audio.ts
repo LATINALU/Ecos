@@ -97,7 +97,7 @@ export class Audio {
   ambientar(bioma: number): void {
     if (this.ctx === null || this.maestro === null) return;
     this.silenciarAmbiente();
-    const bases = [55, 49, 41.2];
+    const bases = [55, 49, 41.2, 61.7, 46.2, 51.9, 43.6, 38.9, 58.3, 36.7];
     const base = bases[Math.max(0, Math.min(bioma, bases.length - 1))];
     const gain = this.ctx.createGain();
     gain.gain.value = 0.035;

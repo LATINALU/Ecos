@@ -45,17 +45,23 @@ export const ESTILOS: Readonly<Record<EstiloArma, DefEstilo>> = {
     mults: [0.62, 0.62, 0.7, 1.15], empujes: [25, 25, 30, 190], eter: 3, tecnica: 1, costoTecnica: 1, regenEter: 1, aturde: 0.2,
   },
   pesada: {
-    id: "pesada", nombre: "Martillo", armaInicial: 104, color: "#b8a98a",
-    descripcion: "Lento y brutal. Combo de 2 golpes de gran alcance; el segundo aturde.",
+    id: "pesada", nombre: "Mazo", armaInicial: 104, color: "#b8a98a",
+    descripcion: "Lento y brutal. Golpe por encima de la cabeza de gran alcance; el segundo aturde y hace temblar el suelo.",
     duracion: 0.36, activoDesde: 0.13, activoHasta: 0.25, alcance: 30, alto: 22,
     mults: [1.75, 2.5], empujes: [170, 330], eter: 5, tecnica: 0.9, costoTecnica: 1, regenEter: 1, aturde: 0.6,
   },
   baston: {
-    id: "baston", nombre: "Bastón", armaInicial: 102, color: "#7fe3ff",
+    id: "baston", nombre: "Báculo", armaInicial: 102, color: "#7fe3ff",
     descripcion: "Golpes flojos, pero tus técnicas pegan +25 %, cuestan −20 % y el éter se regenera más rápido.",
     duracion: 0.28, activoDesde: 0.06, activoHasta: 0.17, alcance: 26, alto: 14,
     mults: [0.75, 0.8, 1], empujes: [70, 70, 160], eter: 6, tecnica: 1.25, costoTecnica: 0.8, regenEter: 2.5, aturde: 0,
   },
+  arco: {
+    id: "arco", nombre: "Arco", armaInicial: 105, color: "#d9b38a",
+    descripcion: "A distancia. Cada golpe dispara una flecha; el tercero suelta tres en abanico. Débil cuerpo a cuerpo.",
+    duracion: 0.3, activoDesde: 0.12, activoHasta: 0.13, alcance: 230, alto: 4,
+    mults: [0.8, 0.8, 0.65], empujes: [50, 50, 80], eter: 2, tecnica: 1, costoTecnica: 1, regenEter: 1, aturde: 0,
+  },
 };
 
-export const ORDEN_ESTILOS: readonly EstiloArma[] = ["espada", "punos", "pesada", "baston"];
+export const ORDEN_ESTILOS: readonly EstiloArma[] = ["espada", "punos", "pesada", "baston", "arco"];

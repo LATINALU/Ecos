@@ -8,10 +8,6 @@ import type { Contexto } from "../contexto.ts";
 import { Criatura, GRAVEDAD } from "./criatura.ts";
 import { Proyectil } from "./proyectil.ts";
 
-/** Personaje de microFantasy que representa cada conducta (los voladores siguen siendo procedurales). */
-const SPRITE_DE: Readonly<Partial<Record<ConductaEnemigo, string>>> = {
-  caminante: "lizard", saltador: "rhino", escudero: "troll", torreta: "wizard",
-};
 
 function cuadroEn(anim: readonly CuadroSprite[], ms: number): CuadroSprite {
   const total = anim.reduce((s, c) => s + c[4], 0);
@@ -52,11 +48,15 @@ export class Enemigo extends Criatura {
     this.velocidad = def.velocidad * (elite ? 1.15 : 1);
     this.colores = bioma.colores[conducta];
     this.tinte = bioma.tinte;
+    this.sprite = bioma.sprites[conducta];
   }
+
+  /** Personaje de microFantasy de esta zona para la conducta (los voladores siguen siendo procedurales). */
+  private readonly sprite: string | undefined;
 
   /** Animación según lo que está haciendo. */
   private animacion(): string | null {
-    const base = SPRITE_DE[this.conducta];
+    const base = this.sprite;
     if (base === undefined) return null;
     if (this.conducta === "torreta") return this.espera < 0.45 ? `${base}_attack` : `${base}_idle`;
     if (this.conducta === "saltador") return this.enSuelo ? `${base}_idle` : `${base}_run`;

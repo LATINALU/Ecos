@@ -1,17 +1,18 @@
-// Árbol de talentos: 3 sendas × 3 niveles. Cada nivel de la partida da 1 punto de talento.
+// Árbol de talentos: 4 sendas × 4 grados. Cada nivel de la partida da 1 punto de talento.
 // Para aprender un talento de nivel N hace falta el de nivel N−1 de la misma senda.
 
 export type IdTalento =
-  | "remate" | "cuartoCorte" | "sedSangre"
-  | "saltoPared" | "ligereza" | "embestidaDoble"
-  | "ecoTecnica" | "resonanciaProfunda" | "golpeEter";
+  | "remate" | "cuartoCorte" | "sedSangre" | "ejecutor"
+  | "saltoPared" | "ligereza" | "embestidaDoble" | "pasoFantasma"
+  | "ecoTecnica" | "resonanciaProfunda" | "golpeEter" | "ecoResonante"
+  | "carcaj" | "corazonValiente" | "armasGemelas" | "lluviaAcero";
 
-export type Senda = "filo" | "vendaval" | "eco";
+export type Senda = "filo" | "vendaval" | "eco" | "arsenal";
 
 export interface DefTalento {
   readonly id: IdTalento;
   readonly senda: Senda;
-  readonly grado: 1 | 2 | 3;
+  readonly grado: 1 | 2 | 3 | 4;
   readonly nombre: string;
   readonly descripcion: string;
 }
@@ -20,6 +21,7 @@ export const SENDAS: Readonly<Record<Senda, { nombre: string; color: string; lem
   filo: { nombre: "Senda del Filo", color: "#ff6a6a", lema: "Golpear más, golpear mejor." },
   vendaval: { nombre: "Senda del Vendaval", color: "#7fe3ff", lema: "Nadie atrapa al viento." },
   eco: { nombre: "Senda del Eco", color: "#c9a7ff", lema: "Las almas responden a quien las escucha." },
+  arsenal: { nombre: "Senda del Arsenal", color: "#ffd27a", lema: "Todo lo que cae al Pozo puede lanzarse." },
 };
 
 export const TALENTOS: readonly DefTalento[] = [
@@ -32,6 +34,13 @@ export const TALENTOS: readonly DefTalento[] = [
   { id: "ecoTecnica", senda: "eco", grado: 1, nombre: "Eco de Técnica", descripcion: "Tus técnicas cuestan un 25 % menos de éter." },
   { id: "resonanciaProfunda", senda: "eco", grado: 2, nombre: "Resonancia Profunda", descripcion: "Las Resonancias aportan +15 % más de sus stats." },
   { id: "golpeEter", senda: "eco", grado: 3, nombre: "Golpe de Éter", descripcion: "El último golpe del combo lanza una onda de éter que atraviesa enemigos." },
+  { id: "ejecutor", senda: "filo", grado: 4, nombre: "Ejecutor", descripcion: "+35 % de daño a enemigos con menos del 30 % de vida." },
+  { id: "pasoFantasma", senda: "vendaval", grado: 4, nombre: "Paso Fantasma", descripcion: "El paso atrás es invulnerable de punta a punta y se recarga el doble de rápido." },
+  { id: "ecoResonante", senda: "eco", grado: 4, nombre: "Eco Resonante", descripcion: "20 % de probabilidad de que una técnica no gaste éter." },
+  { id: "carcaj", senda: "arsenal", grado: 1, nombre: "Carcaj Lleno", descripcion: "El arco dispara una flecha extra en cada tiro." },
+  { id: "corazonValiente", senda: "arsenal", grado: 2, nombre: "Corazón Valiente", descripcion: "Las subarmas cuestan 1 ♥ menos (mínimo 1)." },
+  { id: "armasGemelas", senda: "arsenal", grado: 3, nombre: "Armas Gemelas", descripcion: "Cada subarma se lanza dos veces." },
+  { id: "lluviaAcero", senda: "arsenal", grado: 4, nombre: "Lluvia de Acero", descripcion: "Cada crítico lanza una daga gratis hacia el enemigo." },
 ];
 
 export function talento(id: IdTalento): DefTalento {

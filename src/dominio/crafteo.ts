@@ -2,15 +2,15 @@
 // (Inventario.clonar): se quitan los ingredientes y se prueba que el resultado entre. Solo si todo sale bien
 // se aplica de verdad y se cobran las esquirlas.
 
-import { exito, fallo, type Resultado } from "minialu";
+import { exito, fallo, tirar, type Resultado } from "minialu";
 import { MAT_FRAGMENTO, OBJ_CARTA, apilable } from "../contenido/objetos.ts";
-import { REFINADO_MAX, costoRefinado, type Receta } from "../contenido/recetas.ts";
+import { EXITO_REFINADO, REFINADO_MAX, costoRefinado, type Receta } from "../contenido/recetas.ts";
 import { RAREZA_CARTA_JEFE, cartaAleatoria, nombreCarta } from "./cartas.ts";
 import { generarEquipo, refinar, type ObjetoEquipo } from "./equipo.ts";
 import type { Partida } from "./partida.ts";
 import type { Ranura } from "./tipos.ts";
 
-export type ErrorCrafteo = "faltan-materiales" | "sin-fondos" | "sin-espacio" | "nada-que-refinar" | "al-maximo";
+export type ErrorCrafteo = "faltan-materiales" | "sin-fondos" | "sin-espacio" | "nada-que-refinar" | "al-maximo" | "fallo-refinado";
 
 export function faltantes(p: Partida, receta: Receta): { objeto: number; nombre: string; faltan: number }[] {
   return receta.ingredientes
@@ -74,6 +74,8 @@ export function refinarEquipado(p: Partida, ranura: Ranura): Resultado<ObjetoEqu
   if (p.esquirlas < costo.esquirlas) return fallo("sin-fondos");
   p.mochila.quitar(MAT_FRAGMENTO, costo.fragmentos);
   p.billetera.debitar("esquirlas", costo.esquirlas);
+  // Del +6 en adelante puede fallar: se pierden los materiales, nunca la pieza.
+  if (!tirar(p.azar, EXITO_REFINADO[nivel] ?? 0)) return fallo("fallo-refinado");
   const nuevo = refinar(o);
   p.equipo[ranura] = nuevo;
   return exito(nuevo);
