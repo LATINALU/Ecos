@@ -34,6 +34,10 @@ export interface ObjetoEquipo {
   readonly efecto?: EfectoUnico;
   /** Veces que se refinó en el Yunque (0~5). */
   readonly refinado?: number;
+  /** Pieza ESPECTRAL (arma de otro Portador vengado): solo dura el descenso en curso. */
+  readonly espectral?: boolean;
+  /** Pactos del Templado Abisal (bono salvaje + maldición), ver dominio/templado.ts. */
+  readonly pactos?: readonly string[];
   /** Calidad de la forja (0,75~1,3): multiplica los stats. */
   readonly calidad?: number;
   /** Rasgos al azar (alcance, velocidad de ataque, daño crítico...). */

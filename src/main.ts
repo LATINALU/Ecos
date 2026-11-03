@@ -3,6 +3,13 @@
 // El personaje (Partida) es persistente por ranura: baja con todo, vuelve con todo; al caer pierde un 25 %
 // de las esquirlas que lleva. El banco y la Meta (reliquias, esencia, ecos) también son de la ranura.
 
+// Fuentes de píxel (OFL, empaquetadas: funcionan sin conexión) y la capa de estética pixel art de la interfaz.
+import "@fontsource/pixelify-sans/400.css";
+import "@fontsource/pixelify-sans/600.css";
+import "@fontsource/jacquard-12/400.css";
+import "./ui/pixel.css";
+import { instalarMarcos } from "./ui/marcos.ts";
+import { crearServicioEcos } from "./infra/ecos-compartidos.ts";
 import { MAT_FRAGMENTO, OBJ_CAJA_ALMAS, OBJ_POCION, OBJ_RELICARIO } from "./contenido/objetos.ts";
 import { generarEquipo } from "./dominio/equipo.ts";
 import { crearCarta } from "./dominio/cartas.ts";
@@ -15,14 +22,20 @@ import { Partida } from "./dominio/partida.ts";
 import {
   cargarRanura, guardarRanura, metaDesde, migrarGuardadoViejo, resumenRanuras,
 } from "./infra/repositorio.ts";
-import { Juego, type DatosDescenso, type EventosJuego, type InicioJuego } from "./juego/juego.ts";
-import { Pueblo, type EventosPueblo } from "./juego/pueblo.ts";
+import { Juego, configEcos, type DatosDescenso, type EventosJuego, type InicioJuego } from "./juego/juego.ts";
+import { NPCS, Pueblo, type EventosPueblo } from "./juego/pueblo.ts";
 import { dibujarPortador, type Pose } from "./juego/render-portador.ts";
 import { Audio } from "./motor/audio.ts";
 import { Entrada } from "./motor/entrada.ts";
 import { sprites } from "./motor/sprites.ts";
 import { dibujarHud, dibujarHudPueblo } from "./ui/hud.ts";
+/** Solo desarrollo: &sinhud oculta el HUD (capturas). */
+const sinHud = new URLSearchParams(location.search).has("sinhud");
 import { Interfaz } from "./ui/interfaz.ts";
+
+instalarMarcos();
+const servicioEcos = crearServicioEcos();
+void servicioEcos.precargar();
 import { PISOS_TOTALES } from "./contenido/biomas.ts";
 
 const ANCHO = 480;
@@ -154,6 +167,21 @@ function entrarPueblo(desde: "inicio" | "pozo"): void {
   stock = generarStockArmero(new AzarSistema(), Math.max(partida.pisoDesbloqueado, meta.registro.mejorPiso));
   pueblo = new Pueblo(partida, meta, audio, entrada, eventosPueblo, desde);
   guardarTodo(null);
+  recibirVenganzas();
+}
+
+/** Ecos asíncronos: si otro Portador vengó una de tus caídas, te llega a la Taberna (y las esquirlas). */
+function recibirVenganzas(): void {
+  const autor = `ranura-${ranura ?? 0}`;
+  void servicioEcos.venganzas(autor).then((lista) => {
+    if (lista.length === 0 || partida === null) return;
+    for (const v of lista) {
+      partida.billetera.acreditar("esquirlas", v.recompensa);
+      meta.venganzas = [v, ...meta.venganzas].slice(0, 8);
+      ui.toast(`⚔ ${v.vengador} vengó tu caída en el piso ${v.piso} — Recibes ${v.recompensa} esquirlas`, "#7dffb0");
+    }
+    guardarTodo(null);
+  });
 }
 
 function descender(piso: number, abismo = false): void {
@@ -167,6 +195,10 @@ function descender(piso: number, abismo = false): void {
 }
 
 function iniciarJuego(inicio: InicioJuego): void {
+  // Quién juega y dónde viven los Ecos compartidos (otras ranuras de esta PC, o un servidor si VITE_ECOS_URL).
+  configEcos.servicio = servicioEcos;
+  configEcos.nombre = nombreRanura !== "" ? nombreRanura : "un Portador";
+  configEcos.autor = `ranura-${ranura ?? 0}`;
   juego = new Juego(meta, audio, entrada, eventos, inicio);
   partida = juego.partida;
 }
@@ -186,6 +218,10 @@ const eventosPueblo: EventosPueblo = {
       case "pozo": ui.abrirPozo(pueblo); break;
     }
   },
+  hablar: (s) => {
+    if (pueblo === null) return;
+    ui.abrirHistoria(pueblo, s, NPCS.find((n) => n.servicio === s)?.nombre ?? "");
+  },
 };
 
 const eventos: EventosJuego = {
@@ -193,6 +229,7 @@ const eventos: EventosJuego = {
   abrirAltar: () => { if (juego !== null) ui.abrirAltar(juego); },
   abrirMercader: () => { if (juego !== null) ui.abrirMercader(juego, juego.errante()); },
   abrirCampana: (op) => ui.abrirCampana(op),
+  decidirEco: (op) => ui.decidirEco(op),
   abrirYunque: () => { if (juego !== null) ui.abrirYunque(juego); },
   abrirFaro: (op) => ui.abrirFaro(op),
   abrirPortal: (op) => ui.abrirPortal(op),
@@ -336,7 +373,7 @@ function cuadro(ahora: number): void {
     dibujarGaleria(g, reloj);
   } else if (juego !== null) {
     juego.dibujar(g);
-    if (!juego.terminado) dibujarHud(g, juego);
+    if (!juego.terminado && !(import.meta.env.DEV && sinHud)) dibujarHud(g, juego);
   } else if (pueblo !== null) {
     pueblo.dibujar(g);
     dibujarHudPueblo(g, pueblo, meta, nombreRanura);
@@ -368,7 +405,7 @@ void sprites.cargar().then(() => {
   meta = Meta.nueva();
   ui.usarMeta(meta);
   banco = new Banco();
-  partida = new Partida(meta, (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, { estilo });
+  partida = new Partida(meta, q.has("semilla") ? Number(q.get("semilla")) : (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, { estilo });
   partida.pisoDesbloqueado = PISOS_TOTALES;
   partida.abismoDesbloqueado = 999;
   partida.revisarPiedraJuicio();
@@ -390,8 +427,11 @@ void sprites.cargar().then(() => {
   }
   if (q.has("forma")) partida.forma = crearCarta(partida.azar, partida.forma?.personaje ?? 0, Math.max(0, Math.min(11, Number(q.get("forma")) - 1)));
   if (q.has("cartas")) for (let n = 4; n <= 11; n++) partida.recoger({ tipo: "carta", carta: crearCarta(partida.azar, n % 12, n) });
+  // &desbloqueado=N → pisos superados (cambia cómo se ve el pueblo); &hablar=herrero → historia de ese habitante.
+  if (q.has("desbloqueado")) partida.pisoDesbloqueado = Number(q.get("desbloqueado"));
   if (q.has("pueblo")) {
     entrarPueblo("inicio");
+    if (q.has("hablar") && pueblo !== null) eventosPueblo.hablar(q.get("hablar") as "herrero");
     if (q.has("animar")) ui.animarRelicario(crearCarta(partida.azar, Math.floor(Math.random() * 12), Math.max(4, Math.min(11, Number(q.get("animar")) - 1))), false, () => undefined);
     // &x=N → parar al Portador en esa x de la calle (capturas del pueblo).
     if (q.has("x") && pueblo !== null) pueblo.jugador.colocar(Number(q.get("x")), 14 * 16 - pueblo.jugador.h);
@@ -404,12 +444,24 @@ void sprites.cargar().then(() => {
     if (q.has("inventario") && pueblo !== null) {
       const tab = (q.get("tab") ?? "equipo") as "equipo" | "cartas" | "habilidades" | "stats";
       const relic = [...partida.mochila.posiciones()].find((x) => partida?.mochila.en(x)?.objeto === OBJ_RELICARIO);
-      ui.abrirInventario(pueblo, tab, tab === "cartas" ? 1 : q.has("relicarios") ? relic : undefined);
+      ui.abrirInventario(pueblo, tab, tab === "cartas" ? (Number(q.get("sel") ?? 1) as 1) : q.has("relicarios") ? relic : undefined);
     }
     return;
   }
 
+  // &cicatriz → el piso tiene la cicatriz de una caída (y vas directo a esa sala). &decision → diálogo del Eco vencido.
+  if (q.has("cicatriz")) {
+    meta.marcarCicatriz({
+      piso: Number(q.get("piso") ?? 1), portador: "Lucía", asesino: { nombre: "Cráneo Saltarín", conducta: "caminante", elite: true, afijos: ["explosivo", "veloz"] },
+      arma: "espada", colorArma: "#c8d0e0", almaTecnica: 3, fecha: Date.now(),
+    });
+  }
   descender(Number(q.get("piso") ?? 1), q.has("abismo"));
+  if (q.has("cicatriz") && juego !== null) juego.depurarCicatriz();
+  // &peso=N → Peso del Eco; &cazador → el Cazador de Portadores llega ya.
+  if (q.has("peso") && partida !== null) partida.pesoEco = Number(q.get("peso"));
+  if (q.has("cazador") && juego !== null) juego.depurarCazador();
+  if (q.has("decision") && juego !== null) juego.depurarDecisionEco();
   if (q.has("cargada") && partida !== null) partida.cargaDefinitiva = 100;
   if (q.has("botin") && juego !== null) juego.depurarBotin();
   // &tiposala=arena|boveda|tesoro → primera sala de ese tipo del piso.
@@ -424,6 +476,7 @@ void sprites.cargar().then(() => {
     const modo = q.get("campana");
     juego.depurarCampana(modo === "normal" || modo === "juicio" ? modo : undefined);
   }
+  if (q.has("patada") && juego !== null) juego.depurarPatada();
   if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
   if (q.has("extraccion") && juego !== null) {
     juego.depurarIr(Number(q.get("piso") ?? 1), 0);

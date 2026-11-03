@@ -35,6 +35,8 @@ export abstract class Criatura implements Cuerpo {
   readonly categoria: Categoria;
   flash = 0;
   aturdido = 0;
+  /** Hitstop: segundos que el sprite tiembla en el sitio antes de salir despedido. */
+  vibrar = 0;
   lento = 0;
   quemadura = 0;
   private danioQuemadura = 0;

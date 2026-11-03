@@ -1,6 +1,8 @@
 // Escena de juego: une el dominio (Partida, MapaPiso, Meta) con las entidades, la física y el render.
 // Implementa el Contexto que usan las entidades para interactuar con el mundo.
 
+import { OBJ_RELICARIO } from "../contenido/objetos.ts";
+import type { HabilidadEquipada } from "../dominio/partida.ts";
 import { hd } from "../motor/texto-hd.ts";
 import { AzarSistema, elegirUno, entero, type Azar } from "minialu";
 import {
@@ -8,11 +10,21 @@ import {
   type AfijoElite, type Bioma, type ConductaBase, type ConductaEnemigo, type ConductaNueva,
 } from "../contenido/biomas.ts";
 import { botinCofre, botinEnemigo, botinVela, type Premio } from "../dominio/botin.ts";
-import { crearEco, premiosEco, type Eco } from "../dominio/eco.ts";
+import { crearEco, legadoDelPacto, premiosEco, type Eco } from "../dominio/eco.ts";
+import { RegistroHabitos } from "../dominio/habitos.ts";
+import { tituloDevorador, type Asesino, type Cicatriz } from "../dominio/cicatrices.ts";
+import { PROB_ECO_AJENO, recompensaVenganza, type EcoCompartido, type ServicioEcos } from "../infra/ecos-compartidos.ts";
+import { EspectroAliado } from "./entidades/aliado.ts";
+import { HISTORIAS, type DefHistoria } from "../contenido/historias.ts";
+import { crearCarta } from "../dominio/cartas.ts";
+import { Cazador } from "./entidades/cazador.ts";
+import { PESO_CAZADOR, bonoPeso, nivelEmboscada, planEmboscada, retrasoCazador, statsCazador, type PlanEmboscada } from "../dominio/codicia.ts";
+import { tecnicaEnemiga } from "./entidades/jefes.ts";
+import { alma } from "../contenido/almas.ts";
 import type { Meta } from "../dominio/meta.ts";
 import { aperturas, generarPiso, podarBarreras, type MapaPiso, type SalaMapa } from "../dominio/mundo/generador.ts";
 import {
-  ALTO_SALA, ANCHO_SALA, COLS, ENEMIGOS_SPAWN, FILAS, FILAS_PUERTA, T_CRISTAL, T_PINCHOS, T_RAICES, T_ROCA, T_VACIO, TILE,
+  ALTO_SALA, ANCHO_SALA, COLS, ENEMIGOS_SPAWN, FILAS, FILAS_PUERTA, T_CRISTAL, T_PINCHOS, T_PLATAFORMA, T_RAICES, T_ROCA, T_VACIO, TILE,
   construirSala, esSolido, indice,
 } from "../dominio/mundo/sala.ts";
 import { Partida, type DatosPartida, type ResumenPartida } from "../dominio/partida.ts";
@@ -27,6 +39,9 @@ import { DECORADO } from "../contenido/atlas.ts";
 import { dibujarRecorte, sprites } from "../motor/sprites.ts";
 import { GRACIA_ENTRADA, entradaPor, salidaDe } from "./transiciones.ts";
 import { Efectos } from "./efectos.ts";
+import { Colgante } from "./procedural.ts";
+import { EfectosVivos, ejecutarResonancia } from "./efectos-vivos.ts";
+import type { DefResonancia } from "../contenido/resonancias.ts";
 import type { Criatura } from "./entidades/criatura.ts";
 import { Enemigo } from "./entidades/enemigo.ts";
 import { EcoRival, ElQueRecuerda, Guardian, MadreMicelio } from "./entidades/jefes.ts";
@@ -35,11 +50,12 @@ import { CARGA_COMPLETA, Jugador } from "./entidades/jugador.ts";
 import { BotinSuelo, COLOR_COFRE, Interactuable, NOMBRE_COFRE, colorPremio, premioDestacado } from "./entidades/objetos.ts";
 import { Proyectil } from "./entidades/proyectil.ts";
 import { MedidorCombo, type AccionEstilo } from "./medidor-combo.ts";
-import { Iluminacion, dibujarBarreras, dibujarVineta, fondoBioma, prerenderSala, primerPlano, type Luz } from "./render.ts";
+import {
+  Iluminacion, bordesDeSala, dibujarBarreras, dibujarRelieve, dibujarVineta, fondoBioma, prerenderSala, primerPlano, type Borde, type Luz,
+} from "./render.ts";
 import { Vela } from "./entidades/vela.ts";
 import { AzarSemilla } from "minialu";
 import { generarEquipo } from "../dominio/equipo.ts";
-import { crearCarta } from "../dominio/cartas.ts";
 import { ESTILOS } from "../contenido/armas.ts";
 import { biomaAbismo, cicloAbismo, hayGuardianAbismo, salasAbismo, tirarSalida, ZONAS_ABISMO } from "../dominio/abismo.ts";
 import { arenaPara, arenasDelPiso, premioArena, type DefArena, type Sello } from "../dominio/desafios.ts";
@@ -55,6 +71,18 @@ export interface AvisoAbismo {
   readonly salida: boolean;
   readonly guardian: boolean;
   readonly ciclo: number;
+}
+
+/** Quién juega y dónde se comparten los Ecos (lo configura main antes de crear el Juego). */
+export const configEcos: { servicio: ServicioEcos | null; nombre: string; autor: string } = { servicio: null, nombre: "el Portador", autor: "local" };
+
+/** Al vencer a tu propio Eco: absorberlo o pactar con él (Espectro Temporal). */
+export interface DecisionEco {
+  readonly eco: Eco;
+  readonly perfil: string;
+  readonly legado: string | null;
+  absorber(): void;
+  pactar(): void;
 }
 
 export interface OpcionesCampana {
@@ -87,6 +115,8 @@ export interface EventosJuego {
   abrirMercader(): void;
   /** Campana del desafío: muestra la arena (y el Juicio si ya se tiene la piedra) y deja elegir. */
   abrirCampana(op: OpcionesCampana): void;
+  /** Tu Eco cayó: ¿absorber el recuerdo o dejar que te acompañe? */
+  decidirEco(op: DecisionEco): void;
   reliquia(r: Reliquia): void;
   jefe(nombre: string, titulo: string): void;
   nuevoPiso(piso: number, b: Bioma, abismo?: AvisoAbismo): void;
@@ -152,6 +182,12 @@ class SalaActiva implements Tiles {
   readonly nombre: string;
   private readonly bioma: Bioma;
 
+  /** Aristas de la roca: por baldosa (relieve iluminado) y unidas en tramos (sombras). */
+  bordes: Borde[] = [];
+  /** Cadenas y estandartes con física. */
+  colgantes: Colgante[] = [];
+  oclusores: Borde[] = [];
+
   constructor(mapa: SalaMapa, tiles: Uint8Array, nombre: string, b: Bioma) {
     this.mapa = mapa;
     this.tiles = tiles;
@@ -160,12 +196,20 @@ class SalaActiva implements Tiles {
     const d = prerenderSala(this, b, mapa.semilla, mapa.tipo !== "normal");
     this.lienzo = d.lienzo;
     this.luces = d.luces;
+    this.colgantes = d.colgantes.map((c) => new Colgante(c));
+    this.recalcularBordes();
+  }
+
+  recalcularBordes(): void {
+    this.bordes = bordesDeSala(this, false);
+    this.oclusores = bordesDeSala(this, true);
   }
 
   rehacer(): void {
     const d = prerenderSala(this, this.bioma, this.mapa.semilla, this.mapa.tipo !== "normal");
     this.lienzo = d.lienzo;
     this.luces = d.luces;
+    if (this.colgantes.length !== d.colgantes.length) this.colgantes = d.colgantes.map((c) => new Colgante(c));
   }
 
   tile(tx: number, ty: number): number {
@@ -174,6 +218,7 @@ class SalaActiva implements Tiles {
 
   poner(tx: number, ty: number, v: number): void {
     this.tiles[indice(tx, ty)] = v;
+    this.recalcularBordes();
   }
 }
 
@@ -236,6 +281,7 @@ export class Juego implements Contexto {
       this.estados = new Map(d.estados.map(([id, e]) => [id, { ...e, muertos: new Set(e.muertos), velasRotas: new Set(e.velasRotas ?? []) }]));
       this.cargarSala(d.sala, null);
       this.jugador.colocar(d.x, d.y);
+      if (this.partida.pactoEco !== null) this.aliado = new EspectroAliado(this.partida.pactoEco, d.x, d.y - 20);
       this.audio.ambientar(this.indiceAmbiente);
       this.eventos.nuevoPiso(this.partida.piso, this.bioma, this.avisoAbismo());
       return;
@@ -269,6 +315,41 @@ export class Juego implements Contexto {
     const id = Math.max(0, Math.min(sala, this.mapa.salas.length - 1));
     this.cargarSala(id, null);
     this.jugador.colocar(4 * TILE, 14 * TILE - this.jugador.h);
+  }
+
+  /** Solo para desarrollo: el Cazador de Portadores aparece ya. */
+  depurarCazador(): void {
+    this.aparecerCazador(undefined, "Un Cazador de Portadores baja por ti. No se detiene.");
+  }
+
+  /** Solo para desarrollo: ir a la sala de la cicatriz del piso. */
+  depurarCicatriz(): void {
+    if (this.cicatriz === null) return;
+    this.cargarSala(this.cicatriz.sala, null);
+    this.jugador.colocar(4 * TILE, 14 * TILE - this.jugador.h);
+  }
+
+  /** Solo para desarrollo: el diálogo de "tu Eco se arrodilla". */
+  depurarDecisionEco(): void {
+    const eco = crearEco({
+      piso: this.partida.piso, forma: this.partida.forma, nivel: this.partida.nivel(), stats: this.partida.stats(),
+      equipo: RANURAS.map((r) => this.partida.equipo[r]), causa: "Cráneo Saltarín", numero: 3,
+      habitos: { distancia: 0.8, aereo: 0.5, patada: 0.1, tecnica: 0.6, esquiva: 0.4, agresividad: 0.3, estilo: "arco" }, portador: configEcos.nombre,
+    }, this.partida.azar, Date.now());
+    this.eventos.decidirEco({ eco, perfil: "acecha desde lejos, ataca desde el aire, esquiva al último instante", legado: eco.legado?.nombre ?? null, absorber: () => undefined, pactar: () => undefined });
+  }
+
+  /** Solo para desarrollo: una fila de monstruos y una patada al primero (boliche y muro). */
+  depurarPatada(): void {
+    this.criaturas = this.criaturas.filter((c) => !(c instanceof Enemigo));
+    const suelo = 14 * TILE;
+    this.jugador.colocar(5 * TILE, suelo - this.jugador.h);
+    const fila = [8, 10, 12, 14].map((tx) => {
+      const e = this.crearEnemigo("caminante", tx * TILE, suelo);
+      this.criaturas.push(e);
+      return e;
+    });
+    this.lanzar(fila[0], 1, 30, 0);
   }
 
   /** Solo para desarrollo (capturas): toca la campana de la arena; con `iniciar`, empieza ya (normal o Juicio). */
@@ -376,9 +457,13 @@ export class Juego implements Contexto {
     this.partida.ganarCarga(3);
     const r = this.partida.recibirDanio(danio);
     if (this.arena?.activa === true) this.arena.golpes++;
-    if (this.cargaExtraccion > 0) {
-      this.cargaExtraccion = 0;
-      this.mensaje("¡Extracción interrumpida!", "#ff6a6a");
+    const agresor = this.criaturas.find((c): c is Enemigo => c instanceof Enemigo && !c.muerto && Math.abs(c.cx - desdeX) < 40);
+    if (agresor !== undefined) {
+      this.ultimoAgresor = { a: { nombre: agresor.nombre, conducta: agresor.conducta, elite: agresor.categoria === "elite", afijos: [...agresor.afijos] }, t: this.tiempo };
+    }
+    if (this.cargaExtraccion > 0 && this.emboscada !== null) {
+      this.cargaExtraccion = Math.max(0.01, this.cargaExtraccion - 0.6);
+      this.fx.texto(j.cx, j.y - 14, "−0,6 s", "#ff6a6a");
     }
     if (this.combo.golpes >= 5) this.fx.texto(j.cx, j.y - 14, "Combo roto", "#8a84a0");
     this.combo.recibirDanio();
@@ -449,12 +534,23 @@ export class Juego implements Contexto {
       c.defensa * (1 - (pa?.ignoraDefensa ?? 0)),
       garantizado ? 100 : s.critico + critBasico + (pa?.critBasico ?? 0), 1.75 + mods.critDanio + (pa?.critDanio ?? 0));
     if (lejos >= 1.3) this.fx.texto(c.cx, c.y - 14, "¡Certero!", "#ffe9a8");
+    if (g.critico) {
+      this.fx.estallar(c.cx, c.cy, {
+        colores: ["#ffe9a8", "#ffffff", "#ffd27a"], n: 7, velocidad: 170, tam: [1, 2], vida: 0.7, brillan: true,
+        chispa: "#ffd27a", angulo: dirX > 0 ? -0.5 : Math.PI + 0.5, apertura: 1.6, luz: { color: "#ffe9a8", r: 40, dur: 0.18 },
+      });
+    }
     if (pa?.roboUltimo !== undefined && a.final === true) this.partida.curar(Math.max(1, Math.round(g.danio * pa.roboUltimo)));
     c.aplicarDanio(g.danio, this);
     c.empujar(dirX, a.empuje * (g.critico ? 1.4 : 1));
     if ((a.rompeGuardia === true || pa?.rompeGuardia === true) && c instanceof Enemigo && c.conGuardia) {
       c.romperGuardia();
       this.fx.texto(c.cx, c.y - 10, "¡Guardia rota!", "#ffe27a");
+      this.fx.estallar(c.cx - c.dir * 6, c.cy, {
+        colores: ["#c8c8d8", "#8a8a9a", "#5a5a6a", "#e8e8f0"], n: 40, velocidad: 190, tam: [1, 4], vida: 2,
+        chispa: "#ffe27a", angulo: dirX > 0 ? -0.6 : Math.PI + 0.6, apertura: 2.2, luz: { color: "#ffe9a8", r: 70, dur: 0.5 },
+      });
+      this.fx.sacudir(5);
     }
     if (a.quema === true) c.quemar(a.potencia * 0.15);
     this.aplicarElemento(c, g.danio, a);
@@ -495,8 +591,17 @@ export class Juego implements Contexto {
       velocidad: 130, angulo: dirX > 0 ? 0 : Math.PI, apertura: 1.6, vida: 0.35,
     });
     this.audio.reproducir(g.critico ? "critico" : "impacto");
-    this.fx.congelar(g.critico ? 0.07 : 0.035);
-    this.fx.sacudir(g.critico ? 3 : 1.2);
+    // HITSTOP: el mundo se congela unos cuadros (más en críticos, remates, el mazo y los cargados) y el enemigo
+    // tiembla en el sitio; el empujón se aplica al soltar, así sale despedido con peso.
+    const cargado = this.jugador.accionTipo === "cargado";
+    const pesado = a.arma === "pesada" || cargado;
+    const pausa = Math.min(0.11, (g.critico ? 0.075 : a.final === true ? 0.06 : a.tipo === "patada" ? 0.055 : 0.035) + (pesado ? 0.03 : 0));
+    this.fx.congelar(pausa);
+    c.vibrar = Math.max(c.vibrar, pausa + 0.04);
+    this.fx.sacudir(g.critico || cargado ? 3.5 : pesado ? 2.2 : 1.2);
+    this.habitos.golpe(Math.abs(c.cx - this.jugador.cx), !this.jugador.enSuelo, a.tipo, a.arma ?? this.partida.estilo().id);
+    // Patadas: el enemigo sale volando y el escenario juega (muro, boliche, púas).
+    if (a.tipo === "patada" && a.empuje >= 180 && c instanceof Enemigo && !c.pesado && !c.esJefe && !c.muerto) this.lanzar(c, dirX, g.danio, 0);
     return true;
   }
 
@@ -629,6 +734,9 @@ export class Juego implements Contexto {
       if (this.sala.tile(tx, ty) === tipo) {
         this.sala.poner(tx, ty, T_VACIO);
         this.fx.chispas(tx * TILE + 8, ty * TILE + 8, tipo === T_CRISTAL ? "#7fe3ff" : "#ff7a3d", 18, { velocidad: 140, brillo: true });
+        this.fx.estallar(tx * TILE + 8, ty * TILE + 8, tipo === T_CRISTAL
+          ? { colores: ["#7fe3ff", "#bff3ff", "#3d8bff", "#ffffff"], n: 22, velocidad: 170, tam: [1, 4], brillan: true, chispa: "#bff3ff", vida: 2.2, luz: { color: "#7fe3ff", r: 80, dur: 0.6 } }
+          : { colores: ["#5a3a1a", "#3a2410", "#7a5a2a", "#ff7a3d"], n: 20, velocidad: 140, tam: [1, 4], chispa: "#ff9a3d", vida: 2.4, luz: { color: "#ff7a3d", r: 80, dur: 0.7 } });
       }
     }
     const lado: Dir = tx < COLS / 2 ? "izq" : "der";
@@ -655,7 +763,7 @@ export class Juego implements Contexto {
         ancho: 9,
         alto: 6,
         reliquiasPoseidas: this.meta.listaReliquias(),
-        hayEco: this.meta.ecoDelPiso(piso) !== undefined,
+        hayEco: this.prepararEcos(piso),
         salidas: salida ? 1 : 0,
         // De aquí no se sube: el Abismo conserva altar y mercader.
         servicios: true,
@@ -672,13 +780,16 @@ export class Juego implements Contexto {
         alto: piso > 10 ? 6 : 5,
         reliquiasPoseidas: this.meta.listaReliquias(),
         reliquiaAColocar: this.meta.reliquiaParaPiso(piso),
-        hayEco: this.meta.ecoDelPiso(piso) !== undefined,
+        hayEco: this.prepararEcos(piso),
         // El Pozo no tiene tiendas ni altares (para eso se sube al pueblo): su lugar lo ocupan los desafíos.
         servicios: false,
         arenas: arenasDelPiso(piso, false),
       });
     }
     this.estados = new Map();
+    this.prepararCicatriz(piso);
+    this.prepararHistoria(piso);
+    this.prepararCazador();
     this.avisosBarrera.clear();
     this.avisosPozo.clear();
     this.cargarSala(this.mapa.inicio, null);
@@ -741,6 +852,17 @@ export class Juego implements Contexto {
   }
 
   private cargarSala(id: number, entrada: Dir | null): void {
+    // El Cazador te sigue: si estaba vivo en la sala que dejas, entra por la puerta unos segundos después.
+    const cz = this.criaturas.find((c): c is Cazador => c instanceof Cazador && !c.muerto);
+    if (cz !== undefined) {
+      this.cazador.hp = cz.hp;
+      this.cazador.reentrada = 3;
+    }
+    if (this.emboscada !== null) {
+      this.emboscada = null;
+      this.audio.tension(false);
+    }
+    this.enZonaExtraccion = false;
     this.guardarEstadoSala();
     const sm = this.mapa.salas[id];
     const estado = this.estadoDe(id);
@@ -757,6 +879,8 @@ export class Juego implements Contexto {
     this.puertasSelladas = false;
     this.sellarPendiente = false;
     this.fx.limpiar();
+    this.vivos.limpiar();
+    this.devorador = null;
     this.botines = estado.botin.map((b) => {
       const s = new BotinSuelo(b.premio, b.x, b.y);
       s.vx = 0;
@@ -812,13 +936,16 @@ export class Juego implements Contexto {
           }
           break;
         case "eco": {
-          const eco = this.meta.ecoDelPiso(this.partida.piso);
+          const propio = this.meta.ecoDelPiso(this.partida.piso);
+          const eco = propio ?? this.ecoAjeno?.eco;
           if (eco !== undefined && !estado.jefeVencido) {
-            const rival = new EcoRival(eco, x, piso);
+            const ajeno = propio === undefined;
+            const rival = new EcoRival(eco, x, piso, ajeno);
             rival.idSpawn = i;
             this.criaturas.push(rival);
             this.sellarPuertas(true);
-            this.eventos.jefe(eco.nombre, `Tu Eco · ${eco.causa}`);
+            this.eventos.jefe(ajeno ? `Eco de ${this.ecoAjeno?.portador ?? "otro Portador"}` : eco.nombre,
+              ajeno ? `Otro Portador cayó aquí · ${rival.perfil}` : `Tu Eco aprendió de ti: ${rival.perfil}`);
             this.audio.reproducir("jefe");
           }
           break;
@@ -829,6 +956,11 @@ export class Juego implements Contexto {
     });
 
     this.zonaExtraccion = (this.mapa.extracciones ?? []).includes(id) ? this.ubicarExtraccion() : null;
+    if (this.ecoHistoria !== null && this.ecoHistoria.sala === id) this.despertarEcoHistoria(estado);
+    if (this.cicatriz !== null && this.cicatriz.sala === id) {
+      this.despertarDevorador(estado);
+      if (primeraVez) this.mensaje("Reconoces este lugar. Aquí caíste.", "#ff4d6d");
+    }
     this.cargaExtraccion = 0;
     if (this.abismo && this.zonaExtraccion !== null && primeraVez) {
       this.mensaje("¡Una SALIDA! Aguanta 5 s en la luz verde para volver al pueblo", "#7dffb0");
@@ -1127,7 +1259,7 @@ export class Juego implements Contexto {
         this.audio.reproducir("fallo");
       }
     }
-    if (this.criaturas.some((c) => !c.muerto && !(c instanceof Vela))) return;
+    if (this.criaturas.some((c) => !c.muerto && !(c instanceof Vela) && !(c instanceof Cazador))) return;
     if (a.oleada < a.def.oleadas) {
       this.siguienteOleada();
       return;
@@ -1240,24 +1372,165 @@ export class Juego implements Contexto {
   }
 
   /** Extracción: quedarse 5 s dentro de la zona. Recibir daño reinicia la cuenta. */
+  /** Segundos que hay que resistir en la zona (con emboscada: 15~20 s según lo que llevas en riesgo). */
+  get duracionExtraccion(): number {
+    return this.emboscada?.plan.duracion ?? SEGUNDOS_EXTRACCION;
+  }
+
+  /**
+   * Extracción: al pisar la zona, el Pozo intenta impedir que te vayas. Hay que acumular el tiempo DENTRO de la zona
+   * (salir pausa el progreso, un golpe lo hace retroceder) mientras brotan Manos del Abismo bajo tus pies y llegan
+   * cazadores atraídos por el brillo de tu botín. Cuanto más Legendario/Mítico llevas, más violenta es.
+   */
   private actualizarExtraccion(dt: number): void {
     const z = this.zonaExtraccion;
     if (z === null || this.terminado) return;
     const dentro = !this.jugador.muerto && solapan(this.jugador, z);
+    this.enZonaExtraccion = dentro;
+    if (dentro && this.emboscada === null) this.iniciarEmboscada();
+    const e = this.emboscada;
+    if (e === null) return;
     if (dentro) {
-      if (this.cargaExtraccion === 0) this.mensaje("Extrayendo… no recibas daño", "#7dffb0");
       this.cargaExtraccion += dt;
       if (Math.random() < dt * 20) {
         this.fx.chispas(z.x + Math.random() * z.w, z.y + z.h, "#7dffb0", 1, { velocidad: 40, gravedad: -120, vida: 0.6, brillo: true });
       }
-      if (this.cargaExtraccion >= SEGUNDOS_EXTRACCION) {
-        this.fx.destellar("#7dffb0", 0.9);
-        this.audio.reproducir("reliquia");
-        this.salirAlPueblo("extraccion");
-      }
-    } else if (this.cargaExtraccion > 0) {
-      this.cargaExtraccion = Math.max(0, this.cargaExtraccion - dt * 2);
     }
+    // Manos del Abismo: brotan bajo tus pies con aviso.
+    e.cdMano -= dt;
+    if (e.cdMano <= 0) {
+      e.cdMano = e.plan.cadaMano * (0.75 + Math.random() * 0.5);
+      const j = this.jugador;
+      const x = j.cx + (Math.random() - 0.5) * 30;
+      this.peligros.push({ x: x - 9, y: j.y + j.h - 34, w: 18, h: 34, aviso: 0.75, activo: 0.4, danio: Math.round(6 + this.partida.piso * 2 + e.nivel * 3), color: "#6a1aa0", golpeo: false, forma: "mano" });
+    }
+    // Cazadores atraídos por el brillo del botín.
+    e.cdOleada -= dt;
+    if (e.cdOleada <= 0) {
+      e.cdOleada = e.plan.cadaOleada;
+      this.oleadaEmboscada(e);
+    }
+    if (this.cargaExtraccion >= e.plan.duracion) {
+      this.emboscada = null;
+      this.audio.tension(false);
+      this.fx.destellar("#7dffb0", 0.9);
+      this.audio.reproducir("reliquia");
+      this.salirAlPueblo("extraccion");
+    }
+  }
+
+  private iniciarEmboscada(): void {
+    const nivel = nivelEmboscada(this.partida.resumenRiesgo());
+    this.emboscada = { plan: planEmboscada(nivel), nivel, cdMano: 1.2, cdOleada: 1.5 };
+    this.cargaExtraccion = 0.01;
+    this.audio.tension(true);
+    this.audio.reproducir("jefe");
+    this.fx.sacudir(6);
+    this.eventos.jefe("¡El Pozo no quiere dejarte ir!",
+      nivel >= 4 ? "Lo que llevas brilla demasiado: resiste en la zona" : nivel >= 2 ? "Algo huele tu botín: resiste en la zona" : "Resiste en la zona hasta que se abra el camino");
+  }
+
+  private oleadaEmboscada(e: { plan: PlanEmboscada; nivel: number }): void {
+    const bases: readonly ConductaBase[] = ["caminante", "saltador", "volador"];
+    for (let k = 0; k < e.plan.porOleada; k++) {
+      const lado = Math.random() < 0.5 ? 2 : COLS - 3;
+      const x = lado * TILE + TILE / 2;
+      const tipo = bases[Math.floor(Math.random() * bases.length)];
+      const elite = Math.random() < e.plan.elite;
+      const en = this.crearEnemigo(tipo, x, 14 * TILE, elite);
+      if (tipo === "volador") en.y = 8 * TILE;
+      en.multAtaque *= 1 + e.nivel * 0.08;
+      this.criaturas.push(en);
+      this.fx.estallar(x, 13 * TILE, { colores: ["#6a1aa0", "#2a0a3a", "#c9a7ff"], n: 12, velocidad: 90, tam: [1, 2], brillan: true, chispa: "#c9a7ff", luz: { color: "#b04dff", r: 50, dur: 0.4 } });
+    }
+    if (e.nivel >= 3) this.fx.texto(this.jugador.cx, this.jugador.y - 20, "Atraídos por el brillo…", "#c9a7ff");
+  }
+
+  // ---------------- Peso del Eco: el Cazador de Portadores ----------------
+
+  /** Al empezar un piso: si el Peso es alto, el reloj del Cazador empieza a correr. */
+  private prepararCazador(): void {
+    const peso = this.partida.pesoEco;
+    this.cazador = { hp: null, reloj: peso >= PESO_CAZADOR ? retrasoCazador(peso) : Infinity, reentrada: 0 };
+    if (peso >= 1) {
+      this.mensaje(`Peso del Eco ×${peso}: +${peso * 25} % de hallazgos raros.${peso >= PESO_CAZADOR ? " Algo baja detrás de ti…" : ""}`, peso >= PESO_CAZADOR ? "#ff6a9a" : "#c9a7ff");
+    }
+  }
+
+  private actualizarCazador(dt: number): void {
+    const c = this.cazador;
+    if (this.abismo && this.partida.pesoEco < PESO_CAZADOR) return;
+    const presente = this.criaturas.some((x) => x instanceof Cazador && !x.muerto);
+    if (presente || this.terminado) return;
+    if (c.hp === null) {
+      c.reloj -= dt;
+      if (c.reloj <= 0) this.aparecerCazador(undefined, "Un Cazador de Portadores baja por ti. No se detiene.");
+    } else if (c.reentrada > 0) {
+      c.reentrada -= dt;
+      if (c.reentrada <= 0) this.aparecerCazador(c.hp, "El Cazador entra tras de ti…");
+    }
+  }
+
+  private aparecerCazador(hp: number | undefined, texto: string): void {
+    const j = this.jugador;
+    const x = j.cx < ANCHO_SALA / 2 ? 1 * TILE : (COLS - 2) * TILE;
+    const cz = new Cazador(x, j.y + j.h, statsCazador(this.partida.piso, this.partida.pesoEco), hp);
+    this.criaturas.push(cz);
+    this.cazador.hp = cz.hp;
+    this.mensaje(texto, "#ff2a3d");
+    this.audio.reproducir("jefe");
+    this.fx.destellar("#2a0a24", 0.5);
+  }
+
+  /** Distorsiones del Pozo con mucho Peso: barras de interferencia en la imagen. */
+  private dibujarDistorsion(g: CanvasRenderingContext2D): void {
+    const peso = this.partida.pesoEco;
+    if (peso < 3 || Math.random() > 0.04 * (peso - 2)) return;
+    g.save();
+    g.globalCompositeOperation = "difference";
+    for (let k = 0; k < 2 + peso; k++) {
+      g.globalAlpha = 0.12 + Math.random() * 0.2;
+      g.fillStyle = Math.random() < 0.5 ? "#ff2a6a" : "#2affd0";
+      g.fillRect(0, Math.floor(Math.random() * 270), ANCHO_SALA, 1 + Math.floor(Math.random() * 3));
+    }
+    g.restore();
+  }
+
+  /** Mano del Abismo: un círculo de aviso en el suelo y después una mano que brota y se cierra. */
+  private dibujarMano(g: CanvasRenderingContext2D, z: Peligro): void {
+    const suelo = z.y + z.h;
+    const cx = z.x + z.w / 2;
+    if (z.aviso > 0) {
+      g.fillStyle = "#b04dff";
+      g.globalAlpha = 0.3 + (Math.floor(this.tiempo * 14) % 2) * 0.3;
+      g.fillRect(Math.round(z.x), Math.round(suelo - 2), z.w, 2);
+      g.globalAlpha = 0.15;
+      g.fillRect(Math.round(z.x + 3), Math.round(suelo - 6), z.w - 6, 4);
+      g.globalAlpha = 1;
+      return;
+    }
+    const sube = Math.min(1, (0.4 - z.activo) / 0.12 + 0.2);
+    const alto = Math.round(z.h * sube);
+    const y0 = Math.round(suelo - alto);
+    g.fillStyle = "#2a0a3a";
+    g.fillRect(Math.round(cx - 4), y0 + 8, 8, alto - 8);
+    g.fillStyle = "#4a1a6a";
+    g.fillRect(Math.round(cx - 6), y0 + 4, 12, 6);
+    for (let k = 0; k < 4; k++) g.fillRect(Math.round(cx - 6 + k * 3), y0 + (k === 0 || k === 3 ? 2 : 0), 2, 5);
+    g.fillStyle = "#c9a7ff";
+    g.fillRect(Math.round(cx - 1), y0 + 6, 2, 2);
+  }
+
+  /** Emboscada: bordes de la pantalla oscurecidos que laten en rojo. */
+  private dibujarTensionExtraccion(g: CanvasRenderingContext2D): void {
+    if (this.emboscada === null) return;
+    const k = 0.35 + Math.sin(this.tiempo * 7) * 0.12 + this.emboscada.nivel * 0.04;
+    const grad = g.createRadialGradient(ANCHO_SALA / 2, 135, 90, ANCHO_SALA / 2, 135, 280);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(0.7, `rgba(40,0,20,${k * 0.6})`);
+    grad.addColorStop(1, `rgba(90,0,30,${k})`);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, ANCHO_SALA, 270);
   }
 
   private dibujarExtraccion(g: CanvasRenderingContext2D): void {
@@ -1406,9 +1679,15 @@ export class Juego implements Contexto {
 
   // ---------------- Bucle ----------------
 
+  /** Para los fragmentos con física: qué hay en un punto del mundo. */
+  private readonly sueloFx = (x: number, y: number): "solido" | "plataforma" | null => {
+    const t = this.sala.tile(Math.floor(x / TILE), Math.floor(y / TILE));
+    return t === undefined ? "solido" : esSolido(t) ? "solido" : t === T_PLATAFORMA ? "plataforma" : null;
+  };
+
   actualizar(dt: number): void {
     if (this.terminado) {
-      this.fx.actualizar(dt);
+      this.fx.actualizar(dt, this.sueloFx);
       return;
     }
     // Cámara lenta (esquiva perfecta, subir de rango): el mundo entero va más despacio.
@@ -1420,6 +1699,8 @@ export class Juego implements Contexto {
     this.tiempo += dt;
     this.combo.actualizar(dt);
     this.fundido = Math.max(0, this.fundido - dt * 5);
+    for (const c of this.criaturas) if (c.vibrar > 0) c.vibrar = Math.max(0, c.vibrar - dt);
+    this.audio.intensidadMusica(this.combo.indiceRango);
     if (this.fx.pausaGolpe > 0) {
       this.fx.pausaGolpe -= dt;
       return;
@@ -1514,7 +1795,14 @@ export class Juego implements Contexto {
     this.revisarSello();
     if (this.entrada.recien("interactuar")) this.interactuar();
     this.ambiente();
-    this.fx.actualizar(dt);
+    this.fx.actualizar(dt, this.sueloFx);
+    this.actualizarColgantes(dt);
+    this.actualizarLanzados(dt);
+    this.vivos.actualizar(dt, this, this.proyectiles);
+    if (this.criaturas.some((c) => !c.muerto && (c instanceof Enemigo || c.esJefe))) this.habitos.combate(dt);
+    this.aliado?.actualizar(dt, this);
+    this.actualizarDevorador(dt);
+    this.actualizarCazador(dt);
     this.ayudasDePozo();
     if (!this.terminado) this.revisarSalida(dt);
   }
@@ -1566,11 +1854,14 @@ export class Juego implements Contexto {
     if (this.combo.indiceRango >= 4) {
       this.ralentizar(0.55, 0.12);
       this.fx.destellar(subio.color, 0.25);
+      // El Pozo susurra el rango (y la música suma coro y guitarra).
+      this.audio.susurrarRango(subio.titulo.replace(/[¡!]/g, ""));
     }
   }
 
   private esquivaPerfecta(): void {
     const j = this.jugador;
+    this.habitos.esquiva();
     this.ralentizar(0.3, 0.5);
     this.fx.texto(j.cx, j.y - 16, "¡ESQUIVA PERFECTA!", "#9fe8ff", true);
     this.fx.destellar("#9fe8ff", 0.35);
@@ -1673,6 +1964,11 @@ export class Juego implements Contexto {
         this.avisarMision(this.partida.registrarMision("cofre", this.partida.piso));
         this.audio.reproducir(obj.nivel >= 2 ? "unico" : "cofre");
         const color = COLOR_COFRE[obj.nivel];
+        this.fx.estallar(obj.cx, obj.y + 4, {
+          colores: obj.nivel >= 2 ? [color, "#ffe9a8", "#ffffff"] : ["#7a5230", "#5a3a22", color], n: 10 + obj.nivel * 10,
+          velocidad: 130 + obj.nivel * 30, tam: [1, 3], brillan: obj.nivel >= 2, chispa: obj.nivel >= 1 ? color : null,
+          angulo: -Math.PI / 2, apertura: 1.8, luz: { color, r: 50 + obj.nivel * 25, dur: 0.6 },
+        });
         this.fx.chispas(obj.cx, obj.y, color, 30 + obj.nivel * 20, { velocidad: 120 + obj.nivel * 30, brillo: true });
         if (obj.nivel >= 2) this.fx.destellar(color, 0.3 + obj.nivel * 0.1);
         if (obj.nivel >= 1) this.fx.texto(obj.cx, obj.y - 12, NOMBRE_COFRE[obj.nivel], color, true);
@@ -1735,6 +2031,8 @@ export class Juego implements Contexto {
   salirAlPueblo(motivo: "extraccion" | "portal"): void {
     if (this.terminado) return;
     this.terminado = true;
+    this.resolverPacto();
+    if (this.partida.quitarEspectrales() > 0) this.mensaje("Las armas espectrales vuelven a sus dueños.", "#7dffb0");
     this.partida.registrarMision("extraer", this.partida.piso);
     this.registrarProfundidad();
     this.audio.silenciarAmbiente();
@@ -1757,6 +2055,164 @@ export class Juego implements Contexto {
     this.guardarEstadoSala();
     this.partida.bajarPiso();
     this.nuevoPiso();
+    this.resolverPacto();
+  }
+
+  // ---------------- Ecos: pacto, venganzas, cicatrices ----------------
+
+  /** Eco propio en el piso, o (a veces) el de otro Portador. Devuelve si hay sala de Eco. */
+  private prepararEcos(piso: number): boolean {
+    this.ecoAjeno = null;
+    if (this.meta.ecoDelPiso(piso) !== undefined) return true;
+    if (configEcos.servicio !== null && this.partida.azar.siguiente() < PROB_ECO_AJENO) {
+      this.ecoAjeno = configEcos.servicio.buscar(piso, configEcos.autor);
+    }
+    return this.ecoAjeno !== null;
+  }
+
+  /** El Espectro cumplió: terminaste el piso con vida. Te devuelve tu mejor pieza con un templado más. */
+  private resolverPacto(): void {
+    const eco = this.partida.pactoEco;
+    if (eco === null) return;
+    this.partida.pactoEco = null;
+    this.aliado = null;
+    const legado = legadoDelPacto(eco, this.partida.azar);
+    if (legado === null) return;
+    const r = this.partida.recoger({ tipo: "equipo", equipo: legado });
+    if (!r.ok) this.partida.seguro.agregar(legado.base, 1, { equipo: legado });
+    this.mensaje(`El Espectro cumple su pacto y se desvanece: ${legado.nombre}`, "#9fe8ff");
+    this.audio.reproducir("reliquia");
+  }
+
+  private vengarEcoAjeno(c: EcoRival): void {
+    const ajeno = this.ecoAjeno;
+    const premios: Premio[] = [{ tipo: "esquirlas", cantidad: 60 + c.eco.nivel * 10 }];
+    const legado = c.eco.legado;
+    if (legado !== null) {
+      premios.push({ tipo: "equipo", equipo: { ...legado, uid: `${legado.uid}-esp${Date.now() % 99999}`, nombre: `${legado.nombre.replace(/ \((Eco|Espectral)\)$/, "")} (Espectral)`, espectral: true } });
+    }
+    this.soltar(premios, c.cx, c.cy);
+    if (ajeno !== null) configEcos.servicio?.vengar(ajeno, configEcos.nombre, recompensaVenganza(this.partida.piso));
+    this.mensaje(`Vengaste a ${ajeno?.portador ?? "otro Portador"}. Su arma te acompañará este descenso.`, "#7dffb0");
+    this.ecoAjeno = null;
+    this.eventos.guardar();
+    this.guardarProgreso();
+  }
+
+  /** Cicatriz del piso: una sala normal (siempre la misma para ese mapa) guarda tu caída. */
+  private prepararCicatriz(piso: number): void {
+    this.cicatriz = null;
+    this.devorador = null;
+    if (this.abismo) return;
+    const c = this.meta.cicatrizDelPiso(piso);
+    if (c === undefined) return;
+    const normales = this.mapa.salas.filter((s) => s.tipo === "normal" && s.id !== this.mapa.inicio);
+    if (normales.length === 0) return;
+    this.cicatriz = { sala: normales[Math.floor(normales.length / 2)].id, c };
+  }
+
+  /** Si una misión personal del pueblo apunta a este piso, su Eco espera en una sala normal. */
+  private prepararHistoria(piso: number): void {
+    this.ecoHistoria = null;
+    if (this.abismo) return;
+    const def = HISTORIAS.find((h) => h.piso === piso && this.partida.historias[h.id] === "conocida" && !this.partida.tieneRecuerdo(h.id));
+    if (def === undefined) return;
+    const normales = this.mapa.salas.filter((s) => s.tipo === "normal" && s.id !== this.mapa.inicio && s.id !== this.cicatriz?.sala);
+    if (normales.length === 0) return;
+    this.ecoHistoria = { sala: normales[Math.floor(normales.length / 3)].id, def };
+  }
+
+  private despertarEcoHistoria(estado: EstadoSala): void {
+    const h = this.ecoHistoria;
+    if (h === null || estado.jefeVencido) return;
+    const piso = this.partida.piso;
+    const eco: Eco = {
+      uid: `historia-${h.def.id}`, piso, nombre: h.def.eco.nombre, forma: crearCarta(this.partida.azar, h.def.eco.alma, Math.min(9, Math.floor(piso / 2))),
+      nivel: piso * 2, stats: { hp: 30 + piso * 12, mp: 40, golpe: 8 + piso * 3, patada: 8 + piso * 3, tecnica: 8 + piso * 3, defensa: piso, critico: 8, suerte: 0, regen: 0 },
+      legado: null, fecha: Date.now(), causa: h.def.eco.causa, numero: 0, habitos: h.def.eco.habitos,
+    };
+    const centro = this.ubicarExtraccion();
+    const rival = new EcoRival(eco, centro.x + centro.w / 2 + 40, centro.y + centro.h);
+    rival.historia = h.def.id;
+    this.criaturas.push(rival);
+    this.sellarPuertas(true);
+    this.eventos.jefe(eco.nombre, `${h.def.titulo} · Cayó por ${h.def.eco.causa}`);
+    this.audio.reproducir("jefe");
+  }
+
+  /** Al entrar a la sala de la cicatriz: aparece el Devorador (el monstruo que te mató, con tu nombre). */
+  private despertarDevorador(estado: EstadoSala): void {
+    const cic = this.cicatriz;
+    if (cic === null || this.meta.cicatrizDelPiso(this.partida.piso) === undefined || estado.muertos.has(900)) return;
+    const centro = this.ubicarExtraccion();
+    const x = centro.x + centro.w / 2 + 48;
+    const y = centro.y + centro.h;
+    const e = new Enemigo(cic.c.asesino.conducta, this.partida.piso, this.bioma, x, y, true, cic.c.asesino.afijos as AfijoElite[]);
+    e.x = x - e.w / 2;
+    e.hpMax = Math.round(e.hpMax * 3);
+    e.hp = e.hpMax;
+    e.multAtaque *= 1.3;
+    e.idSpawn = 900;
+    this.criaturas.push(e);
+    this.devorador = { e, cd: 3 };
+    this.eventos.jefe(tituloDevorador(cic.c), "Aquí caíste. Algo creció con tu recuerdo.");
+    this.audio.reproducir("jefe");
+  }
+
+  /** El Devorador usa una de tus habilidades (la técnica del alma de tu Habilidad I). */
+  private actualizarDevorador(dt: number): void {
+    const d = this.devorador;
+    if (d === null || d.e.muerto) return;
+    d.cd -= dt;
+    const id = this.cicatriz?.c.almaTecnica;
+    if (d.cd <= 0 && id !== null && id !== undefined) {
+      d.cd = 4.5;
+      const a = alma(id);
+      tecnicaEnemiga(a.tecnica, d.e, this, d.e.ataque * 1.2, a.colorSec);
+      this.fx.texto(d.e.cx, d.e.y - 14, a.nombre, a.colorSec);
+    }
+  }
+
+  /** Tus armas rotas clavadas en el suelo y tu sangre seca, en la sala donde caíste. */
+  private dibujarCicatriz(g: CanvasRenderingContext2D): void {
+    const cic = this.cicatriz;
+    if (cic === null || this.sala.mapa.id !== cic.sala) return;
+    const centro = this.ubicarExtraccion();
+    const suelo = centro.y + centro.h;
+    const cx = centro.x + centro.w / 2;
+    // Manchas de sangre seca
+    g.fillStyle = "#5a0a14";
+    for (const [dx, w] of [[-26, 14], [-8, 22], [14, 10], [30, 6], [-40, 5]] as const) {
+      g.globalAlpha = 0.75;
+      g.fillRect(Math.round(cx + dx), suelo - 1, w, 1);
+      g.globalAlpha = 0.45;
+      g.fillRect(Math.round(cx + dx + 2), suelo - 2, Math.max(2, w - 4), 1);
+    }
+    g.globalAlpha = 1;
+    // Arma rota clavada (inclinada) y su mitad tirada al lado
+    g.save();
+    g.translate(Math.round(cx - 6), suelo);
+    g.rotate(-0.35);
+    g.fillStyle = "#3a2a1e";
+    g.fillRect(-1, -22, 3, 8);
+    g.fillStyle = "#6a6278";
+    g.fillRect(-4, -15, 9, 2);
+    g.fillStyle = cic.c.colorArma;
+    g.fillRect(-1, -13, 3, 13);
+    g.fillStyle = "#ffffff";
+    g.fillRect(0, -13, 1, 9);
+    g.restore();
+    g.fillStyle = cic.c.colorArma;
+    g.fillRect(Math.round(cx + 6), suelo - 2, 8, 2);
+    g.fillStyle = "#1a1622";
+    g.fillRect(Math.round(cx + 14), suelo - 2, 2, 2);
+    // Jirón de capa
+    g.fillStyle = "#5a1830";
+    g.fillRect(Math.round(cx - 20), suelo - 2, 7, 2);
+    g.fillRect(Math.round(cx - 17), suelo - 3, 3, 1);
+    // Título del Devorador sobre su cabeza
+    const d = this.devorador;
+    if (d !== null && !d.e.muerto) hd.texto(g, tituloDevorador(cic.c), d.e.cx, d.e.y - 12, { color: "#ff4d6d", alinear: "center", tam: 7, negrita: true });
   }
 
   private soltar(premios: readonly Premio[], x: number, y: number): void {
@@ -1780,6 +2236,15 @@ export class Juego implements Contexto {
     if (c instanceof Enemigo && c.tiene("explosivo") && !c.exploto) c.explotar(this, 1.2, 44, 0.6);
     this.fx.chispas(c.cx, c.cy, "#ffffff", c.esJefe ? 80 : 18, { velocidad: c.esJefe ? 220 : 120, vida: 0.7 });
     this.fx.chispas(c.cx, c.cy, this.bioma.acento, c.esJefe ? 60 : 10, { velocidad: 90, brillo: true, gravedad: -30 });
+    {
+      const pal = c instanceof Enemigo ? c.paleta : [this.bioma.acento, "#d9d0bd"] as const;
+      const elite = c instanceof Enemigo && c.categoria === "elite";
+      this.fx.estallar(c.cx, c.cy, {
+        colores: [pal[0], pal[1], "#1a1622"], n: c.esJefe ? 80 : elite ? 30 : 16, velocidad: c.esJefe ? 240 : 150,
+        tam: c.esJefe ? [2, 6] : [1, 3], vida: c.esJefe ? 3 : 1.8, chispa: elite || c.esJefe ? pal[1] : null,
+        luz: { color: pal[1], r: c.esJefe ? 160 : elite ? 70 : 40, dur: c.esJefe ? 1 : 0.35 },
+      });
+    }
 
     const niveles = this.partida.ganarExperiencia(c.exp);
     if (niveles > 0) {
@@ -1794,15 +2259,65 @@ export class Juego implements Contexto {
       this.avisarMision(this.partida.registrarMision("eco", this.partida.piso));
       estado.jefeVencido = true;
       this.partida.ecosVencidos++;
-      this.meta.vencerEco(c.eco.uid);
-      this.soltar(premiosEco(c.eco, this.partida.azar), c.cx, c.cy);
       this.fx.destellar("#ffffff", 0.9);
       this.fx.sacudir(8);
       this.sellarPuertas(false);
-      this.mensaje("Tu Eco se disuelve. Recuperas lo que el Pozo te quitó.", "#c9a7ff");
-      this.eventos.guardar();
-      this.guardarProgreso();
+      if (c.historia !== null) {
+        const def = HISTORIAS.find((h) => h.id === c.historia);
+        if (def !== undefined) {
+          this.soltar([{ tipo: "objeto", objeto: def.recuerdo.objeto, cantidad: 1 }, { tipo: "esquirlas", cantidad: 40 + this.partida.piso * 12 }], c.cx, c.cy);
+          this.eventos.jefe(def.recuerdo.nombre, "Llévalo de vuelta al pueblo. Si caes con él, se pierde.");
+          this.audio.reproducir("reliquia");
+        }
+        this.ecoHistoria = null;
+      } else if (c.ajeno) this.vengarEcoAjeno(c);
+      else {
+        this.meta.vencerEco(c.eco.uid);
+        const eco = c.eco;
+        const x = c.cx;
+        const y = c.cy;
+        this.eventos.decidirEco({
+          eco, perfil: c.perfil, legado: eco.legado?.nombre ?? null,
+          absorber: () => {
+            this.soltar(premiosEco(eco, this.partida.azar), x, y);
+            this.partida.curarTodo();
+            this.fx.chispas(this.jugador.cx, this.jugador.cy, "#c9a7ff", 40, { velocidad: 120, gravedad: -60, brillo: true });
+            this.mensaje("Absorbes el recuerdo: recuperas lo que el Pozo te quitó y tus heridas se cierran.", "#c9a7ff");
+            this.eventos.guardar();
+            this.guardarProgreso();
+          },
+          pactar: () => {
+            this.soltar(premiosEco(eco, this.partida.azar, true), x, y);
+            this.partida.pactoEco = eco;
+            this.aliado = new EspectroAliado(eco, x, y - 10);
+            this.mensaje(`Tu Eco camina a tu lado este piso. Si lo terminas con vida, te devolverá ${eco.legado?.nombre ?? "su fuerza"} mejorado.`, "#9fe8ff");
+            this.eventos.guardar();
+            this.guardarProgreso();
+          },
+        });
+      }
       return;
+    }
+    if (c instanceof Cazador) {
+      this.cazador.hp = null;
+      this.cazador.reloj = retrasoCazador(this.partida.pesoEco) * 1.5;
+      this.soltar([
+        { tipo: "objeto", objeto: OBJ_RELICARIO, cantidad: 1 },
+        { tipo: "equipo", equipo: generarEquipo(this.partida.azar, this.partida.piso, 4) },
+      ], c.cx, c.cy);
+      this.eventos.jefe("¡Cazador abatido!", "El Pozo tardará en mandar otro");
+      this.fx.destellar("#ff2a3d", 0.6);
+    }
+    if (this.devorador !== null && c === this.devorador.e) {
+      this.devorador = null;
+      this.meta.cerrarCicatriz(this.partida.piso);
+      this.soltar([
+        { tipo: "objeto", objeto: OBJ_RELICARIO, cantidad: 1 },
+        { tipo: "equipo", equipo: generarEquipo(this.partida.azar, this.partida.piso, 3) },
+      ], c.cx, c.cy);
+      this.eventos.jefe("La cicatriz se cierra", "Vengaste tu propia caída. El Pozo olvida un poco.");
+      this.audio.reproducir("reliquia");
+      this.fx.destellar("#ff4d6d", 0.6);
     }
     if (c.categoria === "jefe") {
       this.avisarMision(this.partida.registrarMision("jefe", this.partida.piso));
@@ -1843,6 +2358,9 @@ export class Juego implements Contexto {
     if (this.partida.registrarMuerteEnemigo()) {
       this.fx.texto(this.jugador.cx, this.jugador.y - 10, "Corazón del Pozo", "#ff4d6d");
     }
+    if (c.categoria === "elite" && c instanceof Enemigo && this.partida.azar.siguiente() < bonoPeso(this.partida.pesoEco).relicarioElite) {
+      this.soltar([{ tipo: "objeto", objeto: OBJ_RELICARIO, cantidad: 1 }], c.cx, c.cy);
+    }
     if (c.idSpawn >= 0) {
       this.soltar(botinEnemigo(this.partida.azar, this.partida.piso, c.categoria, this.partida.modificadoresBotin()), c.cx, c.cy);
     }
@@ -1865,6 +2383,19 @@ export class Juego implements Contexto {
     this.jugador.muerto = true;
     this.fx.destellar("#000000", 1);
     this.fx.chispas(this.jugador.cx, this.jugador.cy, "#ffffff", 60, { velocidad: 150, gravedad: -20, vida: 1.2, brillo: true });
+    // Las piezas espectrales y el pacto se desvanecen con tu muerte.
+    this.partida.quitarEspectrales();
+    this.partida.pactoEco = null;
+    this.aliado = null;
+    // Cicatriz del Pozo: el monstruo que te mató volverá con tu nombre.
+    const ag = this.ultimoAgresor;
+    if (!this.abismo && ag !== null && this.tiempo - ag.t < 4) {
+      this.meta.marcarCicatriz({
+        piso: this.partida.piso, portador: configEcos.nombre, asesino: ag.a,
+        arma: this.partida.estilo().id, colorArma: this.partida.estilo().color,
+        almaTecnica: this.partida.almas[1]?.personaje ?? this.partida.forma?.personaje ?? null, fecha: Date.now(),
+      });
+    }
     // Extracción fallida: lo que llevabas encima se queda en el Pozo, con tu Eco.
     const stats = this.partida.stats();
     const equipo = RANURAS.map((r) => this.partida.equipo[r]);
@@ -1878,8 +2409,12 @@ export class Juego implements Contexto {
       causa,
       numero: this.meta.registro.muertes + 1,
       botin,
+      habitos: this.habitos.vector(),
+      portador: configEcos.nombre,
     }, this.partida.azar, Date.now());
     this.meta.registrarMuerte(eco);
+    // Ecos asíncronos: otros Portadores pueden encontrarlo (sin tu botín: solo tu forma, tus hábitos y tu legado).
+    configEcos.servicio?.publicar({ eco: { ...eco, botin: undefined }, portador: configEcos.nombre, autor: configEcos.autor });
     this.cerrarRegistro(false);
     this.audio.silenciarAmbiente();
     this.eventos.muerte(this.partida.resumen(false), eco);
@@ -1902,9 +2437,187 @@ export class Juego implements Contexto {
 
   // ---------------- Render ----------------
 
+  // ---------------- Mutaciones y Resonancias ----------------
+
+  /** Zonas, ecos y acciones diferidas de las habilidades mutadas y las resonancias. */
+  readonly vivos = new EfectosVivos();
+  /** Cómo está peleando el Portador en este descenso (lo hereda su Eco si muere). */
+  readonly habitos = new RegistroHabitos();
+  /** El último monstruo que te golpeó (para la Cicatriz si mueres). */
+  private ultimoAgresor: { a: Asesino; t: number } | null = null;
+  /** Eco de otro Portador que espera en este piso (Ecos asíncronos). */
+  private ecoAjeno: EcoCompartido | null = null;
+  /** Cicatriz del piso: sala marcada y su Devorador. */
+  private cicatriz: { sala: number; c: Cicatriz } | null = null;
+  private devorador: { e: Enemigo; cd: number } | null = null;
+  /** Misión personal del pueblo cuyo Eco espera en este piso. */
+  private ecoHistoria: { sala: number; def: DefHistoria } | null = null;
+  /** Espectro Temporal (pacto con tu Eco). */
+  aliado: EspectroAliado | null = null;
+  /** Emboscada de la extracción en curso (el Pozo no quiere dejarte ir). */
+  private emboscada: { plan: PlanEmboscada; nivel: number; cdMano: number; cdOleada: number } | null = null;
+  /** ¿El Portador está dentro de la zona de extracción? (para el HUD). */
+  enZonaExtraccion = false;
+  /** Cazador de Portadores del piso: vida que le queda (null = todavía no llegó), reloj y reentrada tras cambiar de sala. */
+  private cazador: { hp: number | null; reloj: number; reentrada: number } = { hp: null, reloj: Infinity, reentrada: 0 };
+
+  resonar(r: DefResonancia, potencia: number): void {
+    ejecutarResonancia(this, this.vivos, r, potencia);
+    this.sumarEstilo("tecnica");
+    if (this.meta.descubrirResonancia(r.id)) {
+      this.eventos.jefe(`✦ ${r.nombre} ✦`, "¡Resonancia descubierta! Quedó anotada en el Códice");
+      this.ralentizar(0.35, 0.7);
+      this.audio.reproducir("reliquia");
+      this.eventos.guardar();
+    }
+  }
+
+  imitarDefinitiva(h: HabilidadEquipada): void {
+    for (const e of [...this.vivos.ecos]) {
+      const r = 60;
+      this.golpearArea({ x: e.x - r, y: e.pies - 12 - r * 0.7, w: r * 2, h: r * 1.4 }, { potencia: h.potencia * 0.6, tipo: "tecnica", empuje: 200, definitiva: true }, 1, new Set());
+      this.fx.estallar(e.x, e.pies - 12, { colores: [h.def.color, "#ffffff"], n: 24, velocidad: 200, tam: [1, 3], brillan: true, chispa: h.def.color, luz: { color: h.def.color, r: 90, dur: 0.5 } });
+      this.fx.texto(e.x, e.pies - 30, "Coro de Ecos", h.def.color);
+    }
+    this.vivos.ecos.length = 0;
+  }
+
+  // ---------------- Patadas con física: muro, boliche y púas ----------------
+
+  /** Enemigos que salieron volando de una patada: velocidad que conservan, daño de la patada y nivel de rebote. */
+  private readonly lanzados = new Map<Enemigo, { t: number; vx: number; danio: number; dir: number; cadena: number; golpeados: Set<Criatura> }>();
+
+  private lanzar(c: Enemigo, dir: number, danio: number, cadena: number): void {
+    const vx = dir * (cadena === 0 ? 340 : 260);
+    c.vx = vx;
+    c.vy = Math.min(c.vy, -110);
+    c.aturdido = Math.max(c.aturdido, 0.7);
+    this.lanzados.set(c, { t: 0.75, vx, danio, dir, cadena, golpeados: new Set([c]) });
+  }
+
+  private actualizarLanzados(dt: number): void {
+    for (const [c, l] of this.lanzados) {
+      l.t -= dt;
+      if (c.muerto || l.t <= 0 || Math.abs(l.vx) < 40) {
+        this.lanzados.delete(c);
+        continue;
+      }
+      // Conserva el impulso (el aturdimiento lo frenaría de golpe).
+      l.vx *= 1 - 1.6 * dt;
+      c.vx = l.vx;
+      c.aturdido = Math.max(c.aturdido, 0.2);
+      // 1) Púas: muerte instantánea (salvo élites, que sufren un golpe enorme).
+      if (this.tocaTile(c, T_PINCHOS)) {
+        const letal = c.categoria !== "elite";
+        c.aplicarDanio(letal ? c.hp : Math.round(l.danio * 3), this);
+        this.fx.texto(c.cx, c.y - 10, letal ? "¡EMPALADO!" : "¡Contra las púas!", "#ff4d6d", true);
+        this.fx.estallar(c.cx, c.y + c.h, { colores: ["#c8243a", "#8a1020", ...c.paleta], n: 26, velocidad: 160, tam: [1, 3], vida: 2, angulo: -Math.PI / 2, apertura: 2, luz: { color: "#ff4d6d", r: 60, dur: 0.4 } });
+        this.fx.congelar(0.1);
+        this.fx.sacudir(6);
+        this.audio.reproducir("explosion");
+        this.sumarEstilo("muerte");
+        this.lanzados.delete(c);
+        continue;
+      }
+      // 2) Muro: si choca rápido contra la roca, daño de impacto y queda aturdido.
+      const lado = l.dir > 0 ? c.x + c.w + 2 : c.x - 2;
+      const t = this.sala.tile(Math.floor(lado / TILE), Math.floor(c.cy / TILE));
+      if (t !== undefined && esSolido(t) && Math.abs(l.vx) > 110) {
+        const dano = Math.max(1, Math.round(l.danio * 0.8));
+        c.aplicarDanio(dano, this);
+        c.aturdido = Math.max(c.aturdido, 1.6);
+        c.vx = -l.dir * 60;
+        this.fx.texto(c.cx, c.y - 10, `¡Contra el muro! ${dano}`, "#ffe27a", true);
+        this.fx.estallar(lado, c.cy, { colores: ["#8a8070", "#5a5048", "#c8c0b0"], n: 16, velocidad: 120, tam: [1, 3], angulo: l.dir > 0 ? Math.PI : 0, apertura: 1.6, chispa: null, luz: { color: "#ffe9a8", r: 40, dur: 0.2 } });
+        this.fx.congelar(0.07);
+        this.fx.sacudir(5);
+        this.audio.reproducir("impacto");
+        this.sumarEstilo("golpe");
+        this.lanzados.delete(c);
+        continue;
+      }
+      // 3) Boliche: arrolla a los demás monstruos, que salen despedidos en cadena (hasta dos rebotes).
+      for (const o of this.criaturas) {
+        if (!(o instanceof Enemigo) || o.muerto || o.esJefe || l.golpeados.has(o) || !solapan(c, o)) continue;
+        l.golpeados.add(o);
+        const dano = Math.max(1, Math.round(l.danio * 0.6));
+        o.aplicarDanio(dano, this);
+        this.fx.texto(o.cx, o.y - 8, `${dano}`, "#ffe27a");
+        this.fx.chispas(o.cx, o.cy, "#ffffff", 10, { velocidad: 120, angulo: l.dir > 0 ? 0 : Math.PI, apertura: 1.4 });
+        this.fx.congelar(0.05);
+        this.audio.reproducir("patada");
+        if (!o.pesado && l.cadena < 2) this.lanzar(o, l.dir, Math.round(l.danio * 0.8), l.cadena + 1);
+        else o.empujar(l.dir, 180);
+        if (l.golpeados.size === 3) this.fx.texto(c.cx, c.y - 22, "¡CHUZA!", "#ff9a3d", true);
+        this.sumarEstilo("golpe");
+      }
+    }
+  }
+
+  /** ¿El cuerpo toca una baldosa de este tipo? */
+  private tocaTile(c: Criatura, tipo: number): boolean {
+    for (let tx = Math.floor((c.x + 1) / TILE); tx <= Math.floor((c.x + c.w - 1) / TILE); tx++) {
+      for (let ty = Math.floor((c.y + 1) / TILE); ty <= Math.floor((c.y + c.h + 1) / TILE); ty++) {
+        if (this.sala.tile(tx, ty) === tipo) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Cadenas y estandartes: brisa, el Portador los aparta al pasar y los estallidos los sacuden. */
+  private actualizarColgantes(dt: number): void {
+    const j = this.jugador;
+    for (const c of this.sala.colgantes) {
+      c.actualizar(dt, this.tiempo);
+      c.empujar(j.x - 2, j.y, j.w + 4, j.h, j.vx, j.vy);
+      for (const p of this.proyectiles) c.empujar(p.x - 4, p.y - 4, 8, 8, (p as unknown as { vx?: number }).vx ?? 0, 0);
+      for (const f of this.fx.fogonazos) if (f.vida > f.vidaMax - dt * 1.5) c.sacudir(f.x, f.y, f.r * 1.4, 260);
+    }
+  }
+
+  /** Todas las luces de la escena, en coordenadas de MUNDO, con su color y si proyectan sombra. */
+  private lucesEscena(): Luz[] {
+    const j = this.jugador;
+    const b = this.bioma;
+    const luces: Luz[] = [];
+    if (!j.muerto) luces.push({ x: j.cx, y: j.cy, r: 95, sombras: true });
+    const colorInter: Partial<Record<string, string>> = {
+      faro: "#ffe9a8", portal: "#b04dff", altar: b.acento, mercader: "#ffb23d", yunque: "#ff9a3d",
+    };
+    for (const i of this.interactuables) {
+      if (i.usado && i.tipo !== "faro" && i.tipo !== "portal") continue;
+      const color = i.tipo === "cofre" ? COLOR_COFRE[i.nivel] : i.tipo === "campana" ? i.color
+        : i.tipo === "reliquia" && i.reliquia !== undefined ? INFO_RELIQUIA[i.reliquia].color : colorInter[i.tipo];
+      luces.push({ x: i.cx, y: i.y + i.h / 2, r: i.tipo === "faro" ? 80 : 60, fuerza: 0.8, color, sombras: i.tipo === "faro" || i.tipo === "portal" });
+    }
+    for (const p of this.proyectiles) luces.push({ x: p.x, y: p.y, r: 30, fuerza: 0.75, color: p.op.color });
+    for (const c of this.criaturas) {
+      if (c.muerto) continue;
+      if (c instanceof Cazador) luces.push({ x: c.cx, y: c.y + 6, r: 55, fuerza: 0.85, color: "#ff2a3d" });
+      else if (c.esJefe) luces.push({ x: c.cx, y: c.cy, r: 80, fuerza: 0.6, color: b.acento, sombras: true });
+      else if (c instanceof Enemigo) {
+        // Los ojos de los monstruos brillan en la oscuridad (más las élites).
+        const elite = c.categoria === "elite";
+        luces.push({ x: c.cx + c.dir * c.w * 0.25, y: c.y + c.h * 0.3, r: elite ? 26 : 15, fuerza: elite ? 0.6 : 0.4, color: c.paleta[1] });
+      }
+    }
+    for (const bo of this.botines) if (premioDestacado(bo.premio) > 0) luces.push({ x: bo.x, y: bo.y, r: 30, fuerza: 0.6, color: colorPremio(bo.premio) });
+    const parpadeo = (k: number): number => 0.9 + Math.sin(this.tiempo * 9 + k * 1.7) * 0.06 + Math.sin(this.tiempo * 23 + k) * 0.04;
+    this.sala.luces.forEach((l, k) => luces.push({ x: l.x, y: l.y, r: l.r * parpadeo(k), fuerza: l.fuerza, color: "#ffb060", sombras: true }));
+    for (const c of this.criaturas) {
+      if (c instanceof Vela) luces.push({ x: c.llama.x, y: c.llama.y, r: 34 * parpadeo(c.indice + 5), fuerza: 0.85, color: "#ff9a3d" });
+    }
+    const z = this.zonaExtraccion;
+    if (z !== null) luces.push({ x: z.x + z.w / 2, y: z.y + z.h - 8, r: 55, fuerza: 0.7, color: "#7dffb0" });
+    for (const l of this.fx.luces()) luces.push(l);
+    for (const l of this.vivos.luces()) luces.push(l);
+    return luces;
+  }
+
   dibujar(g: CanvasRenderingContext2D): void {
     const b = this.bioma;
     const j = this.jugador;
+    const lucesMundo = this.lucesEscena();
     const camY = Math.max(0, Math.min(ALTO_SALA - 270, j.cy - 135));
     const sx = this.fx.sacudida > 0 ? Math.round((Math.random() - 0.5) * this.fx.sacudida) : 0;
     const sy = this.fx.sacudida > 0 ? Math.round((Math.random() - 0.5) * this.fx.sacudida) : 0;
@@ -1917,11 +2630,18 @@ export class Juego implements Contexto {
     g.save();
     g.translate(sx, Math.round(-camY) + sy);
     g.drawImage(this.sala.lienzo, 0, 0);
+    // Relieve: los cantos de la roca brillan del lado de cada luz (con su color).
+    dibujarRelieve(g, this.sala.bordes, lucesMundo);
+    for (const c of this.sala.colgantes) c.dibujar(g, "#8a8498", "#221c2c", "#5a1830", b.acento);
     dibujarBarreras(g, this.sala, this.tiempo);
     if (this.cadena !== null) this.dibujarCadena(g, this.cadena);
     if (this.puertasSelladas) this.dibujarSellos(g);
 
     for (const z of this.peligros) {
+      if (z.forma === "mano") {
+        this.dibujarMano(g, z);
+        continue;
+      }
       if (z.aviso > 0) {
         g.fillStyle = z.color;
         g.globalAlpha = 0.15 + (Math.floor(this.tiempo * 14) % 2) * 0.15;
@@ -1939,12 +2659,21 @@ export class Juego implements Contexto {
     }
 
     this.dibujarExtraccion(g);
+    this.dibujarCicatriz(g);
     for (const i of this.interactuables) i.dibujar(g, b.acento);
+    this.vivos.dibujar(g, this.tiempo);
     for (const bo of this.botines) bo.dibujar(g, Math.abs(bo.x + 4 - j.cx) < 34 && Math.abs(bo.y - j.cy) < 36);
     for (const c of this.criaturas) {
-      c.dibujar(g);
+      if (c.vibrar > 0) {
+        // Tiembla durante el hitstop.
+        g.save();
+        g.translate(Math.round((Math.random() - 0.5) * 4), Math.round((Math.random() - 0.5) * 2));
+        c.dibujar(g);
+        g.restore();
+      } else c.dibujar(g);
       this.dibujarEstado(g, c);
     }
+    this.aliado?.dibujar(g);
     if (!j.muerto) j.dibujar(g, this);
     if (!j.muerto && j.carga > 0.12) {
       const f = Math.min(1, j.carga / CARGA_COMPLETA);
@@ -1965,21 +2694,13 @@ export class Juego implements Contexto {
       g.restore();
     }
     for (const p of this.proyectiles) p.dibujar(g);
+    this.fx.dibujarFragmentos(g);
     this.fx.dibujarParticulas(g);
     g.restore();
 
-    // Iluminación
-    const luces: Luz[] = [{ x: j.cx, y: j.cy - camY, r: 95 }];
-    for (const i of this.interactuables) if (!i.usado || i.tipo === "faro" || i.tipo === "portal") luces.push({ x: i.cx, y: i.y - camY + i.h / 2, r: 60, fuerza: 0.8 });
-    for (const p of this.proyectiles) luces.push({ x: p.x, y: p.y - camY, r: 28, fuerza: 0.7 });
-    for (const c of this.criaturas) if (c.esJefe) luces.push({ x: c.cx, y: c.cy - camY, r: 70, fuerza: 0.6 });
-    for (const bo of this.botines) if (premioDestacado(bo.premio) > 0) luces.push({ x: bo.x, y: bo.y - camY, r: 30, fuerza: 0.6 });
-    const parpadeo = (k: number): number => 0.9 + Math.sin(this.tiempo * 9 + k * 1.7) * 0.06 + Math.sin(this.tiempo * 23 + k) * 0.04;
-    this.sala.luces.forEach((l, k) => luces.push({ x: l.x, y: l.y - camY, r: l.r * parpadeo(k), fuerza: l.fuerza }));
-    for (const c of this.criaturas) {
-      if (c instanceof Vela) luces.push({ x: c.llama.x, y: c.llama.y - camY, r: 34 * parpadeo(c.indice + 5), fuerza: 0.85 });
-    }
-    this.luz.dibujar(g, b.oscuridad, luces, "rgba(0,0,0,0)");
+    // Iluminación dinámica: luces de color y sombras duras contra la roca.
+    const luces: Luz[] = lucesMundo.map((l) => ({ ...l, y: l.y - camY }));
+    this.luz.dibujar(g, b.oscuridad, luces, "rgba(0,0,0,0)", { bordes: this.sala.oclusores, dx: 0, dy: -camY });
 
     // Bloom: lo emisivo se dibuja aparte, se difumina y se suma encima de la iluminación.
     const e = this.gEmisiva;
@@ -2028,6 +2749,8 @@ export class Juego implements Contexto {
     }
     g.restore();
     this.dibujarRelojArena(g);
+    this.dibujarTensionExtraccion(g);
+    this.dibujarDistorsion(g);
 
     if (this.fx.destello > 0) {
       g.globalAlpha = this.fx.destello * 0.6;

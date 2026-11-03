@@ -1,6 +1,7 @@
 // Progresión permanente (entre partidas): reliquias, esencia, mejoras del Santuario, Ecos y registro.
 // La esencia vive en una Billetera de minialu; las mejoras se compran con "todo o nada" igual que la tienda.
 
+import { registrarCicatriz, type Cicatriz } from "./cicatrices.ts";
 import { Billetera, exito, fallo, type ErrorPago, type Resultado } from "minialu";
 import { registrarEco, type Eco } from "./eco.ts";
 import { RELIQUIAS, type Reliquia, PISOS_RELIQUIA } from "./tipos.ts";
@@ -52,6 +53,19 @@ export interface DatosMeta {
   readonly ecos: readonly Eco[];
   readonly registro: Readonly<Registro>;
   readonly almasVistas: readonly number[];
+  /** Resonancias de mazo descubiertas (Códice). Guardados viejos no lo tienen. */
+  readonly resonancias?: readonly string[];
+  /** Cicatrices del Pozo: dónde caíste y quién te mató. */
+  readonly cicatrices?: readonly Cicatriz[];
+  /** Otros Portadores que vengaron tus caídas (Ecos asíncronos). */
+  readonly venganzas?: readonly VenganzaRecibida[];
+}
+
+export interface VenganzaRecibida {
+  readonly piso: number;
+  readonly vengador: string;
+  readonly recompensa: number;
+  readonly fecha: number;
 }
 
 export type ErrorMejora = "desconocida" | "al-maximo" | ErrorPago;
@@ -63,6 +77,9 @@ export class Meta {
   private ecos: Eco[];
   readonly registro: Registro;
   private readonly almasVistas: Set<number>;
+  private readonly resonancias: Set<string>;
+  private cicatrices: Cicatriz[];
+  venganzas: VenganzaRecibida[];
 
   constructor(datos: DatosMeta) {
     this.billetera = new Billetera({ esencia: datos.esencia });
@@ -71,6 +88,9 @@ export class Meta {
     this.ecos = [...datos.ecos];
     this.registro = { ...datos.registro };
     this.almasVistas = new Set(datos.almasVistas);
+    this.resonancias = new Set(datos.resonancias ?? []);
+    this.cicatrices = [...(datos.cicatrices ?? [])];
+    this.venganzas = [...(datos.venganzas ?? [])];
   }
 
   static nueva(): Meta {
@@ -151,6 +171,30 @@ export class Meta {
     this.almasVistas.add(id);
   }
 
+  marcarCicatriz(c: Cicatriz): void {
+    this.cicatrices = registrarCicatriz(this.cicatrices, c);
+  }
+
+  cicatrizDelPiso(piso: number): Cicatriz | undefined {
+    return this.cicatrices.find((c) => c.piso === piso);
+  }
+
+  /** Vencer al Devorador cierra la cicatriz. */
+  cerrarCicatriz(piso: number): void {
+    this.cicatrices = this.cicatrices.filter((c) => c.piso !== piso);
+  }
+
+  /** Anota una resonancia en el Códice. Devuelve true si es nueva. */
+  descubrirResonancia(id: string): boolean {
+    if (this.resonancias.has(id)) return false;
+    this.resonancias.add(id);
+    return true;
+  }
+
+  resonanciaDescubierta(id: string): boolean {
+    return this.resonancias.has(id);
+  }
+
   almaVista(id: number): boolean {
     return this.almasVistas.has(id);
   }
@@ -164,6 +208,9 @@ export class Meta {
       ecos: [...this.ecos],
       registro: { ...this.registro },
       almasVistas: [...this.almasVistas],
+      resonancias: [...this.resonancias],
+      cicatrices: [...this.cicatrices],
+      venganzas: [...this.venganzas],
     };
   }
 }

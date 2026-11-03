@@ -1,3 +1,6 @@
+import type { EfectosVivos } from "./efectos-vivos.ts";
+import type { DefResonancia } from "../contenido/resonancias.ts";
+import type { HabilidadEquipada } from "../dominio/partida.ts";
 import type { EstiloArma } from "../contenido/objetos.ts";
 // Lo que las entidades pueden pedirle al mundo. Lo implementa Juego; las entidades no se conocen entre sí.
 
@@ -54,6 +57,8 @@ export interface Peligro {
   danio: number;
   color: string;
   golpeo: boolean;
+  /** Cómo se dibuja: "mano" = Mano del Abismo que brota del suelo. */
+  forma?: "mano";
 }
 
 /** Cadena vertical para trepar entre salas (x del centro; extremos en píxeles; pueden salir de la sala). */
@@ -80,11 +85,17 @@ export interface Contexto {
   agregarCriatura(c: Criatura): void;
   agregarPeligro(p: Peligro): void;
   /** Daño bruto (ataque del enemigo) al jugador; aplica defensa, invulnerabilidad y efectos. */
-  golpearJugador(ataque: number, desdeX: number, empuje?: number): void;
+  golpearJugador(ataque: number, desdeX: number, empuje?: number, fuente?: string): void;
   golpearCriatura(c: Criatura, a: AtaqueJugador, dirX: number): boolean;
   /** Golpea todo lo que toque un rectángulo (una vez por criatura por ataque, según `yaGolpeados`). */
   golpearArea(r: { x: number; y: number; w: number; h: number }, a: AtaqueJugador, dirX: number, yaGolpeados: Set<Criatura>): number;
   /** El jugador intentó romper barreras con este rectángulo. */
   tocarBarreras(r: { x: number; y: number; w: number; h: number }, medio: "embestida" | "fuego"): void;
   mensaje(texto: string, color?: string): void;
+  /** Efectos vivos (zonas, ecos, acciones programadas) para las mutaciones de habilidad. Opcional en pruebas. */
+  readonly vivos?: EfectosVivos;
+  /** Dos habilidades resonaron: dispara el efecto combinado (y lo anota en el Códice si es nuevo). */
+  resonar?(r: DefResonancia, potencia: number): void;
+  /** 12★ Coro de Ecos: cada eco imita la Definitiva. */
+  imitarDefinitiva?(h: HabilidadEquipada): void;
 }

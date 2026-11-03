@@ -1,0 +1,123 @@
+/* =====================================================================================================
+   ESTÉTICA PIXEL ART UNIFICADA
+   Toda la interfaz HTML comparte el lenguaje del juego: fuentes de píxel (Pixelify Sans para leer, Jacquard 12
+   —gótica pixelada— para títulos), cero bordes redondeados y marcos nine-slice dibujados por código
+   (ui/marcos.ts): hierro forjado, madera con herrajes, vidrio oscuro y botones biselados.
+   Va después de estilos.css y tiendas.css: los sobreescribe.
+   ===================================================================================================== */
+
+:root {
+  --fuente: "Pixelify Sans", "Segoe UI", system-ui, sans-serif;
+  --titulo: "Jacquard 12", Georgia, serif;
+}
+
+html, body, button, input, select, textarea { font-family: var(--fuente); }
+body { -webkit-font-smoothing: none; -moz-osx-font-smoothing: grayscale; font-smooth: never; text-rendering: optimizeSpeed; }
+
+h1, h2, .b-titulo, .relicario-titulo, .lema, .panel-titulo h1 { font-family: var(--titulo); font-weight: normal; letter-spacing: 0.04em; }
+h1 { font-size: 2.6em; }
+h2 { font-size: 1.9em; }
+h3, .ficha .nombre, .b-sub, .cita, .inv-cabecera > b, .ranura-partida b, .relicario-estrellas, .inv-pista {
+  font-family: var(--fuente); font-weight: 600; font-style: normal;
+}
+h3 { letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.95em; }
+.cita { font-style: normal; opacity: 0.9; }
+
+/* Sin bordes redondeados: todo es de píxel. (Los halos de aura son pseudo-elementos y conservan su forma.) */
+body * { border-radius: 0 !important; }
+
+/* Sombras duras de píxel en vez de difusas */
+.panel { box-shadow: 0 6px 0 #000a !important; }
+
+/* ---------- Paneles: hierro forjado ---------- */
+.panel {
+  background: none !important;
+  border: 16px solid transparent !important;
+  border-image: var(--marco-hierro) 8 fill / 16px round !important;
+  image-rendering: pixelated;
+}
+.panel.tienda { border-image: var(--marco-madera) 8 fill / 16px round !important; }
+
+/* ---------- Vidrio oscuro: fichas, detalles, secciones ---------- */
+.detalle, .mision, .toast, .inv > section, .relicario-revelado .ficha, .campana-info > div, .registro-desafios .records > div, .inv-stat {
+  background: none !important;
+  border: 6px solid transparent !important;
+  border-image: var(--marco-vidrio) 4 fill / 8px round !important;
+  image-rendering: pixelated;
+}
+.mision { border-left-width: 6px !important; }
+
+/* ---------- Botones biselados ---------- */
+button {
+  background: none;
+  border: 6px solid transparent;
+  border-image: var(--marco-boton) 4 fill / 8px round;
+  image-rendering: pixelated;
+  padding: 0.15em 0.7em;
+  text-shadow: 1px 1px 0 #000;
+  transition: none;
+}
+button:hover:not(:disabled) { background: none; border-image-source: var(--marco-boton-hover); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button.principal { background: none; border-image-source: var(--marco-boton-principal); color: #fff6d8; }
+button.principal:hover:not(:disabled) { border-image-source: var(--marco-boton-principal-hover); }
+.tab.on, .inv-filtros button.on { background: none; border-image-source: var(--marco-boton-on); color: #fff; }
+button:disabled { border-image-source: var(--marco-boton-apagado); opacity: 0.75; color: #6a6280; }
+.inv-filtros button { border-width: 4px; border-image-width: 6px; padding: 0 0.5em; font-size: 0.75em; }
+
+/* Los botones que son "fichas" (cartas, casillas, ranuras…) conservan su propio dibujo. */
+button.carta, button.celda, button.inv-celda, button.inv-ranura, button.ranura, button.ranura-fusion, button.alma,
+button.inv-runa, button.ranura-partida, button.articulo, .aura-chip {
+  border-image: none !important;
+  text-shadow: none;
+}
+button.carta, button.celda, button.inv-celda, button.inv-ranura, button.ranura, button.alma, button.inv-runa { border-width: 1px; border-style: solid; }
+button.ranura-fusion { border-width: 2px; }
+
+/* Casillas: bisel hundido de píxel en vez de degradado suave */
+.inv-celda, .inv-ranura, .celda {
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #ffffff14 !important;
+}
+.inv-celda.r4, .inv-ranura.r4, .inv-celda.r5, .inv-ranura.r5 {
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #ffffff14, 0 0 0 1px var(--c), 0 0 6px var(--c) !important;
+}
+
+/* Barras y capacidad con borde de píxel */
+.inv-capacidad, .prob { border: 2px solid #000 !important; box-shadow: inset 0 0 0 1px #3a3050; }
+
+/* Cartel de piso / jefe: título gótico con sombra de píxel */
+.b-titulo { text-shadow: 2px 2px 0 #000, 0 0 12px currentColor; }
+
+/* Pactos del Templado Abisal */
+.pacto { margin-top: 0.3em; padding: 0.2em 0.5em; border-left: 3px solid #b04dff; background: #1a0e24; }
+.pacto b { color: #c9a7ff; }
+.resultado.abisal { color: #c9a7ff; text-shadow: 0 0 8px #b04dff; }
+
+/* Mutaciones por estrella y Resonancias de Mazo */
+.esencia { display: inline-block; margin: 0.15em 0.3em 0.15em 0; padding: 0 0.4em; border: 1px solid var(--c, #3a3050); color: var(--c, #9a90b0); font-size: 0.8em; background: #00000066; }
+.esencia.vacia { color: #5a5070; border-style: dashed; }
+.mutaciones { display: flex; flex-direction: column; gap: 0.1em; margin: 0.2em 0 0.3em 0.6em; }
+.mutacion { font-size: 0.78em; color: #5a5070; }
+.mutacion b { color: #6a6080; }
+.mutacion.on { color: #d8d0e8; }
+.mutacion.on b { color: #ffd27a; text-shadow: 0 0 6px #ffd27a66; }
+.codice { margin: 0.4em 0; }
+.esencias-mazo { margin: 0.3em 0; }
+.codice-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(10em, 1fr)); gap: 0.3em; }
+.resonancia { display: flex; flex-direction: column; padding: 0.3em 0.5em; border: 1px dashed #3a3050; color: #5a5070; background: #0b0814; }
+.resonancia.on { border: 1px solid var(--c); color: var(--c); box-shadow: inset 0 0 8px color-mix(in srgb, var(--c) 30%, transparent); }
+.resonancia small { font-size: 0.72em; opacity: 0.9; }
+.resonancia .sub { font-size: 0.72em; }
+
+/* Ecos: decisión al vencer a tu Eco y venganzas */
+.decision-eco { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; margin-top: 0.8em; }
+.decision-eco button { display: flex; flex-direction: column; gap: 0.3em; padding: 0.6em 0.8em; text-align: left; }
+.decision-eco button b { font-size: 1.05em; }
+.decision-eco small { font-size: 0.78em; opacity: 0.9; line-height: 1.35; }
+.decision-eco .pacto-eco b { color: #9fe8ff; }
+.venganzas { margin: 0.3em 0; }
+.venganza { color: #7dffb0; font-size: 0.85em; }
+
+/* Historias del pueblo */
+.historia-mision { margin: 0.6em 0; padding: 0.4em 0.8em; border-left: 3px solid #ffd27a; background: #1a1220; }
+.receta.mitica { border-left: 3px solid #ff4d6d; padding-left: 0.5em; }

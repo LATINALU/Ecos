@@ -16,6 +16,8 @@ export const OBJ_DADO_BASE = 30;
 export const OBJ_RELICARIO = 20;
 /** Caja de Almas: la sueltan los monstruos; da una carta de 1★ a 6★. */
 export const OBJ_CAJA_ALMAS = 21;
+/** Recuerdos de las misiones personales del pueblo (50 martillo, 51 rosario, 52 cinta, 53 llave). */
+export const OBJ_RECUERDO_BASE = 50;
 
 export interface DefConsumible {
   readonly id: number;
@@ -396,6 +398,10 @@ export function consumible(id: number): DefConsumible | undefined {
 
 /** Objetos especiales: no se venden en el Bazar. */
 export const OBJETOS_ESPECIALES: readonly DefConsumible[] = [
+  { id: OBJ_RECUERDO_BASE, nombre: "Martillo de Dorn", maxPila: 1, precio: 0, color: "#ff9a3d", descripcion: "Recuerdo. Pesa más de lo que debería. Llévaselo a Dorn, en la Fragua. Se pierde si mueres con él." },
+  { id: OBJ_RECUERDO_BASE + 1, nombre: "Rosario de Ceniza", maxPila: 1, precio: 0, color: "#a07cff", descripcion: "Recuerdo. Faltan dos cuentas. Llévaselo a la Hermana Ceniza. Se pierde si mueres con él." },
+  { id: OBJ_RECUERDO_BASE + 2, nombre: "Cinta de Marta", maxPila: 1, precio: 0, color: "#ff4d6d", descripcion: "Recuerdo. Una cinta roja, descolorida por el agua. Llévasela a Ilse. Se pierde si mueres con ella." },
+  { id: OBJ_RECUERDO_BASE + 3, nombre: "Llave del Juramento", maxPila: 1, precio: 0, color: "#c9a7ff", descripcion: "Recuerdo. Una llave de hierro negro. Llévasela a Custodio Vael. Se pierde si mueres con ella." },
   {
     id: OBJ_RELICARIO, nombre: "Relicario de Almas", maxPila: 99, precio: 0, color: "#ffd27a",
     descripcion: "Un cofrecito sellado que late; lo sueltan los guardianes. Ábrelo desde el inventario: guarda UNA carta de alma de 5★ a 12★. "

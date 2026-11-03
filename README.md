@@ -12,7 +12,15 @@ Cada vez que mueres, el Pozo guarda un **Eco** tuyo, una copia de ti que te espe
 > *Cada guerrero que cae en el Pozo deja un eco. El Pozo recuerda a todos.*
 
 Todo lo que se ve —personajes, enemigos, edificios, efectos— está dibujado por código, sin imágenes externas para lo
-principal.
+principal:
+
+- **Iluminación dinámica:** faroles, velas, orbes, fogonazos y hasta los ojos de los monstruos son luces de color; la
+  roca proyecta **sombras duras** y sus cantos brillan del lado de cada luz, como piedra húmeda.
+- **Física en los efectos:** al romper un escudo, una barrera o un enemigo, los fragmentos rotan, rebotan contra el
+  suelo, dejan estela de chispas e iluminan el entorno un instante.
+- **Animación procedural:** cadenas y estandartes cuelgan con física (se mecen y se apartan al pasar), y los
+  guardianes que caminan apoyan sus patas en el suelo con cinemática inversa.
+- **Interfaz pixel art:** fuentes de píxel y marcos de hierro forjado, madera y vidrio dibujados por código.
 
 ---
 
@@ -101,7 +109,8 @@ Es una decisión constante: **¿sigo bajando para conseguir algo mejor, o vuelvo
 
 ## El pueblo (Último Refugio)
 
-El pueblo es un lugar seguro. Cada edificio tiene un servicio:
+El pueblo es un lugar seguro, al borde del abismo. Cada edificio tiene un servicio, y cada habitante, un pasado
+atado al Pozo (acércate y pulsa **↑** para hablar con ellos):
 
 | Edificio | Qué ofrece |
 |---|---|
@@ -113,6 +122,26 @@ El pueblo es un lugar seguro. Cada edificio tiene un servicio:
 | **Fragua** | Forjar equipo con materiales y **refinar** lo que llevas puesto |
 | **Santuario** | Mejoras permanentes que se pagan con **esencia** |
 | **El Pozo** | Bajar al Pozo (eligiendo el piso inicial) o al **Abismo** |
+
+### Historias del pueblo
+
+Cuatro habitantes te piden algo personal. Aparece un **«!»** sobre su cabeza cuando estás cerca de poder hacerlo:
+
+| Quién | Misión | Recompensa permanente |
+|---|---|---|
+| **Dorn** (Fragua) | Fue Portador y volvió del piso 18 sin piernas. Vence a su Eco joven y trae su martillo | **Forja Mítica**: forjar piezas Míticas con nombre |
+| **Hermana Ceniza** (Altar) | Su gemelo cayó en el piso 9. Trae su rosario | **+10 %** de éxito en todas las fusiones |
+| **Ilse** (Taberna) | Su hija Marta bajó con 16 años y no volvió del piso 5. Trae su cinta | Cada descenso empiezas con una **poción y un éter** extra |
+| **Custodio Vael** (Bóveda) | Un Portador juró volver por su cofre. Su Eco vaga por el piso 14 | Si mueres, **conservas tu arma** |
+
+El recuerdo se pierde si mueres con él encima: el Eco vuelve a esperarte.
+
+### Un pueblo que renace
+
+El pueblo cambia con tu progreso (pisos superados y esencia invertida en el Santuario): al principio está en
+**ruinas**, oscuro, con escombros y lloviendo ceniza; a medida que avanzas se encienden los faroles (de **éter** al
+final), aparecen estandartes, los **trofeos de los Guardianes** que venciste cuelgan junto a la Taberna y
+**aventureros** pasean comentando tus hazañas.
 
 Dentro del Pozo **no hay tiendas**: para comprar, fusionar o forjar hay que volver a la superficie. La única excepción
 es el Abismo (ver más abajo).
@@ -150,9 +179,23 @@ Escarcha, Ciudad Sumergida, Biblioteca de Ceniza… y más). Cada zona tiene su 
 ### Riesgo y extracción
 
 - Lo que recoges en el Pozo está **"en riesgo"** (se muestra abajo a la derecha).
-- Si **extraes** (zona verde o portal del guardián), todo pasa a ser tuyo de verdad.
-- Si **mueres**, pierdes lo que llevabas en ese descenso.
+- **Extraer da miedo:** al pisar la zona verde, el Pozo intenta impedir que te vayas. Tienes que **resistir dentro de
+  la zona entre 15 y 20 segundos** (salir pausa el progreso y cada golpe lo hace retroceder) mientras la música se
+  acelera, los bordes de la pantalla laten en rojo, brotan **Manos del Abismo** bajo tus pies y llegan cazadores
+  atraídos por el brillo de tu botín. **Cuanto más Legendario o Mítico lleves, más violenta es la emboscada.**
+- Si lo logras, o si tomas el portal del guardián, todo pasa a ser tuyo de verdad. Si **mueres**, lo pierdes.
 - Al vencer al guardián de un piso, desde el pueblo podrás empezar a bajar **desde el piso siguiente**.
+
+### Peso del Eco (codicia)
+
+Cada piso que bajas **seguido** sin volver al pueblo suma **Peso del Eco** (se ve abajo a la derecha):
+
+- Cada punto da **+25 % de hallazgos raros** (mejor botín y más Relicarios en las élites).
+- Desde Peso 2, el Pozo manda un **Cazador de Portadores**: atraviesa paredes, no se detiene al recibir golpes y te
+  **sigue de sala en sala** (entra por la puerta detrás de ti). Se puede matar, y suelta un Relicario y una pieza
+  Legendaria. Cuanto más Peso, antes llega y más resiste.
+- Con mucho Peso, la imagen misma del Pozo empieza a distorsionarse.
+- El Peso vuelve a cero cuando empiezas un descenso nuevo desde el pueblo.
 
 ### Cofres
 
@@ -182,6 +225,13 @@ El Abismo es un modo alternativo, **infinito**:
 - **Medidor de estilo** (D → C → B → A → S → SS → SSS): sube si pegas seguido **y variado**. Cada rango da más daño,
   más éter y, desde S, más velocidad. Se corta si dejas de pegar o si te golpean.
 - **Esquiva perfecta:** esquivar justo cuando algo te iba a pegar → cámara lenta, éter extra y crítico seguro.
+- **Peso en cada golpe:** el juego se congela unos milisegundos al conectar (más en críticos, remates, el mazo y los
+  ataques cargados) y el enemigo tiembla antes de salir despedido. Cada espadazo deja un arco de corte blanco y del
+  color del aura de tu Forma.
+- **La patada mueve el mundo:** el enemigo sale volando. Contra un **muro** recibe daño de impacto y queda aturdido;
+  contra otros monstruos los arrolla **como bolos** (¡CHUZA!); sobre **púas**, muere al instante.
+- **Música que reacciona a tu estilo:** en D y C solo suenan percusión y bajo; en A entra la melodía; en S un coro y en
+  SS una guitarra distorsionada. Al llegar a S, SS y SSS el Pozo **susurra** el nombre del rango.
 - **Ataque cargado:** mantener **J** y soltar. Cada arma tiene el suyo.
 - **Golpes aéreos:** acertar en el aire te mantiene arriba y recarga el salto y la embestida.
 - **Enemigos élite:** más grandes, con borde dorado y **afijos** (Veloz, Blindado, Vampiro, Regenerador, Explosivo,
@@ -230,6 +280,25 @@ Las cartas son el corazón de tu personaje. Cada una contiene el alma de un guer
 | 5★ | 6★ | 7★ | 8★ | 9★ | 10★ | 11★ | 12★ |
 |---|---|---|---|---|---|---|---|
 | Gris | Morada | Verde | Azul | Roja | Dorada | Plateada | **Prismática** (arcoíris) |
+
+### Mutaciones: las estrellas cambian lo que hace la habilidad
+
+Subir de estrella no solo da más números. Al llegar a **5★, 9★ y 12★**, cada habilidad **muta** según su forma.
+Por ejemplo, las habilidades que lanzan proyectiles:
+
+- **5★ Eco:** donde termina el proyectil queda un eco tuyo que estalla.
+- **9★ Paso del Eco:** si repites la tecla durante el enfriamiento, te teletransportas al eco cortando todo a tu paso.
+- **12★ Coro de Ecos:** al usar tu Definitiva, todos tus ecos la imitan.
+
+Las embestidas dejan estelas y se encadenan, las novas atraen y dejan agujeros negros, las ondas abren grietas y
+levantan columnas, los rayos saltan en cadena… La ficha de cada carta muestra sus tres mutaciones y cuáles tienes.
+
+### Resonancias de Mazo (combinaciones secretas)
+
+Cada habilidad tiene una **esencia** (Fuego, Hielo, Veneno, Tormenta, Tierra, Viento, Sombra o Arcano). Si usas una
+habilidad y, en menos de 1,5 s, otra de **otra ranura** cuya esencia combina, **resuenan** en un efecto que no existe
+en ninguna de las dos cartas: Fuego + Viento = **Tornado de Ceniza**, Sombra + Arcano = **Eclipse Menor**… Hay 10
+por descubrir, y el **Códice de Resonancias** (pestaña Cartas) anota las que encuentras.
 
 ### Fusión y mejora (en el Altar)
 
@@ -282,8 +351,9 @@ Si tienes varias cajas, **"Abrir todas"** las abre de una vez y muestra el resul
 - Las piezas **Míticas con nombre** tienen efectos únicos.
 - **Conjuntos de armadura:** llevar 2, 4 o 6 piezas del mismo set da bonos extra.
 - **Runas:** 2 ranuras de pasivas equipables, en 4 rarezas. Tres iguales se funden en una mejor.
-- **Refinado:** en la Fragua puedes subir una pieza hasta **+10**. Desde +6 puede fallar (pierdes los materiales,
-  nunca la pieza).
+- **Templado:** en la Fragua puedes subir una pieza hasta **+10** y **nunca falla**. Desde +6 eliges:
+  **Templado Seguro** (caro) o **Templado Abisal** (barato, pero sella un **pacto** en la pieza: un bono salvaje junto
+  con una maldición, como *Filo Hambriento*: +40 % de daño crítico, pero recibes +15 % de daño).
 
 ### 12 ranuras de equipo
 
@@ -383,11 +453,24 @@ la arena normal o **invocar el Juicio** (inspirado en las *Míticas+* de World o
 ## Ecos: lo que dejas al morir
 
 Cuando mueres, el Pozo crea tu **Eco**: una copia de ti, con tu Forma, tus stats y tu mejor pieza de equipo, que te
-espera en el piso donde caíste. Si lo vences, **recuperas esa pieza**. Puede haber hasta 3 Ecos a la vez.
+espera en el piso donde caíste. Puede haber hasta 3 Ecos a la vez. El jefe final, **El Que Recuerda**, pelea con las
+técnicas de todos tus Ecos.
 
-El jefe final, **El Que Recuerda**, pelea con las técnicas de todos tus Ecos.
-
----
+- **Tu Eco aprende de ti.** El juego anota cómo peleas en cada descenso (si te mantienes lejos, si atacas desde el
+  aire, si esquivas a último momento, si pateas, si abusas de las habilidades, tu ritmo y tu arma) y tu Eco **pelea
+  igual**: si eras un arquero que huía, te hará *kiting* por la sala y te disparará; si vivías en el aire, te caerá en
+  picado; si esquivabas, esquivará tus golpes. El cartel del duelo dice qué aprendió.
+- **Absorber o pactar.** Al vencerlo eliges:
+  - **Absorber el Recuerdo:** recuperas lo que perdiste y te curas por completo.
+  - **Dejar que te acompañe:** se vuelve un **Espectro Temporal** que pelea a tu lado todo ese piso. Si lo terminas
+    con vida, te devuelve tu mejor pieza **con un templado más**. Si caes, se pierde.
+- **Cicatrices del Pozo.** Si un monstruo te mata, la próxima vez que pases por ese piso habrá una sala con **tus
+  armas rotas clavadas en el suelo**, tu sangre seca y ese mismo monstruo convertido en el **«Devorador de [tu
+  nombre]»**: más fuerte, con sus mismos afijos y usando una de tus habilidades. Vencerlo cierra la cicatriz.
+- **Ecos de otros Portadores.** A veces, en la sala del Eco te espera el de **otro Portador** que cayó en ese piso.
+  Si lo vences, usas una versión **Espectral** de su arma durante ese descenso, y a él le llega a su Taberna: *«Un
+  Portador vengó tu caída en el piso N — Recibes X esquirlas»*. Hoy se comparten entre las partidas de la misma
+  computadora; con un servidor (variable `VITE_ECOS_URL`) se comparten en línea.
 
 ## Misiones
 

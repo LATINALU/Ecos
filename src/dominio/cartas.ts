@@ -136,6 +136,8 @@ export function fusionarCartas(
   cartas: readonly [Carta, Carta, Carta],
   azar: Azar,
   suerte = false,
+  /** Bono a la probabilidad de subir (Bendición del Rosario). */
+  bono = 0,
 ): Resultado<{ carta: Carta; subio: boolean }, ErrorFusion> {
   // minialu exige el mismo "tipo": acá la regla es solo la misma estrella, así que se fusiona con tipo común
   // y la carta nueva toma la familia de su alma. Si las almas difieren, sale una de las tres.
@@ -143,7 +145,7 @@ export function fusionarCartas(
   return fusionar(sinFamilia, {
     azar,
     nivelMaximo: NIVEL_MAX_CARTA,
-    probabilidad: (_tipo, nivel) => PROB_FUSION[nivel],
+    probabilidad: (_tipo, nivel) => Math.min(1, PROB_FUSION[nivel] + bono),
     personajesPosibles: (cs) => cs.map((c) => c.personaje),
     crear: (_tipo, nivel, personaje) => crearCarta(azar, personaje, nivel),
   }, suerte);

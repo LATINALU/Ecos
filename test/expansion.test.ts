@@ -9,6 +9,7 @@ import { ANIMACIONES_CRIATURAS } from "../src/contenido/sprites.generado.ts";
 import { TALENTOS } from "../src/contenido/talentos.ts";
 import { botinEnemigo } from "../src/dominio/botin.ts";
 import { refinarEquipado } from "../src/dominio/crafteo.ts";
+import { costoTemplado } from "../src/dominio/templado.ts";
 import { generarEquipo } from "../src/dominio/equipo.ts";
 import { Meta } from "../src/dominio/meta.ts";
 import { Partida } from "../src/dominio/partida.ts";
@@ -103,26 +104,41 @@ describe("conjuntos", () => {
   });
 });
 
-describe("refinado hasta +10", () => {
-  it("hasta +5 nunca falla; después puede fallar sin perder la pieza", () => {
+describe("templado hasta +10 (nunca falla)", () => {
+  it("hasta +5 es normal; del +6 se elige Seguro o Abisal y siempre sube", () => {
     const p = new Partida(Meta.nueva(), 7);
     p.billetera.acreditar("esquirlas", 1_000_000);
     p.mochila.agregar(MAT_FRAGMENTO, 99);
     for (let i = 0; i < 5; i++) expect(refinarEquipado(p, "arma").ok).toBe(true);
     expect(p.equipo.arma!.refinado).toBe(5);
-    let fallos = 0;
-    for (let i = 0; i < 40 && (p.equipo.arma!.refinado ?? 0) < 10; i++) {
-      const r = refinarEquipado(p, "arma");
-      if (!r.ok) {
-        expect(r.error).toBe("fallo-refinado");
-        fallos++;
-      }
+    const sinElegir = refinarEquipado(p, "arma");
+    expect(sinElegir.ok).toBe(false);
+    if (!sinElegir.ok) expect(sinElegir.error).toBe("elige-templado");
+    expect(refinarEquipado(p, "arma", "seguro").ok).toBe(true);
+    expect(p.equipo.arma!.refinado).toBe(6);
+    expect(p.equipo.arma!.pactos ?? []).toHaveLength(0);
+    for (let i = 0; i < 4; i++) {
       p.mochila.agregar(MAT_FRAGMENTO, 10);
+      const r = refinarEquipado(p, "arma", "abisal");
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.valor.pactoNuevo).toBeDefined();
     }
-    expect(p.equipo.arma).not.toBeNull();
-    expect(fallos).toBeGreaterThan(0);
+    expect(p.equipo.arma!.refinado).toBe(10);
+    // Cuatro pactos distintos en la pieza.
+    expect(new Set(p.equipo.arma!.pactos).size).toBe(4);
+  });
+
+  it("el Abisal es más barato que el Seguro y los pactos cambian los números", () => {
+    expect(costoTemplado(6, "abisal").esquirlas).toBeLessThan(costoTemplado(6, "seguro").esquirlas);
+    const p = new Partida(Meta.nueva(), 9);
+    const antes = { hp: p.stats().hp, recibido: p.multiplicadorRecibido(), critDanio: p.combate().critDanio };
+    p.equipo.arma = { ...p.equipo.arma!, pactos: ["hambriento", "frio"] };
+    expect(p.combate().critDanio).toBeCloseTo(antes.critDanio + 0.4);
+    expect(p.multiplicadorRecibido()).toBeCloseTo(antes.recibido * 1.15);
+    expect(p.stats().hp).toBeLessThan(antes.hp);
   });
 });
+
 
 describe("talentos y stats nuevos", () => {
   it("cuatro sendas con cuatro grados cada una", () => {

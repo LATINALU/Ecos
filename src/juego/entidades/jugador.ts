@@ -2,6 +2,11 @@
 // golpe ascendente (↑ + golpe), patada que rompe guardias, pisotón con rebote, Embestida, Doble Salto,
 // talentos (salto de pared, corte final, golpe de éter...) y la técnica de la Forma equipada.
 
+import type { HabilidadEquipada } from "../../dominio/partida.ts";
+import { esSolido } from "../../dominio/mundo/sala.ts";
+import { auraDeNivel } from "../../dominio/relicario.ts";
+import { tierMutacion } from "../../contenido/mutaciones.ts";
+import { VENTANA_RESONANCIA, buscarResonancia, esenciaDe, type Esencia } from "../../contenido/resonancias.ts";
 import { ejecutarHabilidad } from "../habilidades.ts";
 import { CARGA_DEFINITIVA } from "../../dominio/partida.ts";
 import { ELEMENTOS } from "../../contenido/elementos.ts";
@@ -78,6 +83,11 @@ export class Jugador implements Cuerpo {
   private golpeadosEmbestida = new Set<Criatura>();
   /** Enfriamiento de las habilidades I, II, III y la Definitiva. */
   private readonly cdHab = [0, 0, 0, 0];
+  /** 9★ Doble Paso (embestidas): la ranura ya usó su segunda embestida. */
+  private readonly pasoDoble = [false, false, false, false];
+  private cdPasoEco = 0;
+  /** Última habilidad usada (para las Resonancias de Mazo). */
+  private ultimaHab: { r: number; esencia: Esencia; t: number; potencia: number } | null = null;
   /** Ataque de la habilidad en curso (embestida, garras, caída). */
   private ataqueAccion: AtaqueJugador | null = null;
   private colorAccion = "#e0c48a";
@@ -130,6 +140,17 @@ export class Jugador implements Cuerpo {
   private tFantasma = 0;
   /** Estiramiento visual (salto) / aplastamiento (aterrizaje); vuelve a 1. */
   private estir = 1;
+  /**
+   * Smear frame: arco de corte que queda 2-3 cuadros DESPUÉS de cada espadazo (blanco por dentro y del color del
+   * aura de tu Forma por fuera). Es lo que hace que un golpe rápido "se lea" con peso.
+   */
+  private smear: { x: number; y: number; radio: number; desde: number; hasta: number; vida: number; ancho: number; color: string; accion: unknown } | null = null;
+  private ultimaSmear: unknown = null;
+
+  /** Tipo de la acción en curso (para el hitstop del ataque cargado). */
+  get accionTipo(): string | null {
+    return this.accion?.tipo ?? null;
+  }
   private polvoGiro = 0;
   private readonly estela: { x: number; y: number }[] = [];
   private readonly sombras: { x: number; y: number; vida: number }[] = [];
@@ -200,6 +221,7 @@ export class Jugador implements Cuerpo {
     const p = ctx.partida;
     const ligereza = p.tieneTalento("ligereza");
     this.t += dt;
+    this.cdPasoEco = Math.max(0, this.cdPasoEco - dt);
     this.zonaActiva = null;
     this.tEsquiva += dt;
     if (this.buffer !== null) {
@@ -257,7 +279,10 @@ export class Jugador implements Cuerpo {
     }
     if (this.intentarTrepar(ctx, e)) return;
 
+    if (this.smear !== null && (this.smear.vida -= dt) <= 0) this.smear = null;
     if (this.embestida > 0) {
+      // Squash & stretch: en la embestida se estira un 20 % en el eje del movimiento.
+      this.estir = 0.8;
       this.actualizarEmbestida(dt, ctx, e);
       this.dejarFantasma(dt);
       return;
@@ -548,7 +573,14 @@ export class Jugador implements Cuerpo {
       ctx.mensaje(r === 4 ? "Sin Definitiva: pon una carta en la 5.ª ranura del mazo (I → Cartas)" : `Ranura vacía: pon una carta de alma en «Habilidad ${["I", "II", "III"][r - 1]}» (I → Cartas)`, "#aaaaaa");
       return;
     }
-    if (this.cdHab[r - 1] > 0) return;
+    if (this.cdHab[r - 1] > 0) {
+      // 9★ Paso del Eco: durante el enfriamiento de un proyectil, repetir la tecla te lleva al eco.
+      if (r !== 4 && (h.def.forma === "proyectil" || h.def.forma === "boomerang") && tierMutacion(h.carta.nivel) >= 2
+        && ctx.vivos !== undefined && ctx.vivos.ecos.length > 0 && this.cdPasoEco <= 0) {
+        this.pasoAlEco(ctx, h);
+      }
+      return;
+    }
     if (r === 4) {
       if (p.cargaDefinitiva < CARGA_DEFINITIVA) {
         ctx.fx.texto(this.cx, this.y - 4, `Definitiva ${Math.floor(p.cargaDefinitiva)} %`, "#ffd27a");
@@ -572,6 +604,72 @@ export class Jugador implements Cuerpo {
     p.registrarMision(r === 4 ? "definitiva" : "habilidad");
     ctx.audio.reproducir(r === 4 ? "unico" : "tecnica");
     ejecutarHabilidad(this, ctx, h, r === 4);
+    // 9★ Doble Paso: la primera embestida deja encadenar otra de inmediato.
+    if (r !== 4 && h.def.forma === "embestida" && tierMutacion(h.carta.nivel) >= 2) {
+      if (!this.pasoDoble[r - 1]) {
+        this.cdHab[r - 1] = 0.15;
+        this.pasoDoble[r - 1] = true;
+      } else this.pasoDoble[r - 1] = false;
+    }
+    // 12★ Coro de Ecos: si alguna carta de proyectil del mazo es 12★, los ecos imitan la Definitiva.
+    if (r === 4 && ctx.imitarDefinitiva !== undefined) {
+      const coro = ([1, 2, 3] as const).some((k) => {
+        const o = p.habilidad(k);
+        return o !== null && (o.def.forma === "proyectil" || o.def.forma === "boomerang") && tierMutacion(o.carta.nivel) >= 3;
+      });
+      if (coro) ctx.imitarDefinitiva(h);
+    }
+    // Resonancias de Mazo: dos esencias que combinan, encadenadas desde ranuras distintas.
+    if (r !== 4) {
+      const esencia = esenciaDe(h.def, alma(h.carta.personaje).tipo);
+      const previa = this.ultimaHab;
+      if (previa !== null && previa.r !== r && this.t - previa.t <= VENTANA_RESONANCIA) {
+        const res = buscarResonancia(previa.esencia, esencia);
+        if (res !== undefined && ctx.resonar !== undefined) {
+          ctx.resonar(res, (previa.potencia + h.potencia) * 1.1);
+          this.ultimaHab = null;
+          return;
+        }
+      }
+      this.ultimaHab = { r, esencia, t: this.t, potencia: h.potencia };
+    }
+  }
+
+  /** Teletransporte al eco más reciente, cortando todo lo que hay entre medio. */
+  private pasoAlEco(ctx: Contexto, h: HabilidadEquipada): void {
+    const eco = ctx.vivos!.consumirEco();
+    if (eco === undefined) return;
+    const x0 = this.cx;
+    const y0 = this.cy;
+    // Buscar un lugar libre cerca del eco (si quedó contra una pared).
+    let x = eco.x;
+    let pies = eco.pies;
+    const libre = (px: number, py: number): boolean => {
+      for (const [ox, oy] of [[-this.w / 2 + 1, -1], [this.w / 2 - 1, -1], [-this.w / 2 + 1, -this.h + 1], [this.w / 2 - 1, -this.h + 1]]) {
+        if (esSolido(ctx.tiles.tile(Math.floor((px + ox) / 16), Math.floor((py + oy) / 16)))) return false;
+      }
+      return true;
+    };
+    for (let k = 0; k < 24 && !libre(x, pies); k++) {
+      x += Math.sign(x0 - x) * 4;
+      pies += Math.sign(y0 + this.h / 2 - pies) * 2;
+    }
+    if (!libre(x, pies)) return;
+    ctx.golpearArea({ x: Math.min(x0, x) - 6, y: Math.min(y0, pies - this.h / 2) - 14, w: Math.abs(x - x0) + 12, h: Math.abs(pies - this.h / 2 - y0) + 28 },
+      { potencia: h.potencia * 0.8, tipo: "tecnica", empuje: 80 }, this.dir, new Set());
+    for (let k = 0; k <= 12; k++) {
+      const t = k / 12;
+      ctx.fx.chispas(x0 + (x - x0) * t, y0 + (pies - this.h / 2 - y0) * t, eco.color, 2, { velocidad: 40, vida: 0.4, gravedad: 0, brillo: true });
+    }
+    this.x = x - this.w / 2;
+    this.y = pies - this.h;
+    this.vx = 0;
+    this.vy = 0;
+    this.invuln = Math.max(this.invuln, 0.35);
+    this.cdPasoEco = 0.3;
+    ctx.fx.fogonazo(x, pies - this.h / 2, eco.color, 70, 0.3);
+    ctx.fx.texto(this.cx, this.y - 10, "Paso del Eco", eco.color);
+    ctx.audio.reproducir("embestida");
   }
 
   /** Arranca una acción de cuerpo (embestida, garras, caída) con el ataque de la habilidad. */
@@ -1234,7 +1332,29 @@ export class Jugador implements Cuerpo {
     return Math.abs(this.vx) > 15 ? "correr" : "quieto";
   }
 
+  /** Smear frame: media luna rellena, blanca por dentro y con el color de la Forma por fuera. */
+  private dibujarSmear(g: CanvasRenderingContext2D): void {
+    const m = this.smear;
+    if (m === null) return;
+    const k = Math.max(0, m.vida / 0.05);
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    const media = (r0: number, r1: number, color: string, alfa: number): void => {
+      g.globalAlpha = alfa;
+      g.fillStyle = color;
+      g.beginPath();
+      g.arc(m.x, m.y, r1, m.desde, m.hasta);
+      g.arc(m.x, m.y, r0, m.hasta, m.desde, true);
+      g.closePath();
+      g.fill();
+    };
+    media(m.radio - m.ancho, m.radio + 2, m.color, 0.75 * k);
+    media(m.radio - m.ancho * 0.45, m.radio, "#ffffff", 0.95 * k);
+    g.restore();
+  }
+
   dibujar(g: CanvasRenderingContext2D, ctx: Contexto): void {
+    this.dibujarSmear(g);
     const forma = ctx.partida.forma;
     const a = forma !== null ? alma(forma.personaje) : null;
     const cuerpo = a?.color ?? "#6a6a7a";
@@ -1283,6 +1403,21 @@ export class Jugador implements Cuerpo {
       g.globalCompositeOperation = "lighter";
       const x = Math.round(this.cx);
       const y = Math.round(this.y) + (this.agachado ? -6 : 0);
+      // Al terminar el barrido del golpe, deja el smear frame (una sola vez por golpe).
+      if ((atk.tipo === "golpe" || atk.tipo === "cargado" || atk.tipo === "estocada") && estilo.id !== "arco" && this.ultimaSmear !== atk
+        && atk.t >= (atk.tipo === "golpe" ? estilo.activoHasta : atk.duracion * 0.55)) {
+        this.ultimaSmear = atk;
+        const forma = ctx.partida.forma;
+        const colorForma = forma === null ? "#c9a7ff" : forma.nivel >= 4 ? auraDeNivel(forma.nivel) : alma(forma.personaje).colorSec;
+        const radio = estilo.alcance * (1 + ctx.partida.combate().alcance) * (atk.tipo === "cargado" ? 1.15 : 0.85);
+        const desdeA = estilo.id === "pesada" ? -2.2 : -1.4;
+        const barrido = estilo.id === "pesada" ? 3.0 : 2.5;
+        const a0 = this.dir > 0 ? desdeA : Math.PI - desdeA - barrido;
+        this.smear = {
+          x: Math.round(this.cx), y: Math.round(this.y) + 11, radio, desde: a0, hasta: a0 + barrido,
+          vida: 0.05, ancho: estilo.id === "pesada" || atk.tipo === "cargado" ? 9 : 6, color: colorForma, accion: atk,
+        };
+      }
       if (atk.tipo === "golpe" && estilo.id !== "arco" && atk.t >= estilo.activoDesde * 0.6 && atk.t < estilo.activoHasta + 0.06) {
         // Estela en media luna: más ancha en el frente del corte, desvaneciéndose hacia el inicio.
         const ultimo = atk.combo === this.largoCombo(ctx) - 1;

@@ -4,6 +4,7 @@ import type { Bioma } from "../contenido/biomas.ts";
 import { ALTO_SALA, ANCHO_SALA, COLS, FILAS, T_CRISTAL, T_PINCHOS, T_PLATAFORMA, T_RAICES, TILE, esSolido } from "../dominio/mundo/sala.ts";
 import { DECORADO, LOSA, PARED_FONDO, PINCHOS, ROCA, type Rect } from "../contenido/atlas.ts";
 import type { Tiles } from "../motor/fisica.ts";
+import type { DefColgante } from "./procedural.ts";
 import { dibujarRecorte, sprites, type Lienzo } from "../motor/sprites.ts";
 
 function lienzo(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -26,17 +27,20 @@ export interface SalaDibujada {
   readonly lienzo: HTMLCanvasElement;
   /** Fuentes de luz del decorado (faroles, ventanas) para la iluminación dinámica. */
   readonly luces: readonly Luz[];
+  /** Cadenas y estandartes del techo: se animan con física (ver juego/procedural.ts). */
+  readonly colgantes: readonly DefColgante[];
 }
 
 /** Sala con el tileset del castillo (teñido por bioma); si la imagen no está, versión procedural. */
 export function prerenderSala(t: Tiles, b: Bioma, semilla: number, especial = false): SalaDibujada {
   const atlas = sprites.tenida("castillo", b.tinte[0], b.tinte[1]);
-  if (atlas === null) return { lienzo: prerenderProcedural(t, b, semilla), luces: [] };
+  if (atlas === null) return { lienzo: prerenderProcedural(t, b, semilla), luces: [], colgantes: [] };
   const luces: Luz[] = [];
-  return { lienzo: prerenderConAtlas(t, b, semilla, atlas, especial, luces), luces };
+  const colgantes: DefColgante[] = [];
+  return { lienzo: prerenderConAtlas(t, b, semilla, atlas, especial, luces, colgantes), luces, colgantes };
 }
 
-function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, especial: boolean, luces: Luz[]): HTMLCanvasElement {
+function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, especial: boolean, luces: Luz[], colgantes: DefColgante[]): HTMLCanvasElement {
   const [c, g] = lienzo(ANCHO_SALA, ALTO_SALA);
   const solido = (x: number, y: number): boolean => x < 0 || y < 0 || x >= COLS || y >= FILAS ? true : esSolido(t.tile(x, y));
   const tile = (x: number, y: number): number => x < 0 || y < 0 || x >= COLS || y >= FILAS ? 1 : t.tile(x, y);
@@ -70,9 +74,9 @@ function prerenderConAtlas(t: Tiles, b: Bioma, semilla: number, atlas: Lienzo, e
       luces.push({ x: tx * TILE + 16, y: 2 * TILE + 44, r: 46, fuerza: 0.75 });
       tx += 2;
     } else if (r < 0.16) {
-      poner(DECORADO.cadena, tx * TILE, 2 * TILE);
+      colgantes.push({ tipo: "cadena", x: tx * TILE + 8, y: 2 * TILE, largo: 20 + Math.floor(hash(tx, semilla, 37) * 26) });
     } else if (r < 0.22 && libreAbajo(3)) {
-      poner(DECORADO.estandarte, tx * TILE, 2 * TILE);
+      colgantes.push({ tipo: "estandarte", x: tx * TILE + 8, y: 2 * TILE + 1, largo: 40 });
       tx += 1;
     }
   }
@@ -514,34 +518,244 @@ export interface Luz {
   readonly y: number;
   readonly r: number;
   readonly fuerza?: number;
+  /** Color de la luz (tiñe lo que ilumina y los bordes de la roca). Sin color: luz neutra. */
+  readonly color?: string;
+  /** Proyecta sombras duras contra la roca. */
+  readonly sombras?: boolean;
 }
 
-/** Oscuridad con agujeros de luz (destination-out sobre una capa negra). */
+/** Arista de un bloque sólido que da al aire (mundo, px), con su normal hacia afuera. */
+export interface Borde {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly nx: number;
+  readonly ny: number;
+}
+
+/**
+ * Aristas de la roca expuestas al aire. `unir`: junta las colineales en tramos largos (para las sombras);
+ * sin unir, una por baldosa (para el relieve, que varía a lo largo del tramo).
+ */
+export function bordesDeSala(t: Tiles, unir: boolean): Borde[] {
+  // Las cornisas (plataformas) son losas de piedra: también reciben luz y proyectan sombra.
+  const sol = (tx: number, ty: number): boolean => tx < 0 || ty < 0 || tx >= COLS || ty >= FILAS || esSolido(t.tile(tx, ty)) || t.tile(tx, ty) === T_PLATAFORMA;
+  const r: Borde[] = [];
+  // Horizontales (arriba / abajo de cada baldosa)
+  for (const [dy, ny] of [[-1, -1], [1, 1]] as const) {
+    for (let ty = 0; ty < FILAS; ty++) {
+      let inicio = -1;
+      for (let tx = 0; tx <= COLS; tx++) {
+        const expuesto = tx < COLS && sol(tx, ty) && !sol(tx, ty + dy);
+        if (expuesto && !unir) {
+          const y = (ty + (dy > 0 ? 1 : 0)) * TILE;
+          r.push({ x1: tx * TILE, y1: y, x2: (tx + 1) * TILE, y2: y, nx: 0, ny });
+          continue;
+        }
+        if (expuesto && inicio < 0) inicio = tx;
+        if (!expuesto && inicio >= 0) {
+          const y = (ty + (dy > 0 ? 1 : 0)) * TILE;
+          r.push({ x1: inicio * TILE, y1: y, x2: tx * TILE, y2: y, nx: 0, ny });
+          inicio = -1;
+        }
+      }
+    }
+  }
+  // Verticales (izquierda / derecha)
+  for (const [dx, nx] of [[-1, -1], [1, 1]] as const) {
+    for (let tx = 0; tx < COLS; tx++) {
+      let inicio = -1;
+      for (let ty = 0; ty <= FILAS; ty++) {
+        const expuesto = ty < FILAS && sol(tx, ty) && !sol(tx + dx, ty);
+        if (expuesto && !unir) {
+          const x = (tx + (dx > 0 ? 1 : 0)) * TILE;
+          r.push({ x1: x, y1: ty * TILE, x2: x, y2: (ty + 1) * TILE, nx, ny: 0 });
+          continue;
+        }
+        if (expuesto && inicio < 0) inicio = ty;
+        if (!expuesto && inicio >= 0) {
+          const x = (tx + (dx > 0 ? 1 : 0)) * TILE;
+          r.push({ x1: x, y1: inicio * TILE, x2: x, y2: ty * TILE, nx, ny: 0 });
+          inicio = -1;
+        }
+      }
+    }
+  }
+  return r;
+}
+
+const LUZ_NEUTRA = "#ffe6c0";
+
+/**
+ * Relieve de la roca (el "normal map" de los bloques): cada arista expuesta se ilumina según cuánto mira hacia
+ * cada luz cercana, con el color de esa luz. Así la piedra húmeda brilla del lado del farol, del orbe o del
+ * fogonazo, y queda en sombra del otro. Se dibuja en coordenadas de mundo, encima de la sala.
+ */
+export function dibujarRelieve(g: CanvasRenderingContext2D, bordes: readonly Borde[], luces: readonly Luz[]): void {
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  for (const l of luces) {
+    const fuerza = l.fuerza ?? 1;
+    if (fuerza <= 0.05) continue;
+    g.fillStyle = l.color ?? LUZ_NEUTRA;
+    const r2 = l.r * l.r;
+    for (const b of bordes) {
+      const mx = (b.x1 + b.x2) / 2;
+      const my = (b.y1 + b.y2) / 2;
+      const dx = l.x - mx;
+      const dy = l.y - my;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 1;
+      const cara = (b.nx * dx + b.ny * dy) / d;
+      if (cara <= 0.05) continue;
+      const k = fuerza * cara * Math.pow(1 - d / l.r, 1.4);
+      if (k < 0.04) continue;
+      // Franja brillante en el canto y un reflejo más suave hacia adentro de la piedra.
+      const ancho = b.ny !== 0 ? b.x2 - b.x1 : 1;
+      const alto = b.nx !== 0 ? b.y2 - b.y1 : 1;
+      const ox = b.nx > 0 ? -1 : b.nx < 0 ? 0 : 0;
+      const oy = b.ny > 0 ? -1 : b.ny < 0 ? 0 : 0;
+      g.globalAlpha = Math.min(0.85, k * 0.9);
+      g.fillRect(b.x1 + ox, b.y1 + oy, b.ny !== 0 ? ancho : 1, b.nx !== 0 ? alto : 1);
+      g.globalAlpha = Math.min(0.5, k * 0.4);
+      g.fillRect(b.x1 + ox - b.nx * 1, b.y1 + oy - b.ny * 1, b.ny !== 0 ? ancho : 1, b.nx !== 0 ? alto : 1);
+      g.globalAlpha = Math.min(0.3, k * 0.18);
+      g.fillRect(b.x1 + ox - b.nx * 3, b.y1 + oy - b.ny * 3, b.ny !== 0 ? ancho : 2, b.nx !== 0 ? alto : 2);
+    }
+  }
+  g.restore();
+}
+
+/** Oclusores para las sombras: aristas de la roca y el desplazamiento mundo → pantalla. */
+export interface Oclusores {
+  readonly bordes: readonly Borde[];
+  readonly dx: number;
+  readonly dy: number;
+}
+
+/**
+ * Iluminación dinámica: oscuridad con agujeros de luz. Cada luz se dibuja en un lienzo auxiliar (con su color);
+ * si proyecta sombras, se le recortan los volúmenes de sombra de la roca; después ese lienzo agujerea la oscuridad
+ * y además TIÑE lo que ilumina con su color.
+ */
 export class Iluminacion {
   private readonly c: HTMLCanvasElement;
   private readonly g: CanvasRenderingContext2D;
+  private readonly aux: HTMLCanvasElement;
+  private readonly ga: CanvasRenderingContext2D;
+  private readonly tinteC: HTMLCanvasElement;
+  private readonly gt: CanvasRenderingContext2D;
 
   constructor(w: number, h: number) {
     [this.c, this.g] = lienzo(w, h);
+    [this.aux, this.ga] = lienzo(w, h);
+    [this.tinteC, this.gt] = lienzo(w, h);
   }
 
-  dibujar(destino: CanvasRenderingContext2D, oscuridad: number, luces: readonly Luz[], tinte: string): void {
+  dibujar(destino: CanvasRenderingContext2D, oscuridad: number, luces: readonly Luz[], tinte: string, oclusores?: Oclusores): void {
     const g = this.g;
+    const ga = this.ga;
+    const gt = this.gt;
+    const W = this.c.width;
+    const H = this.c.height;
     g.globalCompositeOperation = "source-over";
-    g.clearRect(0, 0, this.c.width, this.c.height);
+    g.clearRect(0, 0, W, H);
     g.fillStyle = `rgba(4,2,10,${oscuridad})`;
-    g.fillRect(0, 0, this.c.width, this.c.height);
-    g.globalCompositeOperation = "destination-out";
+    g.fillRect(0, 0, W, H);
+    gt.clearRect(0, 0, W, H);
+    let sombreadas = 0;
+    let hayTinte = false;
     for (const l of luces) {
-      const grad = g.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
-      grad.addColorStop(0, `rgba(0,0,0,${l.fuerza ?? 1})`);
+      const fuerza = l.fuerza ?? 1;
+      if (fuerza <= 0.02 || l.x + l.r < 0 || l.x - l.r > W || l.y + l.r < 0 || l.y - l.r > H) continue;
+      const conSombra = l.sombras === true && oclusores !== undefined && sombreadas < 7;
+      if (!conSombra && l.color === undefined) {
+        // Luz simple: agujero directo (lo más barato).
+        g.globalCompositeOperation = "destination-out";
+        const grad = g.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+        grad.addColorStop(0, `rgba(0,0,0,${fuerza})`);
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = grad;
+        g.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+        continue;
+      }
+      // Luz completa en el lienzo auxiliar.
+      const x0 = Math.floor(l.x - l.r);
+      const y0 = Math.floor(l.y - l.r);
+      const lado = Math.ceil(l.r * 2) + 1;
+      ga.globalCompositeOperation = "source-over";
+      ga.clearRect(x0, y0, lado, lado);
+      const grad = ga.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+      const color = l.color ?? LUZ_NEUTRA;
+      grad.addColorStop(0, color);
       grad.addColorStop(1, "rgba(0,0,0,0)");
-      g.fillStyle = grad;
-      g.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+      ga.globalAlpha = fuerza;
+      ga.fillStyle = grad;
+      ga.fillRect(x0, y0, lado, lado);
+      ga.globalAlpha = 1;
+      if (conSombra) {
+        sombreadas++;
+        this.recortarSombras(l, oclusores);
+      }
+      g.globalCompositeOperation = "destination-out";
+      g.drawImage(this.aux, x0, y0, lado, lado, x0, y0, lado, lado);
+      if (l.color !== undefined) {
+        gt.globalCompositeOperation = "lighter";
+        gt.drawImage(this.aux, x0, y0, lado, lado, x0, y0, lado, lado);
+        hayTinte = true;
+      }
     }
     g.globalCompositeOperation = "source-over";
     destino.drawImage(this.c, 0, 0);
+    if (hayTinte) {
+      destino.save();
+      destino.globalCompositeOperation = "lighter";
+      destino.globalAlpha = 0.22;
+      destino.drawImage(this.tinteC, 0, 0);
+      destino.restore();
+    }
     destino.fillStyle = tinte;
-    destino.fillRect(0, 0, this.c.width, this.c.height);
+    destino.fillRect(0, 0, W, H);
+  }
+
+  /** Volúmenes de sombra: cada arista de espaldas a la luz se proyecta lejos y borra la luz detrás de la roca. */
+  private recortarSombras(l: Luz, o: Oclusores): void {
+    const ga = this.ga;
+    ga.globalCompositeOperation = "destination-out";
+    ga.fillStyle = "#000";
+    const lejos = l.r * 3;
+    // ¿La luz está metida en la roca? (un farol pegado al techo): no proyecta.
+    for (const b of o.bordes) {
+      const x1 = b.x1 + o.dx;
+      const y1 = b.y1 + o.dy;
+      const x2 = b.x2 + o.dx;
+      const y2 = b.y2 + o.dy;
+      // Descarte rápido por distancia (al tramo).
+      const cx = Math.max(Math.min(l.x, Math.max(x1, x2)), Math.min(x1, x2));
+      const cy = Math.max(Math.min(l.y, Math.max(y1, y2)), Math.min(y1, y2));
+      if ((cx - l.x) ** 2 + (cy - l.y) ** 2 > l.r * l.r) continue;
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      // De espaldas a la luz: proyecta.
+      if (b.nx * (l.x - mx) + b.ny * (l.y - my) >= 0) continue;
+      const p = (x: number, y: number): [number, number] => {
+        const dx = x - l.x;
+        const dy = y - l.y;
+        const d = Math.hypot(dx, dy) || 1;
+        return [x + (dx / d) * lejos, y + (dy / d) * lejos];
+      };
+      const [x3, y3] = p(x2, y2);
+      const [x4, y4] = p(x1, y1);
+      ga.beginPath();
+      ga.moveTo(x1, y1);
+      ga.lineTo(x2, y2);
+      ga.lineTo(x3, y3);
+      ga.lineTo(x4, y4);
+      ga.closePath();
+      ga.fill();
+    }
+    ga.globalCompositeOperation = "source-over";
   }
 }

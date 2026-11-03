@@ -5,7 +5,9 @@
 // Implementa Contexto para que el Jugador funcione igual que abajo (sin enemigos).
 
 import { hd } from "../motor/texto-hd.ts";
-import { BIOMAS, type Bioma } from "../contenido/biomas.ts";
+import { BIOMAS, bioma, type Bioma } from "../contenido/biomas.ts";
+import { HISTORIAS } from "../contenido/historias.ts";
+import { MEJORAS_SANTUARIO } from "../dominio/meta.ts";
 import { ROCA } from "../contenido/atlas.ts";
 import { ALTO_SALA, ANCHO_SALA, FILAS, TILE } from "../dominio/mundo/sala.ts";
 import type { Meta } from "../dominio/meta.ts";
@@ -78,6 +80,8 @@ export const NPCS: readonly Npc[] = [
 
 export interface EventosPueblo {
   abrirServicio(s: Servicio): void;
+  /** ↑ junto a un habitante: su historia (y su misión personal, si tiene). */
+  hablar(s: Servicio): void;
   mensaje(texto: string, color: string): void;
 }
 
@@ -107,6 +111,13 @@ export class Pueblo implements Contexto {
   private t = 0;
   private camX = 0;
   private frase = new Map<Servicio, number>();
+  /**
+   * EVOLUCIÓN DEL PUEBLO (0 = ruinas … 1 = renacido): según los pisos superados y la esencia invertida en el
+   * Santuario. Cambia la oscuridad, la ceniza que llueve, los faroles (de éter al final), los escombros,
+   * los estandartes, los trofeos de los Guardianes en la Taberna y cuántos aventureros pasean comentando tus hazañas.
+   */
+  readonly avance: number;
+  private readonly aventureros: { x: number; min: number; max: number; vel: number; paleta: [string, string]; variante: number; frase: string }[] = [];
 
   constructor(partida: Partida, meta: Meta, audio: Audio, entrada: Entrada, eventos: EventosPueblo, desde: "inicio" | "pozo" = "inicio") {
     this.partida = partida;
@@ -117,6 +128,21 @@ export class Pueblo implements Contexto {
     const x = desde === "pozo" ? NPCS[NPCS.length - 1].x - 50 : NPCS[0].x + 40;
     this.jugador.colocar(x, SUELO - this.jugador.h);
     partida.curarTodo();
+    const niveles = MEJORAS_SANTUARIO.reduce((a, m) => a + meta.nivelMejora(m.id), 0);
+    const maximos = MEJORAS_SANTUARIO.reduce((a, m) => a + m.maximo, 0);
+    this.avance = Math.max(0, Math.min(1, ((partida.pisoDesbloqueado - 1) / 23) * 0.75 + (niveles / Math.max(1, maximos)) * 0.25));
+    const frases = comentariosPueblo(partida, meta);
+    const cuantos = Math.round(this.avance * 6);
+    const paletas: [string, string][] = [["#5a4a3a", "#c8a070"], ["#3a4a5a", "#9fe8ff"], ["#6a3a4a", "#ffb0c0"], ["#3a5a3a", "#9aff5a"], ["#4a3a6a", "#c9a7ff"], ["#6a5a2a", "#ffd27a"]];
+    for (let k = 0; k < cuantos; k++) {
+      const a = NPCS[k % (NPCS.length - 1)].x + 40;
+      this.aventureros.push({ x: a, min: a - 20, max: a + 90, vel: (k % 2 === 0 ? 1 : -1) * (14 + k * 3), paleta: paletas[k % paletas.length], variante: k % 4, frase: frases[k % frases.length] });
+    }
+  }
+
+  /** 0 ruinas · 1 reconstruyéndose · 2 con vida · 3 próspero · 4 renacido. */
+  get etapa(): number {
+    return Math.min(4, Math.floor(this.avance * 5));
   }
 
   // ---- Contexto (sin enemigos: los golpes no pegan a nadie)
@@ -144,7 +170,15 @@ export class Pueblo implements Contexto {
     this.t += dt;
     this.jugador.actualizar(dt, this, this.entrada);
     this.fx.actualizar(dt);
-    if (Math.random() < dt * 6) {
+    // Lluvia de ceniza (más cuanto más en ruinas).
+    if (Math.random() < dt * 40 * (1 - this.avance)) {
+      this.fx.ambiente(this.camX + Math.random() * ANCHO_SALA, -4, "#8a8090", 22 + Math.random() * 10, false);
+    }
+    for (const a of this.aventureros) {
+      a.x += a.vel * dt;
+      if (a.x < a.min || a.x > a.max) a.vel = -a.vel;
+    }
+    if (Math.random() < dt * 6 * (0.3 + this.avance)) {
       // luciérnagas y brasas de los faroles
       this.fx.ambiente(Math.random() * ANCHO_PUEBLO, 120 + Math.random() * 100, Math.random() < 0.6 ? "#ffe27a" : "#c9a7ff", -6, true);
     }
@@ -154,6 +188,10 @@ export class Pueblo implements Contexto {
       }
     }
     const n = this.cercano();
+    if (n !== undefined && n.servicio !== "pozo" && this.entrada.recien("arr")) {
+      this.audio.reproducir("puerta");
+      this.eventos.hablar(n.servicio);
+    }
     if (n !== undefined && this.entrada.recien("interactuar")) {
       const i = (this.frase.get(n.servicio) ?? -1) + 1;
       this.frase.set(n.servicio, i);
@@ -185,14 +223,32 @@ export class Pueblo implements Contexto {
     g.fillStyle = "#ffcf6a55";
     for (let x = 0; x < ANCHO_PUEBLO; x += 46) if ((x / 46) % 3 !== 1) g.fillRect(x + 16, SUELO - 30 - ((x * 7) % 11), 3, 4);
     this.rotulos = NPCS.flatMap((n) => dibujarEdificio(g, n.servicio, n.x, SUELO, n.edificio));
-    // Faroles entre edificios
+    // Faroles entre edificios: apagados en ruinas, encendidos al prosperar, de éter al renacer.
     for (let i = 0; i < NPCS.length - 1; i++) {
       const x = (NPCS[i].x + NPCS[i + 1].x) / 2;
       g.fillStyle = "#1a1622";
       g.fillRect(x - 1, SUELO - 46, 3, 46);
       g.fillRect(x - 4, SUELO - 48, 9, 3);
-      g.fillStyle = "#ffe9a8";
+      g.fillStyle = this.farolEncendido(i) ? (this.etapa >= 3 ? "#9fe8ff" : "#ffe9a8") : "#2a2438";
       g.fillRect(x - 3, SUELO - 56, 7, 8);
+    }
+    // Ruinas: escombros, tablones y vigas caídas entre los edificios.
+    if (this.etapa <= 1) {
+      for (let i = 0; i < NPCS.length - 1; i++) {
+        const x = (NPCS[i].x + NPCS[i + 1].x) / 2 + 22;
+        g.fillStyle = "#2a2430";
+        g.fillRect(x, SUELO - 6, 14, 6);
+        g.fillRect(x + 3, SUELO - 10, 7, 4);
+        g.fillStyle = "#4a3a2a";
+        g.fillRect(x - 8, SUELO - 3, 18, 2);
+        if (this.etapa === 0) {
+          g.save();
+          g.translate(x + 20, SUELO);
+          g.rotate(-0.5);
+          g.fillRect(0, -2, 26, 3);
+          g.restore();
+        }
+      }
     }
     // Calle empedrada
     const atlas = sprites.imagen("castillo");
@@ -207,6 +263,10 @@ export class Pueblo implements Contexto {
       }
     }
     return c;
+  }
+
+  private farolEncendido(i: number): boolean {
+    return i < Math.round(1 + this.avance * (NPCS.length - 2));
   }
 
   dibujar(g: CanvasRenderingContext2D): void {
@@ -270,11 +330,28 @@ export class Pueblo implements Contexto {
     g.drawImage(this.fondo, 0, 0);
     for (const n of NPCS) if (Math.abs(n.x - cam - ANCHO_SALA / 2) < ANCHO_SALA) animarEdificio(g, n.servicio, n.x, SUELO, this.t);
     dibujarRotulos(g, this.rotulos.filter((r) => Math.abs(r.x - cam - ANCHO_SALA / 2) < ANCHO_SALA / 2 + 60));
-    // Comerciantes
+    this.dibujarEstandartes(g);
+    this.dibujarTrofeos(g);
+    // Habitantes (Dorn forja sentado: el Pozo le quitó las piernas). Marca sobre la cabeza si tienen algo que contarte.
     for (const n of NPCS) {
       if (n.servicio === "pozo") continue;
       const dir = this.jugador.cx < n.x ? -1 : 1;
-      dibujarPortador(g, n.x - 24, SUELO, dir, "quieto", { cuerpo: n.paleta[0], acento: n.paleta[1] }, this.t + n.x, { variante: n.variante });
+      dibujarPortador(g, n.x - 24, SUELO, dir, n.servicio === "herrero" ? "agachado" : "quieto", { cuerpo: n.paleta[0], acento: n.paleta[1] }, this.t + n.x, { variante: n.variante });
+      const marca = this.marcaHistoria(n.servicio);
+      if (marca !== null) {
+        const y = SUELO - 40 + Math.round(Math.sin(this.t * 4) * 2);
+        hd.texto(g, marca.texto, n.x - 24, y, { color: marca.color, alinear: "center", tam: 11, negrita: true });
+      }
+    }
+    // Aventureros que pasean y comentan tus hazañas
+    for (const a of this.aventureros) {
+      dibujarPortador(g, a.x, SUELO, a.vel > 0 ? 1 : -1, "correr", { cuerpo: a.paleta[0], acento: a.paleta[1] }, this.t * 0.6 + a.x, { variante: a.variante });
+      if (Math.abs(a.x - this.jugador.cx) < 46) {
+        const ancho = a.frase.length * 3.6 + 8;
+        g.fillStyle = "#000000bb";
+        g.fillRect(Math.round(a.x - ancho / 2), SUELO - 44, Math.round(ancho), 11);
+        hd.texto(g, a.frase, a.x, SUELO - 36, { color: "#e8e0f0", alinear: "center", tam: 6, negrita: false });
+      }
     }
     this.jugador.dibujar(g, this);
     this.fx.dibujarParticulas(g);
@@ -286,10 +363,11 @@ export class Pueblo implements Contexto {
       for (const l of lucesEdificio(n.servicio, n.x, SUELO - 2, this.t)) luces.push({ ...l, x: l.x - cam });
     }
     for (let i = 0; i < NPCS.length - 1; i++) {
+      if (!this.farolEncendido(i)) continue;
       const x = (NPCS[i].x + NPCS[i + 1].x) / 2;
-      luces.push({ x: x - cam, y: SUELO - 52, r: 52 + Math.sin(this.t * 7 + i) * 3, fuerza: 0.9 });
+      luces.push({ x: x - cam, y: SUELO - 52, r: 52 + Math.sin(this.t * 7 + i) * 3, fuerza: 0.9, color: this.etapa >= 3 ? "#9fe8ff" : undefined });
     }
-    this.luz.dibujar(g, 0.38, luces, "rgba(0,0,0,0)");
+    this.luz.dibujar(g, 0.52 - this.avance * 0.28, luces, "rgba(0,0,0,0)");
     dibujarVineta(g);
 
     // Etiqueta del comerciante cercano
@@ -299,7 +377,7 @@ export class Pueblo implements Contexto {
     if (cerca !== undefined) {
       const frases = cerca.frases;
       const linea = frases[(this.frase.get(cerca.servicio) ?? 0) % frases.length];
-      const texto = cerca.servicio === "pozo" ? "E · Bajar al Pozo o al Abismo" : `E · ${cerca.nombre} — ${cerca.edificio}`;
+      const texto = cerca.servicio === "pozo" ? "E · Bajar al Pozo o al Abismo" : `E · ${cerca.nombre} — ${cerca.edificio} · ↑ Hablar`;
       g.font = "bold 8px monospace";
       const w = Math.max(g.measureText(texto).width, g.measureText(linea).width) + 10;
       const x = Math.round(Math.max(cam + 4, Math.min(cam + ANCHO_SALA - w - 4, cerca.x - w / 2)));
@@ -312,4 +390,81 @@ export class Pueblo implements Contexto {
     this.fx.dibujarTextos(g);
     g.restore();
   }
+
+  /** "!" dorado: tiene una misión para ti · "?" brillante: llevas su recuerdo. */
+  private marcaHistoria(servicio: Servicio): { texto: string; color: string } | null {
+    const h = HISTORIAS.find((x) => x.servicio === servicio);
+    if (h === undefined) return null;
+    const estado = this.partida.historias[h.id];
+    if (estado === undefined && this.partida.pisoDesbloqueado >= Math.max(2, h.piso - 4)) return { texto: "!", color: "#ffd27a" };
+    if (estado === "conocida" && this.partida.tieneRecuerdo(h.id)) return { texto: "?", color: h.recuerdo.color };
+    return null;
+  }
+
+  /** Estandartes de colores cruzando la calle (desde que el pueblo empieza a tener vida). */
+  private dibujarEstandartes(g: CanvasRenderingContext2D): void {
+    if (this.etapa < 2) return;
+    const colores = ["#c83a3a", "#ffd27a", "#3a8ac8", "#7dff9a", "#c9a7ff"];
+    for (let i = 0; i < NPCS.length - 2; i++) {
+      const x0 = (NPCS[i].x + NPCS[i + 1].x) / 2;
+      const x1 = (NPCS[i + 1].x + NPCS[i + 2].x) / 2;
+      for (let k = 0; k <= 10; k++) {
+        const t = k / 10;
+        const x = x0 + (x1 - x0) * t;
+        const y = SUELO - 52 + Math.sin(t * Math.PI) * 14 + Math.sin(this.t * 2 + k) * 0.8;
+        g.fillStyle = "#1a1622";
+        g.fillRect(Math.round(x), Math.round(y), 1, 1);
+        if (k % 2 === 1) {
+          g.fillStyle = colores[(i + k) % colores.length];
+          g.fillRect(Math.round(x) - 2, Math.round(y) + 1, 5, 3);
+          g.fillRect(Math.round(x) - 1, Math.round(y) + 4, 3, 1);
+        }
+      }
+    }
+  }
+
+  /** Trofeos de los Guardianes vencidos colgados en la fachada de la Taberna (hasta 24). */
+  private dibujarTrofeos(g: CanvasRenderingContext2D): void {
+    const vencidos = Math.min(24, this.partida.pisoDesbloqueado - 1);
+    const taberna = NPCS.find((n) => n.servicio === "taberna");
+    if (taberna === undefined || vencidos <= 0) return;
+    // Tablero de trofeos colgado junto a la Taberna: 6 por fila, hasta 4 filas.
+    const x0 = taberna.x + 64;
+    const y0 = SUELO - 78;
+    g.fillStyle = "#2a1c12";
+    g.fillRect(x0 - 3, y0 - 4, 6 * 6 + 4, Math.ceil(vencidos / 6) * 8 + 4);
+    g.fillStyle = "#4a3020";
+    g.fillRect(x0 - 3, y0 - 4, 6 * 6 + 4, 1);
+    for (let k = 0; k < vencidos; k++) {
+      const x = x0 + (k % 6) * 6;
+      const y = y0 + Math.floor(k / 6) * 8;
+      const color = bioma(k + 1).acento;
+      g.fillStyle = "#1a1622";
+      g.fillRect(x, y - 1, 5, 6);
+      g.fillStyle = color;
+      g.fillRect(x + 1, y, 3, 3);
+      g.fillStyle = "#000000";
+      g.fillRect(x + 1, y + 1, 1, 1);
+      g.fillRect(x + 3, y + 1, 1, 1);
+      g.fillStyle = color;
+      g.fillRect(x + 2, y + 3, 1, 2);
+    }
+  }
+}
+
+/** Lo que comentan los aventureros del pueblo según lo que hiciste. */
+export function comentariosPueblo(p: Partida, meta: Meta): string[] {
+  const r: string[] = [];
+  const vencido = p.pisoDesbloqueado - 1;
+  if (vencido >= 1) r.push(`¡Eh! Tú venciste a ${bioma(vencido).jefe.nombre}, ¿no?`);
+  if (vencido >= 3) r.push(`Ya bajas más allá del piso ${vencido}. Nadie llegaba tan hondo.`);
+  if (vencido < 3) r.push("Mi abuelo decía que nadie pasaba del Osario.");
+  if ((meta.registro.arenas ?? 0) > 0) r.push(`Dicen que ganaste ${meta.registro.arenas} arenas. Las campanas suenan por ti.`);
+  if ((meta.registro.mejorAbismo ?? 0) > 0) r.push(`¿Bajaste ${meta.registro.mejorAbismo} pisos en el Abismo? Estás loco.`);
+  if (meta.registro.muertes > 0) r.push(`Moriste ${meta.registro.muertes} veces y sigues bajando…`);
+  if (meta.registro.ecosVencidos > 0) r.push("Venciste a tu propio Eco. Eso no lo hace cualquiera.");
+  if ((meta.registro.mejorJuicio ?? 0) > 0) r.push(`Juicio +${meta.registro.mejorJuicio}… El Pozo te tiene miedo.`);
+  for (const h of HISTORIAS) if (p.historiaCumplida(h.id)) r.push(`Le devolviste ${h.recuerdo.nombre.toLowerCase()} a su dueño. Se nota.`);
+  r.push("Los faroles volvieron a encenderse desde que llegaste.");
+  return r;
 }

@@ -2,17 +2,18 @@
 // (Inventario.clonar): se quitan los ingredientes y se prueba que el resultado entre. Solo si todo sale bien
 // se aplica de verdad y se cobran las esquirlas.
 
-import { exito, fallo, tirar, type Resultado } from "minialu";
+import { exito, fallo, type Resultado } from "minialu";
 import {
   COSTO_FUSION_RUNA, MAT_FRAGMENTO, NOMBRES_RAREZA_RUNA, OBJ_CARTA, RAREZA_RUNA_MAX, apilable, objetoRuna, runaDeObjeto,
 } from "../contenido/objetos.ts";
-import { EXITO_REFINADO, REFINADO_MAX, costoRefinado, type Receta } from "../contenido/recetas.ts";
+import { REFINADO_MAX, type Receta } from "../contenido/recetas.ts";
+import { NIVEL_ELECCION_TEMPLADO, costoTemplado, tirarPacto, type DefPacto, type ModoTemplado } from "./templado.ts";
 import { RAREZA_CARTA_JEFE, cartaAleatoria, nombreCarta } from "./cartas.ts";
-import { generarEquipo, refinar, type ObjetoEquipo } from "./equipo.ts";
+import { crearUnico, generarEquipo, refinar, type ObjetoEquipo } from "./equipo.ts";
 import type { Partida } from "./partida.ts";
 import type { Ranura } from "./tipos.ts";
 
-export type ErrorCrafteo = "faltan-materiales" | "sin-fondos" | "sin-espacio" | "nada-que-refinar" | "al-maximo" | "fallo-refinado";
+export type ErrorCrafteo = "faltan-materiales" | "sin-fondos" | "sin-espacio" | "nada-que-refinar" | "al-maximo" | "elige-templado";
 
 export function faltantes(p: Partida, receta: Receta): { objeto: number; nombre: string; faltan: number }[] {
   return receta.ingredientes
@@ -66,22 +67,32 @@ export function craftear(p: Partida, receta: Receta): Resultado<string, ErrorCra
 }
 
 /** Refina la pieza equipada en esa ranura (+12 % a sus stats). */
-export function refinarEquipado(p: Partida, ranura: Ranura): Resultado<ObjetoEquipo, ErrorCrafteo> {
+/**
+ * Templado (refinado) de lo equipado: NUNCA falla. Hasta +5 es "normal"; del +6 al +10 hay que elegir
+ * Templado Seguro (caro) o Templado Abisal (barato, sella un pacto: bono salvaje + maldición).
+ */
+export function refinarEquipado(
+  p: Partida, ranura: Ranura, modo: ModoTemplado = "normal",
+): Resultado<ObjetoEquipo & { readonly pactoNuevo?: DefPacto }, ErrorCrafteo> {
   const o = p.equipo[ranura];
   if (o === null) return fallo("nada-que-refinar");
   const nivel = o.refinado ?? 0;
   if (nivel >= REFINADO_MAX) return fallo("al-maximo");
-  const costo = costoRefinado(nivel);
+  if (nivel >= NIVEL_ELECCION_TEMPLADO && modo === "normal") return fallo("elige-templado");
+  const costo = costoTemplado(nivel, modo);
   if (p.mochila.contar(MAT_FRAGMENTO) < costo.fragmentos) return fallo("faltan-materiales");
   if (p.esquirlas < costo.esquirlas) return fallo("sin-fondos");
   p.mochila.quitar(MAT_FRAGMENTO, costo.fragmentos);
   p.billetera.debitar("esquirlas", costo.esquirlas);
-  // Del +6 en adelante puede fallar: se pierden los materiales, nunca la pieza.
-  if (!tirar(p.azar, EXITO_REFINADO[nivel] ?? 0)) return fallo("fallo-refinado");
-  const nuevo = refinar(o);
+  let nuevo = refinar(o);
+  let pactoNuevo: DefPacto | undefined;
+  if (modo === "abisal" && nivel >= NIVEL_ELECCION_TEMPLADO) {
+    pactoNuevo = tirarPacto(p.azar, o.pactos ?? []);
+    nuevo = { ...nuevo, pactos: [...(o.pactos ?? []), pactoNuevo.id] };
+  }
   p.equipo[ranura] = nuevo;
   p.registrarMision("refinar");
-  return exito(nuevo);
+  return exito(pactoNuevo !== undefined ? { ...nuevo, pactoNuevo } : nuevo);
 }
 
 /**
@@ -100,4 +111,19 @@ export function fusionarRunas(p: Partida, objeto: number): Resultado<string, "no
   const nueva = objetoRuna(ru.id, ru.nivel + 1);
   p.mochila.agregar(nueva, 1);
   return exito(`${ru.nombre} · ${NOMBRES_RAREZA_RUNA[ru.nivel + 1]}`);
+}
+
+/** Costo de la Forja Mítica (Dorn, tras recuperar su martillo). */
+export const COSTO_FORJA_MITICA = { fragmentos: 6, esquirlas: 2500 } as const;
+
+/** Forja Mítica: una pieza Mítica con nombre. Solo si Dorn recuperó su martillo. */
+export function forjaMitica(p: Partida): Resultado<ObjetoEquipo, ErrorCrafteo | "sin-martillo"> {
+  if (!p.historiaCumplida("dorn")) return fallo("sin-martillo");
+  if (p.mochila.contar(MAT_FRAGMENTO) < COSTO_FORJA_MITICA.fragmentos) return fallo("faltan-materiales");
+  if (p.esquirlas < COSTO_FORJA_MITICA.esquirlas) return fallo("sin-fondos");
+  const o = crearUnico(p.azar, Math.max(p.pisoDesbloqueado, 8));
+  if (!p.recoger({ tipo: "equipo", equipo: o }).ok) return fallo("sin-espacio");
+  p.mochila.quitar(MAT_FRAGMENTO, COSTO_FORJA_MITICA.fragmentos);
+  p.billetera.debitar("esquirlas", COSTO_FORJA_MITICA.esquirlas);
+  return exito(o);
 }

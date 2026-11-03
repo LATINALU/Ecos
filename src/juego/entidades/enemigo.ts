@@ -28,6 +28,11 @@ export class Enemigo extends Criatura {
   readonly conducta: ConductaEnemigo;
   private readonly velocidad: number;
   private readonly colores: readonly [string, string];
+
+  /** Colores del cuerpo (para los fragmentos al morir). */
+  get paleta(): readonly [string, string] {
+    return this.colores;
+  }
   private espera = 1 + Math.random();
   private guardiaRota = 0;
   private baseY: number;

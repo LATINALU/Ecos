@@ -10,6 +10,7 @@ import { Criatura, GRAVEDAD } from "./criatura.ts";
 import { Enemigo } from "./enemigo.ts";
 import { TECNICAS_ENEMIGAS, tecnicaEnemiga } from "./jefes.ts";
 import { Proyectil } from "./proyectil.ts";
+import { Patas } from "../procedural.ts";
 
 const SUELO = 14 * TILE;
 const PATRONES_DE_SUELO: ReadonlySet<PatronJefe> = new Set(["carga", "salto"]);
@@ -29,6 +30,9 @@ export class JefeConfigurable extends Criatura {
   private destinoY = 70;
   private yaGolpeo = false;
   private ultimo: PatronJefe | null = null;
+  /** Patas con cinemática inversa (solo los que caminan: gólem y bestia). */
+  private patas: Patas | null = null;
+  private tPatas = 0;
 
   constructor(def: DefJefe, x: number, piso: number) {
     super({ nombre: def.nombre, hp: def.hp, ataque: def.ataque, defensa: def.defensa, exp: def.exp, w: def.w, h: def.h, categoria: "jefe" },
@@ -262,6 +266,18 @@ export class JefeConfigurable extends Criatura {
 
   // ---------------- Dibujo por forma ----------------
 
+  private dibujarPatas(
+    g: CanvasRenderingContext2D, caderas: readonly { dx: number; dy: number }[], muslo: number, canilla: number, zancada: number,
+    color: string, articulacion: string, grosor: number,
+  ): void {
+    if (this.vuela) return;
+    if (this.patas === null) this.patas = new Patas(caderas, muslo, canilla, zancada);
+    const dt = Math.min(0.05, Math.max(0, this.t - this.tPatas));
+    this.tPatas = this.t;
+    this.patas.actualizar(this.cx, this.cy, this.y + this.h, this.vx, dt);
+    this.patas.dibujar(g, this.cx, this.cy, this.dir, color, articulacion, grosor);
+  }
+
   dibujar(g: CanvasRenderingContext2D): void {
     const [base, acento, brillo] = this.c;
     const x = Math.round(this.x);
@@ -289,9 +305,8 @@ export class JefeConfigurable extends Criatura {
     const ojoX = (o: number): number => (d > 0 ? x + w - o : x + o);
     switch (this.forma) {
       case "golem": {
-        const paso = Math.abs(this.vx) > 10 ? Math.floor(t * 6) % 2 : 0;
-        r(x + 6 + paso * 2, y + h - 12, 9, 12, this.color("#2a2020"));
-        r(x + w - 15 - paso * 2, y + h - 12, 9, 12, this.color("#2a2020"));
+        // Piernas de roca con IK: los pies se plantan y dan pasos en arco mientras el cuerpo avanza.
+        this.dibujarPatas(g, [{ dx: -w * 0.24, dy: h / 2 - 13 }, { dx: w * 0.24, dy: h / 2 - 13 }], 9, 9, 16, this.color("#2a2020"), acento, 6);
         r(x + 2, y + 12, w - 4, h - 24, cuerpo);
         r(x + 6, y + 2, w - 12, 14, cuerpo);
         // grietas brillantes
@@ -306,6 +321,9 @@ export class JefeConfigurable extends Criatura {
       }
       case "bestia": {
         const ond = Math.sin(t * 6) * 2;
+        // Cuatro patas con IK que se alternan al andar (como un insecto de cripta).
+        this.dibujarPatas(g, [{ dx: -w * 0.38, dy: h / 2 - 8 }, { dx: -w * 0.14, dy: h / 2 - 8 }, { dx: w * 0.14, dy: h / 2 - 8 }, { dx: w * 0.38, dy: h / 2 - 8 }],
+          6, 7, 11, this.color("#1a1420"), acento, 3);
         r(x, y + 8 + ond, w, h - 14, cuerpo);
         r(d > 0 ? x + w - 16 : x, y + 2, 16, h - 8, cuerpo);
         // mandíbula

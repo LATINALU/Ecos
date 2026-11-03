@@ -26,8 +26,9 @@ interface Orden {
   readonly alfa: number;
 }
 
-const FUENTE = '"Segoe UI", "Trebuchet MS", Verdana, sans-serif';
-const FUENTE_TITULO = 'Georgia, "Times New Roman", serif';
+// Fuentes de píxel (las mismas que la interfaz): el texto del juego deja de verse "de navegador".
+const FUENTE = '"Pixelify Sans", "Segoe UI", "Trebuchet MS", Verdana, sans-serif';
+const FUENTE_TITULO = '"Jacquard 12", Georgia, "Times New Roman", serif';
 
 class TextoHD {
   private cola: Orden[] = [];

@@ -12,7 +12,8 @@ import { OBJ_POLVO } from "../contenido/objetos.ts";
 import type { Premio } from "./botin.ts";
 import type { BotinPerdido } from "./partida.ts";
 import type { Carta } from "./cartas.ts";
-import { puntuacion, type ObjetoEquipo } from "./equipo.ts";
+import { puntuacion, refinar, type ObjetoEquipo } from "./equipo.ts";
+import type { Habitos } from "./habitos.ts";
 import type { Bloque } from "./stats.ts";
 
 export interface Eco {
@@ -28,6 +29,10 @@ export interface Eco {
   readonly numero: number;
   /** Todo lo que el Portador perdió al morir (equipo, mochila, esquirlas). */
   readonly botin?: BotinPerdido;
+  /** Cómo peleaba el Portador en ese descenso: el Eco pelea igual. */
+  readonly habitos?: Habitos;
+  /** Nombre del Portador (para los Ecos que ven otros jugadores). */
+  readonly portador?: string;
 }
 
 export const MAX_ECOS = 3;
@@ -43,6 +48,8 @@ export interface DatosMuerte {
   readonly causa: string;
   readonly numero: number;
   readonly botin?: BotinPerdido;
+  readonly habitos?: Habitos;
+  readonly portador?: string;
 }
 
 export function crearEco(m: DatosMuerte, azar: Azar, ahora: number): Eco {
@@ -61,6 +68,8 @@ export function crearEco(m: DatosMuerte, azar: Azar, ahora: number): Eco {
     causa: m.causa,
     numero: m.numero,
     ...(m.botin !== undefined ? { botin: m.botin } : {}),
+    ...(m.habitos !== undefined ? { habitos: m.habitos } : {}),
+    ...(m.portador !== undefined ? { portador: m.portador } : {}),
   };
 }
 
@@ -69,12 +78,16 @@ export function registrarEco(ecos: readonly Eco[], nuevo: Eco): Eco[] {
   return [nuevo, ...ecos.filter((e) => e.piso !== nuevo.piso)].slice(0, MAX_ECOS);
 }
 
-export function premiosEco(eco: Eco, azar: Azar): Premio[] {
+/**
+ * Lo que devuelve el Eco al vencerlo. `retenerLegado`: el Portador pactó con el Eco (Espectro Temporal), así que la
+ * mejor pieza NO vuelve todavía: la devuelve el Espectro mejorada al terminar el piso (ver legadoDelPacto).
+ */
+export function premiosEco(eco: Eco, azar: Azar, retenerLegado = false): Premio[] {
   const premios: Premio[] = [{ tipo: "esquirlas", cantidad: 80 + eco.nivel * 12 + entero(azar, 40) }];
   if (eco.botin !== undefined) {
     // Extracción: el Eco devuelve exactamente lo que perdiste (los objetos originales, no copias).
     if (eco.botin.esquirlas > 0) premios.push({ tipo: "esquirlas", cantidad: eco.botin.esquirlas });
-    for (const o of eco.botin.equipo) premios.push({ tipo: "equipo", equipo: o });
+    for (const o of eco.botin.equipo) if (!retenerLegado || o.uid !== eco.legado?.uid) premios.push({ tipo: "equipo", equipo: o });
     for (const p of eco.botin.pilas) {
       const o = p.extra?.equipo as ObjetoEquipo | undefined;
       premios.push(o !== undefined ? { tipo: "equipo", equipo: o } : { tipo: "objeto", objeto: p.objeto, cantidad: p.cantidad });
@@ -84,12 +97,20 @@ export function premiosEco(eco: Eco, azar: Azar): Premio[] {
     return premios;
   }
   // El legado vuelve como una COPIA nueva: tu equipo es persistente y no se puede duplicar el mismo objeto.
-  if (eco.legado !== null) {
+  if (eco.legado !== null && !retenerLegado) {
     premios.push({ tipo: "equipo", equipo: { ...eco.legado, uid: `${eco.legado.uid}-eco${entero(azar, 99999)}`, nombre: `${eco.legado.nombre.replace(/ \(Eco\)$/, "")} (Eco)` } });
   }
   if (eco.forma !== null) premios.push({ tipo: "carta", carta: eco.forma });
   premios.push({ tipo: "objeto", objeto: OBJ_POLVO, cantidad: 3 });
   return premios;
+}
+
+/** Pacto cumplido: el Espectro devuelve tu mejor pieza con un nivel de templado más. */
+export function legadoDelPacto(eco: Eco, azar: Azar): ObjetoEquipo | null {
+  if (eco.legado === null) return null;
+  const enBotin = eco.botin?.equipo.some((o) => o.uid === eco.legado?.uid) === true;
+  const base = enBotin ? eco.legado : { ...eco.legado, uid: `${eco.legado.uid}-pacto${entero(azar, 99999)}` };
+  return refinar(base);
 }
 
 /** Stats del Eco como enemigo: más vida (es un duelo), mismo daño que tenías. */

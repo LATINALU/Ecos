@@ -3,7 +3,11 @@
 //   Catalogo + comprar (mercader), y las reglas propias: forma/resonancias, equipo, únicos y Ecos.
 // No sabe nada de render ni de teclado: la escena le pide cosas y muestra el Resultado.
 
+import type { Eco } from "./eco.ts";
 import { NIVEL_INICIAL_JUICIO, PISO_DESBLOQUEO_JUICIO } from "./juicio.ts";
+import { sumarPactos, type EfectosPacto } from "./templado.ts";
+import { PESO_MAX, bonoPeso, type ResumenRiesgo } from "./codicia.ts";
+import { historia, type IdHistoria } from "../contenido/historias.ts";
 import { abrirRelicario, PIEDAD_INICIAL, tirarNivelCaja, type PiedadRelicario } from "./relicario.ts";
 import {
   AzarSemilla, Billetera, Catalogo, Inventario, PuntosHabilidad, RegistroMisiones, comprar, curvaPolinomica, elegirUno, exito, fallo, pagoConBilletera, transferir,
@@ -112,6 +116,9 @@ export interface ModCombate {
 }
 
 /** Estado serializable de una partida (para "Continuar descenso"). */
+/** Estado de una misión personal del pueblo. */
+export type EstadoHistoria = "conocida" | "cumplida";
+
 export interface DatosPartida {
   readonly version: 1;
   readonly semilla: number;
@@ -151,6 +158,12 @@ export interface DatosPartida {
   readonly piedraJuicio?: number;
   /** Relicarios: piedad del bloque de 100. */
   readonly piedadRelicario?: PiedadRelicario;
+  /** Pacto con un Eco vencido (Espectro Temporal) durante el piso en curso. */
+  readonly pactoEco?: Eco | null;
+  /** Pisos seguidos bajados en este descenso sin volver al pueblo. */
+  readonly pesoEco?: number;
+  /** Misiones personales de los habitantes del pueblo. */
+  readonly historias?: Partial<Record<IdHistoria, EstadoHistoria>>;
   readonly seguro?: readonly (Pila | null)[];
   readonly misiones?: { readonly activas: readonly MisionActiva[]; readonly entregadas: readonly number[] };
 }
@@ -201,6 +214,12 @@ export class Partida {
   piedraJuicio = 0;
   /** Relicario de Almas: garantía por bloque de 100 aperturas. */
   piedadRelicario: PiedadRelicario = PIEDAD_INICIAL;
+  /** Espectro Temporal: el Eco con el que pactaste pelea a tu lado este piso y guarda tu mejor pieza. */
+  pactoEco: Eco | null = null;
+  /** PESO DEL ECO: pisos seguidos sin volver al pueblo (más hallazgos raros, pero llegan los Cazadores). */
+  pesoEco = 0;
+  /** Misiones personales del pueblo: aceptadas ("conocida") o terminadas ("cumplida"). */
+  historias: Partial<Record<IdHistoria, EstadoHistoria>> = {};
   /** Tablón de misiones de la taberna (minialu/RegistroMisiones). */
   readonly misiones = new RegistroMisiones(mision, MAX_MISIONES_ACTIVAS);
   /** Dos ranuras de runa (pasivas equipables). */
@@ -318,7 +337,7 @@ export class Partida {
   ganarCarga(n: number): boolean {
     if (this.almas[4] === null) return false;
     const antes = this.cargaDefinitiva;
-    this.cargaDefinitiva = Math.min(CARGA_DEFINITIVA, this.cargaDefinitiva + n * (1 + this.efectoAlma("carga") + (this.tieneReliquia("lagrimaPozo") ? 0.2 : 0)));
+    this.cargaDefinitiva = Math.min(CARGA_DEFINITIVA, this.cargaDefinitiva + n * (1 + this.efectoAlma("carga") + (this.tieneReliquia("lagrimaPozo") ? 0.2 : 0) + this.efectosPacto().carga));
     return antes < CARGA_DEFINITIVA && this.cargaDefinitiva >= CARGA_DEFINITIVA;
   }
 
@@ -371,8 +390,19 @@ export class Partida {
   }
 
   /** Suma de rasgos de equipo + rasgo de la Forma + pasiva. */
+  /** Suma de los pactos (Templado Abisal) de todo lo equipado: bonos y maldiciones. */
+  efectosPacto(): Required<EfectosPacto> {
+    const ids: string[] = [];
+    for (const r of RANURAS) for (const id of this.equipo[r]?.pactos ?? []) ids.push(id);
+    return sumarPactos(ids);
+  }
+
   combate(): ModCombate {
-    const m = { alcance: 0, velocidad: 0, critDanio: 0, agilidad: 0, tecnicaDanio: 0, tecnicaCosto: 0, robo: 0, eterGolpe: 0, esquiva: 0, resistencia: 0 };
+    const pc = this.efectosPacto();
+    const m = {
+      alcance: 0, velocidad: pc.velocidad, critDanio: pc.critDanio, agilidad: pc.agilidad, tecnicaDanio: pc.tecnicaDanio,
+      tecnicaCosto: -pc.costoTecnica, robo: pc.robo, eterGolpe: 0, esquiva: 0, resistencia: 0,
+    };
     for (const r of RANURAS) {
       const rasgos = this.equipo[r]?.rasgos;
       if (rasgos === undefined) continue;
@@ -564,17 +594,22 @@ export class Partida {
     if (hpPct > 0) b.hp = Math.round(b.hp * (1 + hpPct));
     const defensaPct = 0.2 * this.potenciaRuna("acero") + this.bonoConjuntoActivo("defensaPct") + this.efectoAlma("defensaPct");
     if (defensaPct > 0) b.defensa = Math.round(b.defensa * (1 + defensaPct));
+    // Pactos del Templado Abisal.
+    const pc = this.efectosPacto();
+    if (pc.vida !== 0) b.hp = Math.max(1, Math.round(b.hp * (1 + pc.vida)));
+    if (pc.defensa !== 0) b.defensa = Math.max(0, Math.round(b.defensa * (1 + pc.defensa)));
+    b.critico += pc.critico;
     return b;
   }
 
   /** Multiplicador de daño infligido y recibido por efectos únicos. */
   multiplicadorDanio(): number {
     const furia = this.tieneRuna("furia") && this.hp < this.stats().hp * 0.4 ? 1 + 0.3 * this.potenciaRuna("furia") : 1;
-    return (this.tiene("vidrio") ? 1.6 : 1) * furia * (1 + this.bonoConjuntoActivo("danio") + this.efectoAlma("danio") + 0.05 * this.potenciaRuna("brasa"));
+    return (1 + this.efectosPacto().danio) * (this.tiene("vidrio") ? 1.6 : 1) * furia * (1 + this.bonoConjuntoActivo("danio") + this.efectoAlma("danio") + 0.05 * this.potenciaRuna("brasa"));
   }
 
   multiplicadorRecibido(): number {
-    return (this.tiene("corona") ? 1.3 : 1) * (1 - this.bonoConjuntoActivo("recibido")) * (1 - this.combate().resistencia);
+    return (this.tiene("corona") ? 1.3 : 1) * (1 - this.bonoConjuntoActivo("recibido")) * (1 - this.combate().resistencia) * (1 + this.efectosPacto().recibido);
   }
 
   /** Suma de un modificador en todo el equipo puesto. */
@@ -589,11 +624,12 @@ export class Partida {
   modificadoresBotin(): ModificadoresBotin {
     const corona = this.tiene("corona");
     const suerte = this.stats().suerte;
+    const peso = bonoPeso(this.pesoEco);
     return {
-      suerte: (corona ? 1.5 : 1) * (1 + suerte / 100),
+      suerte: (corona ? 1.5 : 1) * (1 + suerte / 100) * peso.suerte,
       codicia: (1 + 0.12 * this.meta.nivelMejora("codicia")) * (corona ? 1.6 : 1) * (1 + 0.35 * this.potenciaRuna("avaro")) * (this.tieneReliquia("manoAvaro") ? 1.25 : 1)
         * (1 + this.sumaRasgo("codicia")) * (1 + suerte / 400),
-      fortuna: suerte,
+      fortuna: suerte + peso.fortuna,
     };
   }
 
@@ -656,6 +692,7 @@ export class Partida {
 
   bajarPiso(): void {
     this.piso++;
+    this.pesoEco = Math.min(PESO_MAX, this.pesoEco + 1);
     this.segundaVidaUsada = false;
     this.alEmpezarPiso();
   }
@@ -797,7 +834,7 @@ export class Partida {
     const conDado = usarLagrima && dado !== undefined && this.mochila.contar(dado) > 0;
     if (usarLagrima && !conDado && this.mochila.contar(OBJ_LAGRIMA) < 1) return fallo("sin-lagrima");
     if (this.billetera.saldo("esquirlas") < costo) return fallo("sin-fondos");
-    const r = fusionarCartas([a, b, c], this.azar, usarLagrima);
+    const r = fusionarCartas([a, b, c], this.azar, usarLagrima, this.bonoFusion());
     if (!r.ok) return r;
     this.billetera.debitar("esquirlas", costo);
     if (conDado) this.mochila.quitar(dado!, 1);
@@ -833,7 +870,7 @@ export class Partida {
 
   usarPocion(): boolean {
     if (this.hp >= this.stats().hp || !this.mochila.quitar(OBJ_POCION, 1).ok) return false;
-    this.curar(Math.round(this.stats().hp * 0.45 * (1 + this.sumaRasgo("curaPocion") + (this.tieneReliquia("corazonEco") ? 0.25 : 0))));
+    this.curar(Math.round(this.stats().hp * 0.45 * Math.max(0.1, 1 + this.sumaRasgo("curaPocion") + (this.tieneReliquia("corazonEco") ? 0.25 : 0) + this.efectosPacto().pociones)));
     return true;
   }
 
@@ -878,6 +915,12 @@ export class Partida {
     this.abismo = abismo;
     this.pisosSinSalida = 0;
     this.rachaArenas = 0;
+    this.pesoEco = 0;
+    // Brindis de Ilse: nadie baja de su taberna con las manos vacías.
+    if (this.historiaCumplida("ilse")) {
+      this.mochila.agregar(OBJ_POCION, 1);
+      this.mochila.agregar(OBJ_ETER, 1);
+    }
     this.piso = Math.max(1, Math.min(piso, abismo ? this.abismoDesbloqueado : this.pisoDesbloqueado));
     this.segundaVidaUsada = false;
     this.cargaDefinitiva = 0;
@@ -916,9 +959,30 @@ export class Partida {
    * Se conservan el contenedor seguro, las cartas, el nivel, los talentos, las runas engarzadas y el banco.
    * Devuelve lo perdido (el Eco del piso lo guarda: si lo vences, lo recuperas).
    */
+  /** Las piezas espectrales (armas de Portadores vengados) se desvanecen al terminar el descenso. */
+  quitarEspectrales(): number {
+    let n = 0;
+    for (const r of RANURAS) {
+      if (this.equipo[r]?.espectral === true) {
+        this.equipo[r] = null;
+        n++;
+      }
+    }
+    for (const pos of [...this.mochila.posiciones()]) {
+      const p = this.mochila.en(pos);
+      if (p !== null && equipoDe(p)?.espectral === true) {
+        this.mochila.sacarDe(pos, p.cantidad);
+        n++;
+      }
+    }
+    return n;
+  }
+
   perderTodo(): BotinPerdido {
     const equipo: ObjetoEquipo[] = [];
     for (const r of RANURAS) {
+      // Juramento de Vael: el arma equipada no la reclama el Pozo.
+      if (r === "arma" && this.historiaCumplida("vael")) continue;
       const o = this.equipo[r];
       if (o !== null) equipo.push(o);
       this.equipo[r] = null;
@@ -938,6 +1002,24 @@ export class Partida {
   }
 
   /** Valor en riesgo (esquirlas + lo que valen equipo y mochila): lo que perderías si mueres ahora. */
+  /** Lo que llevas encima resumido para la emboscada de extracción (rarezas, relicarios, valor). */
+  resumenRiesgo(): ResumenRiesgo {
+    const porRareza = [0, 0, 0, 0, 0, 0];
+    for (const r of RANURAS) {
+      const o = this.equipo[r];
+      if (o !== null && o.espectral !== true) porRareza[o.rareza]++;
+    }
+    let relicarios = 0;
+    for (const pos of this.mochila.posiciones()) {
+      const p = this.mochila.en(pos);
+      if (p === null) continue;
+      const o = equipoDe(p);
+      if (o !== undefined && o.espectral !== true) porRareza[o.rareza]++;
+      if (p.objeto === OBJ_RELICARIO) relicarios += p.cantidad;
+    }
+    return { valor: this.valorEnRiesgo(), porRareza, relicarios };
+  }
+
   valorEnRiesgo(): number {
     let v = this.esquirlas;
     for (const r of RANURAS) {
@@ -962,6 +1044,34 @@ export class Partida {
   sacarDeSeguro(pos: Posicion): Resultado<void, string> {
     const r = transferir(this.seguro, pos, this.mochila);
     return r.ok ? exito(undefined) : fallo(r.error);
+  }
+
+  // ---------------- Historias del pueblo ----------------
+
+  aceptarHistoria(id: IdHistoria): void {
+    if (this.historias[id] === undefined) this.historias[id] = "conocida";
+  }
+
+  historiaCumplida(id: IdHistoria): boolean {
+    return this.historias[id] === "cumplida";
+  }
+
+  /** ¿Llevas encima el recuerdo de esa historia? */
+  tieneRecuerdo(id: IdHistoria): boolean {
+    return this.mochila.contar(historia(id).recuerdo.objeto) > 0;
+  }
+
+  /** Entregar el recuerdo: la historia queda cumplida y su recompensa, desbloqueada para siempre. */
+  entregarRecuerdo(id: IdHistoria): boolean {
+    if (this.historias[id] !== "conocida" || !this.tieneRecuerdo(id)) return false;
+    this.mochila.quitar(historia(id).recuerdo.objeto, 1);
+    this.historias[id] = "cumplida";
+    return true;
+  }
+
+  /** Bendición del Rosario (Hermana Ceniza): +10 % a la fusión. */
+  bonoFusion(): number {
+    return this.historiaCumplida("ceniza") ? 0.1 : 0;
   }
 
   /** La Piedra del Juicio se entrega al desbloquear el Pozo Profundo. Devuelve true si se acaba de recibir. */
@@ -1081,7 +1191,7 @@ export class Partida {
       puntos, talentos: [...this.talentos], corazones: this.corazones, subarma: this.subarma, runas: [this.runas[0], this.runas[1]], nivelesRuna: [this.nivelesRuna[0], this.nivelesRuna[1]],
       pisoDesbloqueado: this.pisoDesbloqueado, abismo: this.abismo, pisosSinSalida: this.pisosSinSalida,
       abismoDesbloqueado: this.abismoDesbloqueado, rachaArenas: this.rachaArenas, piedraJuicio: this.piedraJuicio,
-      piedadRelicario: this.piedadRelicario, misiones: this.misiones.exportar(), seguro: volcar(this.seguro),
+      piedadRelicario: this.piedadRelicario, pactoEco: this.pactoEco, pesoEco: this.pesoEco, historias: { ...this.historias }, misiones: this.misiones.exportar(), seguro: volcar(this.seguro),
     };
   }
 
@@ -1125,6 +1235,9 @@ export class Partida {
     p.rachaArenas = d.rachaArenas ?? 0;
     p.piedraJuicio = d.piedraJuicio ?? 0;
     p.piedadRelicario = d.piedadRelicario ?? PIEDAD_INICIAL;
+    p.pactoEco = d.pactoEco ?? null;
+    p.pesoEco = d.pesoEco ?? 0;
+    p.historias = { ...(d.historias ?? {}) };
     p.revisarPiedraJuicio();
     // Misiones: se descartan las de versiones viejas del tablón (ids que ya no existen).
     if (d.misiones !== undefined) {

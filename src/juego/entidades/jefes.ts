@@ -1,6 +1,7 @@
 // Guardianes de cada piso y el Eco rival. Máquinas de estados con ataques ANUNCIADOS (el jugador siempre
 // puede leer lo que viene: destello, línea de aviso o zona marcada) y una segunda fase al 50 % de vida.
 
+import { HABITOS_NEUTROS, perfilHabitos, type Habitos } from "../../dominio/habitos.ts";
 import { ALMAS, alma, type Tecnica } from "../../contenido/almas.ts";
 import { escalaEnemigo, type DefJefe } from "../../contenido/biomas.ts";
 import { statsEcoEnemigo, type Eco } from "../../dominio/eco.ts";
@@ -530,36 +531,93 @@ export class ElQueRecuerda extends Jefe {
 // ======================================================================================
 // El Eco: tu yo de una partida anterior. Pelea como un Portador, con tu técnica.
 // ======================================================================================
+/**
+ * Tu Eco. Pelea COMO PELEABAS (dominio/habitos.ts): mantiene la distancia y dispara si eras de lejos, cae en picado
+ * si vivías en el aire, esquiva tus golpes si esquivabas a último momento, patea si pateabas, abusa de su técnica
+ * si abusabas de las tuyas, y va más o menos al frente según tu ritmo.
+ */
 export class EcoRival extends Criatura {
   readonly eco: Eco;
+  /** Eco de OTRO Portador (Ecos asíncronos). */
+  readonly ajeno: boolean;
+  /** Eco de una historia del pueblo (misión personal): suelta su recuerdo. */
+  historia: string | null = null;
   private readonly tecnica: Tecnica;
   private readonly potenciaTecnica: number;
   private readonly colores: readonly [string, string];
+  private readonly habitos: Habitos;
   private estado = "intro";
   private tiempo = 1.4;
   private cdTecnica = 3;
+  private cdDisparo = 1.2;
+  private cdEsquiva = 0;
+  private esquivando = 0;
   private golpeo = false;
+  private patadaFuerte = false;
 
-  constructor(eco: Eco, x: number, y: number) {
+  constructor(eco: Eco, x: number, y: number, ajeno = false) {
     const s = statsEcoEnemigo(eco);
     super({ nombre: eco.nombre, hp: s.hp, ataque: s.ataque, defensa: s.defensa, exp: 40 + eco.nivel * 8, w: 12, h: 22, categoria: "eco" }, x, y - 22, true);
     this.eco = eco;
+    this.ajeno = ajeno;
     const a = eco.forma !== null ? alma(eco.forma.personaje) : null;
     this.tecnica = a?.tecnica ?? "orbe";
     this.potenciaTecnica = s.tecnica;
     this.colores = a !== null ? [a.color, a.colorSec] : ["#888899", "#ffffff"];
+    this.habitos = eco.habitos ?? HABITOS_NEUTROS;
+    this.cdTecnica = this.enfriamientoTecnica();
   }
 
   get titulo(): string {
     return `Caíste aquí: ${this.eco.causa}`;
   }
 
+  /** Lo que aprendió de ti (para el cartel del duelo). */
+  get perfil(): string {
+    return perfilHabitos(this.habitos);
+  }
+
+  private get lejano(): boolean {
+    return this.habitos.distancia > 0.55 || this.habitos.estilo === "arco";
+  }
+
+  private enfriamientoTecnica(): number {
+    return Math.max(1.2, 3.4 - this.habitos.tecnica * 2.2) + Math.random() * 1.2;
+  }
+
+  override aplicarDanio(n: number, ctx: Contexto): boolean {
+    // Mientras esquiva (aprendió de tus esquivas perfectas) no recibe daño.
+    if (this.esquivando > 0) {
+      ctx.fx.texto(this.cx, this.y - 6, "¡Esquiva!", "#9fe8ff");
+      return false;
+    }
+    return super.aplicarDanio(n, ctx);
+  }
+
   protected pensar(dt: number, ctx: Contexto): void {
     const j = ctx.jugador;
+    const h = this.habitos;
     const dx = j.cx - this.cx;
+    const dist = Math.abs(dx);
     this.tiempo -= dt;
     this.cdTecnica -= dt;
+    this.cdDisparo -= dt;
+    this.cdEsquiva -= dt;
+    this.esquivando = Math.max(0, this.esquivando - dt);
     this.vy += GRAVEDAD * dt;
+    const rapidez = 90 + h.agresividad * 70;
+
+    // Esquiva reactiva: si le atacas de cerca, a veces da un paso atrás invulnerable (como hacías tú).
+    const atacando = j.accionTipo === "golpe" || j.accionTipo === "cargado" || j.accionTipo === "estocada";
+    if (atacando && dist < 52 && this.cdEsquiva <= 0 && this.estado !== "intro" && Math.random() < h.esquiva * 0.85 + 0.05) {
+      this.cdEsquiva = 1.3;
+      this.esquivando = 0.28;
+      this.vx = -Math.sign(dx || 1) * 300;
+      this.vy = Math.min(this.vy, -80);
+      this.estado = "retroceso";
+      this.tiempo = 0.28;
+      ctx.fx.chispas(this.cx, this.cy, "#9fe8ff", 10, { velocidad: 60, gravedad: 0, brillo: true });
+    }
 
     switch (this.estado) {
       case "intro":
@@ -567,36 +625,93 @@ export class EcoRival extends Criatura {
         break;
       case "acechar": {
         this.dir = dx < 0 ? -1 : 1;
-        const lejos = Math.abs(dx) > 26;
-        this.vx += ((lejos ? this.dir * 105 : 0) - this.vx) * Math.min(1, dt * 10);
+        if (this.lejano) {
+          // Kiting: se aleja si te acercas, se acerca si te alejas, y dispara desde su distancia.
+          const objetivo = dist < 110 ? -this.dir * rapidez * 1.15 : dist > 190 ? this.dir * rapidez : 0;
+          this.vx += (objetivo - this.vx) * Math.min(1, dt * 8);
+          // Atrapado contra la pared mientras huye: salta por encima.
+          if (dist < 80 && this.enSuelo && Math.abs(this.vx) < 15 && Math.random() < dt * 3) {
+            this.vy = -380;
+            this.vx = this.dir * 160;
+          }
+          if (this.cdDisparo <= 0 && Math.abs(j.cy - this.cy) < 70) {
+            this.estado = "preDisparo";
+            this.tiempo = 0.25;
+          }
+        } else {
+          const lejos = dist > 26;
+          this.vx += ((lejos ? this.dir * rapidez : 0) - this.vx) * Math.min(1, dt * 10);
+          if (!lejos && Math.abs(j.cy - this.cy) < 24) {
+            this.patadaFuerte = Math.random() < h.patada * 1.4;
+            this.estado = "preGolpe";
+            this.tiempo = 0.28 - h.agresividad * 0.1;
+            this.golpeo = false;
+          }
+        }
         if (this.enSuelo && j.y + j.h < this.y - 20 && Math.random() < dt * 2) this.vy = -340;
+        // Aéreo: salta para caerte encima en picado.
+        if (this.enSuelo && dist < 130 && Math.random() < dt * h.aereo * 2.2) {
+          this.vy = -400;
+          this.vx = this.dir * 120;
+          this.estado = "aire";
+        }
         if (this.cdTecnica <= 0) {
           this.estado = "preTecnica";
           this.tiempo = 0.45;
           this.vx = 0;
-        } else if (!lejos && Math.abs(j.cy - this.cy) < 24) {
-          this.estado = "preGolpe";
-          this.tiempo = 0.28;
-          this.golpeo = false;
         }
         break;
       }
+      case "aire":
+        this.vx += (Math.sign(dx) * 140 - this.vx) * Math.min(1, dt * 6);
+        if (this.vy > -60 && dist < 26 && this.y + this.h < j.y) {
+          this.estado = "picado";
+          this.vx = 0;
+          this.vy = 460;
+        }
+        if (this.enSuelo && this.vy >= 0) this.estado = "acechar";
+        break;
+      case "picado":
+        if (solapan(this, j)) {
+          ctx.golpearJugador(this.ataque * 1.2, this.cx, 260, this.eco.nombre);
+          this.vy = -220;
+          this.estado = "aire";
+        } else if (this.enSuelo) {
+          ctx.fx.chispas(this.cx, this.y + this.h, this.colores[1], 14, { velocidad: 110, angulo: -Math.PI / 2, apertura: 2.4 });
+          ctx.fx.sacudir(3);
+          if (dist < 30) ctx.golpearJugador(this.ataque, this.cx, 200, this.eco.nombre);
+          this.estado = "acechar";
+        }
+        break;
+      case "preDisparo":
+        this.vx *= 0.6;
+        if (this.tiempo <= 0) {
+          const ang = Math.atan2(j.cy - this.cy, j.cx - this.cx);
+          ctx.agregarProyectil(new Proyectil({
+            tipo: "flecha", x: this.cx, y: this.cy - 2, vx: Math.cos(ang) * 320, vy: Math.sin(ang) * 320, w: 10, h: 3, vida: 1.6,
+            color: this.colores[1], ataqueEnemigo: this.ataque * 0.7,
+          }));
+          ctx.audio.reproducir("golpe");
+          this.cdDisparo = 1.5 - h.agresividad * 0.8;
+          this.estado = "acechar";
+        }
+        break;
       case "preGolpe":
         this.vx *= 0.7;
         if (this.tiempo <= 0) {
           this.estado = "golpe";
           this.tiempo = 0.18;
-          ctx.audio.reproducir("golpe");
+          ctx.audio.reproducir(this.patadaFuerte ? "patada" : "golpe");
         }
         break;
       case "golpe":
         if (!this.golpeo) {
           this.golpeo = true;
           const r = { x: this.dir > 0 ? this.x + this.w : this.x - 22, y: this.y + 2, w: 22, h: 16 };
-          if (solapan(r, j)) ctx.golpearJugador(this.ataque, this.cx, 200);
+          if (solapan(r, j)) ctx.golpearJugador(this.ataque * (this.patadaFuerte ? 1.1 : 1), this.cx, this.patadaFuerte ? 340 : 200, this.eco.nombre);
         }
         if (this.tiempo <= 0) {
-          this.estado = Math.random() < 0.35 ? "retroceso" : "acechar";
+          this.estado = Math.random() < 0.35 - h.agresividad * 0.2 ? "retroceso" : "acechar";
           this.tiempo = 0.3;
           if (this.estado === "retroceso") {
             this.vx = -this.dir * 260;
@@ -611,7 +726,7 @@ export class EcoRival extends Criatura {
         this.vx = 0;
         if (this.tiempo <= 0) {
           tecnicaEnemiga(this.tecnica, this, ctx, this.potenciaTecnica, this.colores[1]);
-          this.cdTecnica = 3.2 + Math.random() * 1.8;
+          this.cdTecnica = this.enfriamientoTecnica();
           this.estado = "acechar";
         }
         break;
@@ -621,15 +736,15 @@ export class EcoRival extends Criatura {
 
   dibujar(g: CanvasRenderingContext2D): void {
     g.save();
-    g.globalAlpha = 0.8 + Math.sin(this.t * 8) * 0.15;
-    dibujarFigura(g, this.x, this.y, this.dir, this.color(this.colores[0]), this.colores[1], this.t, this.estado === "golpe", Math.abs(this.vx) > 10,
+    g.globalAlpha = (this.esquivando > 0 ? 0.4 : 0.8) + Math.sin(this.t * 8) * 0.15;
+    dibujarFigura(g, this.x, this.y, this.dir, this.color(this.colores[0]), this.colores[1], this.t, this.estado === "golpe" || this.estado === "picado", Math.abs(this.vx) > 10,
       this.eco.forma !== null ? alma(this.eco.forma.personaje).tipo : 1);
     g.globalCompositeOperation = "lighter";
     g.globalAlpha = 0.25;
-    g.fillStyle = this.colores[1];
+    g.fillStyle = this.ajeno ? "#7dffb0" : this.colores[1];
     g.fillRect(Math.round(this.x) - 2, Math.round(this.y) - 2, this.w + 4, this.h + 4);
     g.restore();
-    if (this.estado === "preTecnica" || this.estado === "preGolpe") {
+    if (this.estado === "preTecnica" || this.estado === "preGolpe" || this.estado === "preDisparo") {
       g.fillStyle = "#ff3d3d";
       if (Math.floor(this.t * 12) % 2 === 0) g.fillRect(Math.round(this.cx) - 1, Math.round(this.y) - 10, 3, 6);
     }

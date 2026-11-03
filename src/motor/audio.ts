@@ -1,4 +1,7 @@
-// Sonido sintetizado con WebAudio (sin archivos): efectos y un zumbido ambiental por bioma.
+// Sonido sintetizado con WebAudio (sin archivos): efectos, un zumbido ambiental por bioma y música por capas
+// que reacciona al medidor de estilo (ver motor/musica.ts).
+
+import { Musica } from "./musica.ts";
 
 export type Sonido =
   | "salto" | "golpe" | "patada" | "impacto" | "critico" | "muerte" | "recoger" | "raro" | "unico"
@@ -9,6 +12,7 @@ export class Audio {
   private ctx: AudioContext | null = null;
   private maestro: GainNode | null = null;
   private ambiente: { osc: OscillatorNode[]; gain: GainNode } | null = null;
+  private musica: Musica | null = null;
   volumen = 0.5;
 
   /** Los navegadores exigen un gesto del usuario antes de sonar. */
@@ -93,10 +97,27 @@ export class Audio {
     }
   }
 
-  /** Zumbido de fondo: dos osciladores graves desafinados, distinto por bioma. */
+  /** Rango de estilo actual (0 = D … 6 = SSS): sube o baja las capas de la música. */
+  intensidadMusica(rango: number): void {
+    this.musica?.intensidad(rango);
+  }
+
+  /** Extracción: la música se acelera y suenan todas las capas. */
+  tension(on: boolean): void {
+    this.musica?.tensar(on);
+  }
+
+  /** El Pozo susurra el nombre del rango al alcanzar S, SS o SSS. */
+  susurrarRango(texto: string): void {
+    if (this.musica !== null && this.maestro !== null) this.musica.susurrar(texto, this.maestro);
+  }
+
+  /** Zumbido de fondo (dos osciladores graves desafinados, distinto por bioma) y la música por capas. */
   ambientar(bioma: number): void {
     if (this.ctx === null || this.maestro === null) return;
     this.silenciarAmbiente();
+    this.musica ??= new Musica(this.ctx, this.maestro);
+    this.musica.iniciar(bioma);
     const bases = [55, 49, 41.2, 61.7, 46.2, 51.9, 43.6, 38.9, 58.3, 36.7];
     const base = bases[Math.max(0, Math.min(bioma, bases.length - 1))];
     const gain = this.ctx.createGain();
@@ -115,6 +136,7 @@ export class Audio {
   }
 
   silenciarAmbiente(): void {
+    this.musica?.detener();
     if (this.ambiente === null) return;
     for (const o of this.ambiente.osc) o.stop();
     this.ambiente.gain.disconnect();

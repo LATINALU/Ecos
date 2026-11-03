@@ -10,7 +10,7 @@ import { SUBARMAS } from "../contenido/subarmas.ts";
 import { estrellas } from "../dominio/cartas.ts";
 import { dibujarIconoSubarma } from "../juego/entidades/objetos.ts";
 import { aperturas, type MapaPiso } from "../dominio/mundo/generador.ts";
-import { SEGUNDOS_EXTRACCION, type Juego } from "../juego/juego.ts";
+import type { Juego } from "../juego/juego.ts";
 import type { Pueblo } from "../juego/pueblo.ts";
 import type { Meta } from "../dominio/meta.ts";
 
@@ -87,10 +87,14 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
   // Extracción: valor en riesgo y progreso de la zona.
   texto(g, `En riesgo ◆${p.valorEnRiesgo()}`, 476, 251, "#ffb0a0", "right");
   if (juego.cargaExtraccion > 0) {
-    const prog = Math.min(1, juego.cargaExtraccion / SEGUNDOS_EXTRACCION);
-    texto(g, `EXTRAYENDO ${Math.ceil(SEGUNDOS_EXTRACCION - juego.cargaExtraccion)} s`, 240, 200, "#7dffb0", "center");
-    barra(g, 180, 204, 120, 4, prog, "#7dffb0");
+    const total = juego.duracionExtraccion;
+    const prog = Math.min(1, juego.cargaExtraccion / total);
+    const fuera = !juego.enZonaExtraccion;
+    texto(g, fuera ? `¡VUELVE A LA ZONA! ${Math.ceil(total - juego.cargaExtraccion)} s` : `RESISTE ${Math.ceil(total - juego.cargaExtraccion)} s`, 240, 200, fuera ? "#ff6a6a" : "#7dffb0", "center");
+    barra(g, 180, 204, 120, 4, prog, fuera ? "#ff6a6a" : "#7dffb0");
   }
+  // Peso del Eco: pisos seguidos sin volver al pueblo.
+  if (p.pesoEco > 0) texto(g, `Peso del Eco ×${p.pesoEco} · +${p.pesoEco * 25} % hallazgos`, 476, 241, p.pesoEco >= 2 ? "#ff6a9a" : "#c9a7ff", "right");
 
   // Piso
   const b = bioma(p.piso);

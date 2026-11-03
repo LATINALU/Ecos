@@ -3,8 +3,12 @@
 // y se llama a Partida/Meta, mostrando el Resultado (ok / código de error) que devuelven.
 
 import { biomaAbismo, iniciosAbismo, numeroRomano } from "../dominio/abismo.ts";
-import type { ArticuloErrante, AvisoAbismo, OpcionesCampana } from "../juego/juego.ts";
+import type { ArticuloErrante, AvisoAbismo, DecisionEco, OpcionesCampana } from "../juego/juego.ts";
 import { INFO_AFIJO_JUICIO, afijosJuicio, semanaDe } from "../dominio/juicio.ts";
+import { UMBRALES_MUTACION, mutacionesDe, tierMutacion } from "../contenido/mutaciones.ts";
+import { HISTORIAS, LORE_NPC } from "../contenido/historias.ts";
+import { COSTO_FORJA_MITICA, forjaMitica } from "../dominio/crafteo.ts";
+import { INFO_ESENCIA, RESONANCIAS, VENTANA_RESONANCIA, esenciaDe } from "../contenido/resonancias.ts";
 import {
   BLOQUE_RELICARIO, NIVEL_MIN_RELICARIO, NOMBRE_AURA, PROB_CAJA, PROB_RELICARIO, auraDeNivel, colorEstrella, pendientes,
 } from "../dominio/relicario.ts";
@@ -22,7 +26,8 @@ import {
   NOMBRE_RANURA_ALMA, RANURAS_ALMA, TECLA_RANURA_ALMA, cantidadExtra, describirEfectos, escalaCarta, grimorio, type RanuraAlma,
 } from "../contenido/grimorio.ts";
 import { ESTILOS, ORDEN_ESTILOS } from "../contenido/armas.ts";
-import { EXITO_REFINADO, REFINADO_MAX, RECETAS, costoRefinado } from "../contenido/recetas.ts";
+import { REFINADO_MAX, RECETAS } from "../contenido/recetas.ts";
+import { NIVEL_ELECCION_TEMPLADO, costoTemplado, pacto, type ModoTemplado } from "../dominio/templado.ts";
 import { CONJUNTOS, conjunto as defConjunto } from "../contenido/conjuntos.ts";
 import { COLORES_RAREZA_RUNA, estiloDe, COSTO_FUSION_RUNA, NOMBRES_RAREZA_RUNA, RAREZA_RUNA_MAX, nombreRuna, objetoRuna, runaDeObjeto } from "../contenido/objetos.ts";
 import { SENDAS, TALENTOS, type Senda } from "../contenido/talentos.ts";
@@ -103,7 +108,7 @@ const ERRORES: Readonly<Record<string, string>> = {
   "ya-aprendido": "Ya lo aprendiste",
   "sin-puntos": "No tienes puntos libres",
   "al-tope": "Ese stat llegó a su tope para tu nivel",
-  "fallo-refinado": "El refinado falló: se perdieron los materiales (la pieza está intacta)",
+  "elige-templado": "Del +6 en adelante elige Templado Seguro o Templado Abisal",
   "no-es-runa": "Eso no es una runa",
 };
 
@@ -140,6 +145,15 @@ function grimorioCarta(c: Carta, resaltar?: RanuraAlma): HTMLElement {
         hab !== null ? h("div", { class: "hab", style: `color:${hab.color}` },
           `✦ ${hab.nombre}`, h("span", { class: "sub" },
             ` — ${hab.descripcion} ${r === 4 ? "(carga 100 %)" : `(${hab.costo} éter · ${hab.cd} s)`} · poder ×${(hab.mult * escala).toFixed(1).replace(".", ",")}`)) : null,
+        hab !== null && r !== 4 ? (() => {
+          const es = INFO_ESENCIA[esenciaDe(hab, alma(c.personaje).tipo)];
+          return h("span", { class: "esencia", style: `--c:${es.color}`, title: "Esencia: combínala con otra en las Resonancias de Mazo" }, `${es.icono} ${es.nombre}`);
+        })() : null,
+        hab !== null ? h("div", { class: "mutaciones" }, ...mutacionesDe(hab.forma).map((mu, k) => {
+          const activa = tierMutacion(c.nivel) > k;
+          return h("div", { class: `mutacion${activa ? " on" : ""}`, title: mu.descripcion },
+            h("b", {}, `${UMBRALES_MUTACION[k]}★ ${mu.nombre}`), ` — ${mu.descripcion}`);
+        })) : null,
         h("div", { class: "pasiva" }, `${r === 0 ? "Ataques básicos" : "Pasiva"}: `, h("b", {}, pas.nombre), ` — ${describirEfectos(pas.efectos, escala)}`));
     }));
 }
@@ -191,6 +205,13 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
       const firma = def.firma?.includes(o.ranura) === true;
       return h("div", { class: `rasgo${deBase ? " de-base" : ""}${firma ? " firma" : ""}` },
         `${firma ? "◆" : "◈"} ${def.nombre} ${def.formato(v)}${deBase ? " (propio de la pieza)" : firma ? " · firma" : ""}`);
+    }),
+    ...(o.pactos ?? []).map((id) => {
+      const pc = pacto(id);
+      return pc === undefined ? null : h("div", { class: "pacto" },
+        h("b", {}, `⛧ Pacto · ${pc.nombre}`),
+        h("div", { class: "sube" }, `+ ${pc.textoBono}`),
+        h("div", { class: "baja" }, `− ${pc.textoMaldicion}`));
     }),
     o.pasiva !== undefined ? h("div", { class: "pasiva-mitica" },
       h("b", {}, `✦ Pasiva mítica · ${pasivaMitica(o.pasiva).nombre}`), h("div", {}, describirEfectos(pasivaMitica(o.pasiva).efectos))) : null,
@@ -296,6 +317,8 @@ function categoriaPila(pila: { objeto: number; extra?: unknown }): FiltroMochila
 function valorPieza(o: ObjetoEquipo): number {
   return o.nivel * (4 + o.rareza * 2) + (o.refinado ?? 0) * 6;
 }
+
+const h3 = (t: string): HTMLElement => h("h3", {}, t);
 
 function miniCarta(c: Carta | null, etiqueta: string, sel: boolean, onclick: () => void): HTMLElement {
   if (c === null) return h("button", { class: `carta vacia${sel ? " sel" : ""}`, onclick }, h("small", {}, etiqueta), "—");
@@ -785,7 +808,26 @@ export class Interfaz {
           grimorioCarta(c));
       }
     }
-    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Mazo de almas (5 ranuras)"), slots, h("h3", {}, "Cartas"), mazo), detalle);
+    // Esencias de lo equipado y Códice de Resonancias (las no descubiertas, ocultas).
+    const esencias = h("div", { class: "esencias-mazo" }, ...([1, 2, 3] as const).map((r) => {
+      const c = p.cartaEn(r);
+      if (c === null) return h("span", { class: "esencia vacia" }, `${NOMBRE_RANURA_ALMA[r]}: —`);
+      const hab = grimorio(c.personaje).habilidades[r - 1];
+      const es = INFO_ESENCIA[esenciaDe(hab, alma(c.personaje).tipo)];
+      return h("span", { class: "esencia", style: `--c:${es.color}` }, `${NOMBRE_RANURA_ALMA[r]}: ${es.icono} ${es.nombre}`);
+    }));
+    const descubiertas = RESONANCIAS.filter((x) => this.meta.resonanciaDescubierta(x.id)).length;
+    const codice = h("div", { class: "codice" },
+      h("h3", {}, `Códice de Resonancias · ${descubiertas}/${RESONANCIAS.length}`),
+      h("p", { class: "sub" }, `Usa una habilidad y, en menos de ${String(VENTANA_RESONANCIA).replace(".", ",")} s, otra de OTRA ranura: si sus esencias combinan, resuenan en algo nuevo.`),
+      esencias,
+      h("div", { class: "codice-lista" }, ...RESONANCIAS.map((x) => this.meta.resonanciaDescubierta(x.id)
+        ? h("div", { class: "resonancia on", style: `--c:${x.color}` },
+          h("b", {}, x.nombre),
+          h("small", {}, x.esencias.map((e) => `${INFO_ESENCIA[e].icono} ${INFO_ESENCIA[e].nombre}`).join(" + ")),
+          h("span", { class: "sub" }, x.descripcion))
+        : h("div", { class: "resonancia" }, h("b", {}, "???"), h("small", {}, "Dos esencias por descubrir")))));
+    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Mazo de almas (5 ranuras)"), slots, codice, h("h3", {}, "Cartas"), mazo), detalle);
   }
 
   private vistaHabilidades(juego: ConPartida, p: Partida): HTMLElement {
@@ -967,7 +1009,7 @@ export class Interfaz {
       ? { id: dado, nombre: `Dado del Destino ${n + 2}★`, cantidad: dados }
       : { id: OBJ_LAGRIMA, nombre: "Lágrima de Eco", cantidad: lagrimas };
     const costo = n >= 0 ? COSTO_FUSION[n] ?? 0 : 0;
-    const prob = n < 0 ? 0 : n >= NIVEL_MAX_CARTA ? 0 : usaSello ? 1 : PROB_FUSION[n];
+    const prob = n < 0 ? 0 : n >= NIVEL_MAX_CARTA ? 0 : usaSello ? 1 : Math.min(1, PROB_FUSION[n] + p.bonoFusion());
 
     const ranuraCarta = (i: number): HTMLElement => {
       const c = sel[i];
@@ -1096,25 +1138,64 @@ export class Interfaz {
     const refinar = RANURAS.map((ranura) => {
       const o = p.equipo[ranura];
       const nivel = o?.refinado ?? 0;
-      const costo = costoRefinado(nivel);
+      const eleccion = nivel >= NIVEL_ELECCION_TEMPLADO;
+      const frag = p.mochila.contar(MAT_FRAGMENTO);
+      const templar = (modo: ModoTemplado): void => {
+        const res = refinarEquipado(p, ranura, modo);
+        if (!res.ok) {
+          this.audio.reproducir("fallo");
+          refrescar(h("p", { class: "baja" }, textoError(res.error)));
+          return;
+        }
+        this.audio.reproducir(modo === "abisal" ? "explosion" : "fusion");
+        const pc = res.valor.pactoNuevo;
+        refrescar(h("div", { class: `resultado sube${pc !== undefined ? " abisal" : ""}` },
+          pc !== undefined ? `¡Templado Abisal! El Pozo sella un pacto: ${pc.nombre}` : "¡Templado!",
+          fichaEquipo(res.valor)));
+      };
+      const boton = (modo: ModoTemplado, texto: string, clase = ""): HTMLElement => {
+        const c = costoTemplado(nivel, modo);
+        return h("button", {
+          class: clase,
+          disabled: o === null || nivel >= REFINADO_MAX || frag < c.fragmentos || p.esquirlas < c.esquirlas,
+          title: `Fragmentos de Eco ${frag}/${c.fragmentos} · ◆ ${c.esquirlas}`,
+          onclick: () => templar(modo),
+        }, `${texto} · ${c.fragmentos}✦ ${c.esquirlas}◆`);
+      };
       return h("div", { class: "receta" },
         h("b", { style: o !== null ? `color:${COLORES_RAREZA[o.rareza]}` : "" }, o?.nombre ?? `${NOMBRE_RANURA[ranura]}: nada equipado`),
-        h("span", { class: "sub" }, o === null ? "" : nivel >= REFINADO_MAX ? "Refinado al máximo" : `+12 % a todo · Fragmento de Eco ${p.mochila.contar(MAT_FRAGMENTO)}/${costo.fragmentos} · ◆ ${costo.esquirlas} · éxito ${Math.round((EXITO_REFINADO[nivel] ?? 0) * 100)} %`),
-        h("button", {
-          disabled: o === null || nivel >= REFINADO_MAX,
-          onclick: () => {
-            const res = refinarEquipado(p, ranura);
-            if (!res.ok) {
-              this.audio.reproducir("fallo");
-              refrescar(h("p", { class: "baja" }, textoError(res.error)));
-              return;
-            }
-            this.audio.reproducir("fusion");
-            refrescar(h("div", { class: "resultado sube" }, "¡Refinado!", fichaEquipo(res.valor)));
-          },
-        }, `Refinar (+${nivel}→+${nivel + 1})`));
+        h("span", { class: "sub" }, o === null ? "" : nivel >= REFINADO_MAX ? "Templado al máximo"
+          : eleccion ? `+${nivel}→+${nivel + 1} · +12 % a todo. Nunca falla: elige cómo templar.` : `+${nivel}→+${nivel + 1} · +12 % a todo. Nunca falla.`),
+        o !== null && (o.pactos ?? []).length > 0 ? h("span", { class: "baja" }, `Pactos: ${(o.pactos ?? []).map((id) => pacto(id)?.nombre ?? id).join(", ")}`) : null,
+        o === null || nivel >= REFINADO_MAX ? null
+          : eleccion
+            ? h("div", { class: "botones" },
+              boton("seguro", "Templado Seguro"),
+              boton("abisal", "Templado Abisal (pacto)", "peligro"))
+            : boton("normal", "Templar"));
     });
     const enPueblo = !("mapa" in juego);
+    // Forja Mítica: solo en el pueblo y si Dorn recuperó su martillo.
+    const mitica = !enPueblo ? null : !p.historiaCumplida("dorn")
+      ? h("p", { class: "sub" }, "Dorn guarda un secreto de forja. Habla con él (↑) en la Fragua.")
+      : h("div", { class: "receta mitica" },
+        h("b", { style: "color:#ff4d6d" }, "Forja Mítica (Martillo de Dorn)"),
+        h("span", { class: "sub" }, `Una pieza Mítica con nombre · Fragmentos de Eco ${p.mochila.contar(MAT_FRAGMENTO)}/${COSTO_FORJA_MITICA.fragmentos} · ◆ ${COSTO_FORJA_MITICA.esquirlas}`),
+        h("button", {
+          class: "principal",
+          disabled: p.mochila.contar(MAT_FRAGMENTO) < COSTO_FORJA_MITICA.fragmentos || p.esquirlas < COSTO_FORJA_MITICA.esquirlas,
+          onclick: () => {
+            const r = forjaMitica(p);
+            if (!r.ok) {
+              this.audio.reproducir("fallo");
+              refrescar(h("p", { class: "baja" }, textoError(r.error)));
+              return;
+            }
+            this.audio.reproducir("unico");
+            this.acciones.guardar();
+            refrescar(h("div", { class: "resultado sube" }, "¡Forja Mítica!", fichaEquipo(r.valor)));
+          },
+        }, "Forjar"));
     // Fusión de runas: tres iguales de la misma rareza → una de la rareza siguiente.
     const fusionables = [...new Set([...p.mochila.posiciones()].map((q) => p.mochila.en(q)?.objeto).filter((o): o is number => o !== undefined))]
       .map((o) => ({ o, ru: runaDeObjeto(o), n: p.mochila.contar(o) }))
@@ -1143,6 +1224,7 @@ export class Interfaz {
       materiales,
       resultado ?? null,
       h("h3", {}, "Recetas"), ...recetas,
+      mitica,
       h("h3", {}, "Refinar equipo puesto"), ...refinar,
       h("h3", {}, "Fundir runas"), runasUi);
   }
@@ -1293,6 +1375,11 @@ export class Interfaz {
         h("div", {}, h("b", {}, `×${r.mayorRacha ?? 0}`), h("small", {}, "mayor racha")),
         h("div", {}, h("b", {}, piedra > 0 ? `+${piedra}` : "—"), h("small", {}, "Piedra del Juicio")),
         h("div", {}, h("b", {}, r.mejorJuicio !== undefined ? `+${r.mejorJuicio}` : "—"), h("small", {}, `mejor Juicio · ${r.juiciosATiempo ?? 0} a tiempo`))),
+      this.meta.venganzas.length > 0
+        ? h("div", { class: "venganzas" },
+          h("small", {}, "Venganzas recibidas:"),
+          ...this.meta.venganzas.slice(0, 4).map((v) => h("div", { class: "venganza" }, `⚔ ${v.vengador} vengó tu caída en el piso ${v.piso} — recibiste ${v.recompensa} ◆`)))
+        : null,
       piedra > 0
         ? h("div", { class: "afijos-semana" },
           h("small", {}, "Afijos del Juicio esta semana (se suman en +2, +4, +7 y +10):"),
@@ -1476,6 +1563,80 @@ export class Interfaz {
     requestAnimationFrame(cuadro);
     // Por si el navegador frena los cuadros (pestaña en segundo plano): la carta se revela igual.
     window.setTimeout(revelar, total * 1000 + 300);
+  }
+
+  /**
+   * Tu Eco cayó: absorber el recuerdo (recuperas todo y te curas) o dejar que te acompañe como Espectro Temporal
+   * (pelea a tu lado este piso y, si lo terminas con vida, te devuelve tu mejor pieza con un templado más).
+   * Cerrar sin elegir = absorber.
+   */
+  decidirEco(op: DecisionEco): void {
+    let elegido = false;
+    const elegir = (f: () => void): void => {
+      if (elegido) return;
+      elegido = true;
+      f();
+    };
+    this.abrir("faro",
+      h("h2", {}, "Tu Eco se arrodilla"),
+      h("p", { class: "sub" }, `${op.eco.nombre}. Peleaba como tú: ${op.perfil}.`),
+      h("div", { class: "decision-eco" },
+        h("button", { class: "principal", onclick: () => { elegir(op.absorber); this.cerrar(); } },
+          h("b", {}, "Absorber el Recuerdo"),
+          h("small", {}, `Recuperas lo que perdiste${op.legado !== null ? ` (y ${op.legado})` : ""} y te curas por completo.`)),
+        h("button", { class: "pacto-eco", onclick: () => { elegir(op.pactar); this.cerrar(); } },
+          h("b", {}, "Dejar que te acompañe"),
+          h("small", {}, `Espectro Temporal: pelea a tu lado todo este piso. Si lo terminas con vida, te devuelve ${op.legado ?? "su fuerza"} con un templado más. Si caes, se pierde.`))));
+    this.alCerrar = () => elegir(op.absorber);
+  }
+
+  /**
+   * Hablar con un habitante: su historia y, si tiene, su misión personal (aceptar, pendiente, entregar el recuerdo
+   * o cumplida con su recompensa).
+   */
+  abrirHistoria(juego: ConPartida, servicio: string, nombre: string, mensaje?: HTMLElement): void {
+    const p = juego.partida;
+    const hi = HISTORIAS.find((x) => x.servicio === servicio);
+    const refrescar = (m?: HTMLElement): void => this.abrirHistoria(juego, servicio, nombre, m);
+    let mision: HTMLElement | null = null;
+    if (hi !== undefined) {
+      const estado = p.historias[hi.id];
+      const cuerpo: (HTMLElement | null)[] = [h3(hi.titulo)];
+      if (estado === undefined) {
+        cuerpo.push(
+          h("p", { class: "cita" }, `«${hi.pedido}»`),
+          h("p", { class: "sub" }, `Misión: baja al piso ${hi.piso}, vence a ${hi.eco.nombre} y trae ${hi.recuerdo.nombre}.`),
+          h("p", { class: "sube" }, `Recompensa: ${hi.recompensa}`),
+          h("button", { class: "principal", onclick: () => { p.aceptarHistoria(hi.id); this.acciones.guardar(); this.audio.reproducir("nivel"); refrescar(); } }, "Aceptar"));
+      } else if (estado === "conocida") {
+        if (p.tieneRecuerdo(hi.id)) {
+          cuerpo.push(
+            h("p", {}, `Llevas ${hi.recuerdo.nombre}.`),
+            h("button", {
+              class: "principal",
+              onclick: () => {
+                if (!p.entregarRecuerdo(hi.id)) return;
+                this.acciones.guardar();
+                this.audio.reproducir("reliquia");
+                refrescar(h("div", { class: "resultado sube" }, `«${hi.gracias}»`, h("div", {}, hi.recompensa)));
+              },
+            }, `Entregar ${hi.recuerdo.nombre}`));
+        } else {
+          cuerpo.push(
+            h("p", { class: "cita" }, `«${hi.pedido}»`),
+            h("p", { class: "baja" }, `Pendiente: ${hi.eco.nombre} vaga por el piso ${hi.piso}. Si caes con ${hi.recuerdo.nombre} encima, se pierde.`));
+        }
+      } else {
+        cuerpo.push(h("p", { class: "cita" }, `«${hi.gracias}»`), h("p", { class: "sube" }, `✔ ${hi.recompensa}`));
+      }
+      mision = h("div", { class: "historia-mision" }, ...cuerpo);
+    }
+    this.abrir("faro",
+      h("h2", {}, nombre),
+      h("p", { class: "sub" }, LORE_NPC[servicio] ?? ""),
+      mensaje ?? null,
+      mision,
+      h("div", { class: "menu" }, h("button", { onclick: () => this.cerrar() }, "Despedirse")));
   }
 
   /** Campana del desafío: la arena normal, o el Juicio si se tiene la piedra. */
