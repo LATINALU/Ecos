@@ -5,7 +5,8 @@ import { elegirPorPeso, elegirUno, entero, type Azar, type Capa } from "minialu"
 import { AFIJOS, BASES, NOMBRES_RAREZA, RASGOS_EQUIPO, UNICOS, type DefUnico, type IdRasgoEquipo } from "../contenido/objetos.ts";
 import { conjunto as defConjunto, type IdConjunto } from "../contenido/conjuntos.ts";
 import { nuevoUid } from "./cartas.ts";
-import type { EfectoUnico, Ranura } from "./tipos.ts";
+import { ELEMENTOS, ORDEN_ELEMENTOS, type Elemento } from "../contenido/elementos.ts";
+import { ACCESORIOS, ARMADURAS, normalizarPieza, type EfectoUnico, type TipoPieza } from "./tipos.ts";
 
 export type Rareza = 0 | 1 | 2 | 3 | 4;
 export const RAREZA_UNICA: Rareza = 4;
@@ -14,7 +15,8 @@ export interface ObjetoEquipo {
   readonly uid: string;
   /** Id del catálogo (base o único): es el `objeto` de la pila en el inventario. */
   readonly base: number;
-  readonly ranura: Ranura;
+  /** Clase de pieza (arma, casco, anillo...). Los anillos van en cualquiera de las dos ranuras de anillo. */
+  readonly ranura: TipoPieza;
   readonly nombre: string;
   readonly rareza: Rareza;
   readonly nivel: number;
@@ -28,20 +30,35 @@ export interface ObjetoEquipo {
   readonly rasgos?: Readonly<Partial<Record<IdRasgoEquipo, number>>>;
   /** Pieza de un conjunto (2 y 3 piezas dan bonos). */
   readonly conjunto?: IdConjunto;
+  /** Solo armas: elemento (fuego, hielo, veneno, rayo) que suma daño y un efecto. */
+  readonly elemento?: Elemento;
+}
+
+/** Probabilidad de que un arma salga elemental según la rareza. */
+const PROB_ELEMENTO = [0.2, 0.35, 0.5, 0.65, 0];
+
+export function tirarElemento(azar: Azar, rareza: Rareza): Elemento | undefined {
+  return azar.siguiente() < PROB_ELEMENTO[rareza] ? elegirUno(azar, ORDEN_ELEMENTOS) : undefined;
 }
 
 /** Cantidad de rasgos según rareza: común (a veces 1), raro 1, épico 2, legendario 3, único 1. */
 const RASGOS_POR_RAREZA = [0, 1, 2, 3, 1];
 
-export function tirarRasgos(azar: Azar, ranura: Ranura, rareza: Rareza): Partial<Record<IdRasgoEquipo, number>> {
+export function tirarRasgos(azar: Azar, ranura: TipoPieza, rareza: Rareza): Partial<Record<IdRasgoEquipo, number>> {
   const cantidad = RASGOS_POR_RAREZA[rareza] + (rareza === 0 && azar.siguiente() < 0.3 ? 1 : 0);
-  const posibles = RASGOS_EQUIPO.filter((r) => !r.soloArma || ranura === "arma");
+  const posibles = RASGOS_EQUIPO.filter((r) => r.en === undefined || r.en.includes(ranura));
   const rasgos: Partial<Record<IdRasgoEquipo, number>> = {};
-  for (let i = 0; i < cantidad && posibles.length > 0; i++) {
-    const r = posibles.splice(entero(azar, posibles.length), 1)[0];
+  const tirar = (r: (typeof RASGOS_EQUIPO)[number]): void => {
     const v = r.min + azar.siguiente() * (r.max - r.min) * (1 + rareza * 0.1);
-    rasgos[r.id] = r.id === "eterGolpe" ? Math.round(v) : Math.round(v * 100) / 100;
+    rasgos[r.id] = r.id === "eterGolpe" || r.id === "eterMax" ? Math.round(v) : Math.round(v * 100) / 100;
+    posibles.splice(posibles.indexOf(r), 1);
+  };
+  // Los accesorios (capa, anillos, aretes, collar) siempre traen al menos un rasgo único de su clase.
+  if (ACCESORIOS.includes(ranura)) {
+    const unicos = posibles.filter((r) => r.unicoDe?.includes(ranura));
+    if (unicos.length > 0) tirar(unicos[entero(azar, unicos.length)]);
   }
+  while (Object.keys(rasgos).length < cantidad && posibles.length > 0) tirar(posibles[entero(azar, posibles.length)]);
   return rasgos;
 }
 
@@ -92,10 +109,16 @@ function sumar(stats: Record<string, number>, porNivel: Readonly<Record<string, 
   }
 }
 
-export function generarEquipo(azar: Azar, piso: number, minima: Rareza = 0, ranura?: Ranura, deConjunto?: IdConjunto): ObjetoEquipo {
+/** `tipo`: una clase de pieza, una lista de clases (p. ej. todas las de armadura) o cualquiera. */
+export function generarEquipo(
+  azar: Azar, piso: number, minima: Rareza = 0, tipo?: TipoPieza | readonly TipoPieza[], deConjunto?: IdConjunto,
+): ObjetoEquipo {
   const rareza = tirarRarezaEquipo(azar, piso, minima);
   const nivel = nivelObjeto(piso, azar);
-  const def = elegirUno(azar, ranura === undefined ? BASES : BASES.filter((b) => b.ranura === ranura));
+  const tipos = tipo === undefined ? undefined : typeof tipo === "string" ? [tipo] : tipo;
+  // Sin tipo pedido: primero la clase de pieza (así las armas no dominan por tener más bases).
+  const clase = tipos !== undefined ? elegirUno(azar, tipos) : elegirUno(azar, [...new Set(BASES.map((b) => b.ranura))]);
+  const def = elegirUno(azar, BASES.filter((b) => b.ranura === clase));
   const stats: Record<string, number> = {};
   const calidad = tirarCalidad(azar, rareza);
   sumar(stats, def.porNivel, nivel, MULT_RAREZA[rareza] * calidad);
@@ -112,15 +135,19 @@ export function generarEquipo(azar: Azar, piso: number, minima: Rareza = 0, ranu
   for (const [id, v] of Object.entries(def.rasgos ?? {}) as [IdRasgoEquipo, number][]) {
     rasgos[id] = Math.round(((rasgos[id] ?? 0) + v) * 100) / 100;
   }
-  if (deConjunto !== undefined) {
+  // Solo las 6 piezas de armadura pueden ser de conjunto.
+  if (deConjunto !== undefined && ARMADURAS.includes(def.ranura)) {
     const c = defConjunto(deConjunto);
     return {
       uid: nuevoUid(azar), base: def.id, ranura: def.ranura, nombre: `${def.nombre} · ${c.nombre}`,
       rareza: Math.max(rareza, 2) as Rareza, nivel, stats, calidad, rasgos, conjunto: deConjunto,
     };
   }
-  const nombre = (etiqueta !== null ? `${etiqueta} · ` : "") + (nombres.length === 0 ? def.nombre : `${def.nombre} ${nombres[0]}`);
-  return { uid: nuevoUid(azar), base: def.id, ranura: def.ranura, nombre, rareza, nivel, stats, calidad, rasgos };
+  const elemento = def.ranura === "arma" ? tirarElemento(azar, rareza) : undefined;
+  const nucleo = elemento !== undefined ? `${def.nombre} ${ELEMENTOS[elemento].sufijo}` : nombres.length === 0 ? def.nombre : `${def.nombre} ${nombres[0]}`;
+  const nombre = (etiqueta !== null ? `${etiqueta} · ` : "") + nucleo;
+  const obj: ObjetoEquipo = { uid: nuevoUid(azar), base: def.id, ranura: def.ranura, nombre, rareza, nivel, stats, calidad, rasgos };
+  return elemento !== undefined ? { ...obj, elemento } : obj;
 }
 
 export function crearUnico(azar: Azar, piso: number, def?: DefUnico): ObjetoEquipo {
@@ -151,6 +178,12 @@ export function refinar(o: ObjetoEquipo): ObjetoEquipo {
   const nombre = o.nombre.replace(/ \+\d+$/, "") + ` +${n}`;
   // (los rasgos y la calidad se conservan: refinar mejora los números, no cambia la pieza)
   return { ...o, stats, refinado: n, nombre };
+}
+
+/** Guardados viejos: la pieza "armadura" pasa a pecho y "amuleto" a collar. */
+export function normalizarEquipo(o: ObjetoEquipo): ObjetoEquipo {
+  const ranura = normalizarPieza(o.ranura);
+  return ranura === o.ranura ? o : { ...o, ranura };
 }
 
 export function capaEquipo(objetos: readonly (ObjetoEquipo | null | undefined)[]): Capa {

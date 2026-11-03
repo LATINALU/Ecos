@@ -289,3 +289,38 @@ canvas.icono-sprite { image-rendering: pixelated; width: 80%; height: auto; max-
 .conjunto b { color: var(--c); }
 .ranuras + .ranuras { margin-top: 0.4em; grid-template-columns: repeat(2, 1fr); }
 .sendas { grid-template-columns: repeat(4, 1fr); }
+
+/* ---------- Muñeco de equipo (11 ranuras) ---------- */
+.ranuras.munieco {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-areas:
+    "aretes casco  hombros arma"
+    "collar pecho  cinturon capa"
+    "anillo1 pantalones botas anillo2";
+}
+.ranuras.munieco .ranura { align-items: center; text-align: center; min-height: 3.6em; padding: 0.2em; }
+.ranuras.munieco .ranura canvas { width: 2em; }
+.ranura.libre canvas { opacity: 0.45; }
+.r-arma { grid-area: arma; } .r-casco { grid-area: casco; } .r-hombros { grid-area: hombros; } .r-pecho { grid-area: pecho; }
+.r-cinturon { grid-area: cinturon; } .r-pantalones { grid-area: pantalones; } .r-botas { grid-area: botas; }
+.r-capa { grid-area: capa; } .r-anillo1 { grid-area: anillo1; } .r-anillo2 { grid-area: anillo2; } .r-aretes { grid-area: aretes; } .r-collar { grid-area: collar; }
+
+/* ---------- Partidas, pueblo y comercio ---------- */
+.panel-partidas, .panel-faro, .panel-pozo { text-align: center; }
+.panel-faro { inset: 22% 28%; }
+.ranuras-partida { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8em; margin: 1em 0; }
+.ranura-partida { display: flex; flex-direction: column; gap: 0.3em; padding: 0.9em; border: 1px solid var(--borde); background: #120e1c; border-radius: 4px; }
+.ranura-partida.vacia { border-style: dashed; justify-content: center; }
+.ranura-partida b { font-family: Georgia, serif; font-size: 1.2em; color: var(--oro); }
+.aviso-descenso { color: #ff8aff; }
+.campo { display: block; margin: 0.6em 0; }
+input.nombre-portador { font: inherit; color: var(--texto); background: #0c0916; border: 1px solid var(--borde); padding: 0.3em 0.6em; border-radius: 3px; width: 14em; }
+.mision { border-left: 3px solid var(--acento); background: #120e1c; padding: 0.4em 0.7em; margin: 0.4em 0; display: flex; flex-direction: column; gap: 0.2em; }
+.mision.completa { border-color: var(--oro); box-shadow: 0 0 12px #ffd27a33; }
+.objetivo { display: grid; grid-template-columns: 1fr auto 5em; gap: 0.5em; align-items: center; font-size: 0.9em; }
+.barra { height: 0.4em; background: #221b30; display: block; }
+.barra i { display: block; height: 100%; background: var(--oro); }
+.pisos { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5em; margin: 0.8em 0; }
+.pisos button { display: flex; flex-direction: column; align-items: center; gap: 0.2em; }
+.stock { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6em; }
+.stock .detalle { display: flex; flex-direction: column; justify-content: space-between; }

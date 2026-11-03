@@ -4,8 +4,8 @@
 // No sabe nada de render ni de teclado: la escena le pide cosas y muestra el Resultado.
 
 import {
-  AzarSemilla, Billetera, Catalogo, Inventario, PuntosHabilidad, comprar, curvaPolinomica, exito, fallo, pagoConBilletera,
-  type Azar, type ErrorHabilidad, type ReglasHabilidades, type Capa, type CurvaNiveles, type ErrorCompra, type ErrorFusion, type Pila, type Posicion, type Resultado,
+  AzarSemilla, Billetera, Catalogo, Inventario, PuntosHabilidad, RegistroMisiones, comprar, curvaPolinomica, exito, fallo, pagoConBilletera, transferir,
+  type Azar, type ErrorHabilidad, type ErrorMision, type MisionActiva, type ReglasHabilidades, type Capa, type CurvaNiveles, type ErrorCompra, type ErrorFusion, type Pila, type Posicion, type Resultado,
 } from "minialu";
 import { ALMAS, INFO_TECNICA, alma, type Pasiva } from "../contenido/almas.ts";
 import { ESTILOS, type DefEstilo } from "../contenido/armas.ts";
@@ -15,20 +15,35 @@ import {
 } from "../contenido/objetos.ts";
 import { CORAZONES_INICIALES, CORAZONES_MAX, SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
 import { TALENTOS, talento, type IdTalento } from "../contenido/talentos.ts";
+import { MAX_MISIONES_ACTIVAS, mision } from "../contenido/misiones.ts";
 import { CONJUNTOS, type BonoConjunto, type IdConjunto } from "../contenido/conjuntos.ts";
 import { RUNAS, runaDeObjeto, type IdRuna } from "../contenido/objetos.ts";
+import { potenciaElemental, type Elemento } from "../contenido/elementos.ts";
 import type { ModificadoresBotin, Premio } from "./botin.ts";
 import {
   COSTO_FUSION, capaForma, capaResonancia, crearCarta, fusionarCartas, mejorarCarta, nombreCarta, type Carta,
 } from "./cartas.ts";
-import { capaEquipo, equipoInicial, valorDesguace, type ObjetoEquipo } from "./equipo.ts";
+import { capaEquipo, equipoInicial, normalizarEquipo, valorDesguace, type ObjetoEquipo } from "./equipo.ts";
 import type { Meta } from "./meta.ts";
 import { BASE_PORTADOR, STATS, bloque, capaNivel, type Bloque, type Stat } from "./stats.ts";
-import { RANURAS, type EfectoUnico, type Ranura } from "./tipos.ts";
+import { RANURAS, ranurasDePieza, type EfectoUnico, type Ranura } from "./tipos.ts";
 
 export type RanuraCarta = "forma" | 0 | 1;
 
 export const TAM_MOCHILA = 24;
+/** Contenedor seguro: lo que va acá no se pierde al morir en el Pozo. */
+export const TAM_SEGURO = 4;
+
+/** Lo que se pierde al morir (y se lleva el Eco de ese piso). */
+export interface BotinPerdido {
+  readonly equipo: readonly ObjetoEquipo[];
+  readonly pilas: readonly Pila[];
+  readonly esquirlas: number;
+}
+
+export function botinVacio(b: BotinPerdido | undefined): boolean {
+  return b === undefined || (b.equipo.length === 0 && b.pilas.length === 0 && b.esquirlas === 0);
+}
 export const TAM_MAZO = 24;
 
 export const CATALOGO_MERCADER = new Catalogo(
@@ -65,6 +80,10 @@ export interface ModCombate {
   readonly robo: number;
   /** Éter extra por golpe acertado. */
   readonly eterGolpe: number;
+  /** Probabilidad de esquivar un golpe (capas). */
+  readonly esquiva: number;
+  /** Fracción de daño recibido que se ignora (capas, collares). */
+  readonly resistencia: number;
 }
 
 /** Estado serializable de una partida (para "Continuar descenso"). */
@@ -92,6 +111,10 @@ export interface DatosPartida {
   readonly corazones?: number;
   readonly subarma?: IdSubarma | null;
   readonly runas?: readonly [IdRuna | null, IdRuna | null];
+  /** Personaje persistente (pueblo): piso más hondo desde el que se puede empezar y misiones. */
+  readonly pisoDesbloqueado?: number;
+  readonly seguro?: readonly (Pila | null)[];
+  readonly misiones?: { readonly activas: readonly MisionActiva[]; readonly entregadas: readonly number[] };
 }
 
 export interface ResumenPartida {
@@ -110,7 +133,8 @@ export class Partida {
   readonly billetera = new Billetera({ esquirlas: 0 });
   readonly mochila = new Inventario({ pestanas: 1, casillasPorPestana: TAM_MOCHILA, maxPila });
   readonly mazo = new Inventario({ pestanas: 1, casillasPorPestana: TAM_MAZO, maxPila });
-  readonly equipo: Record<Ranura, ObjetoEquipo | null> = { arma: null, armadura: null, amuleto: null };
+  readonly seguro = new Inventario({ pestanas: 1, casillasPorPestana: TAM_SEGURO, maxPila });
+  readonly equipo: Record<Ranura, ObjetoEquipo | null> = equipoVacio();
   forma: Carta | null = null;
   resonancias: [Carta | null, Carta | null] = [null, null];
 
@@ -123,6 +147,10 @@ export class Partida {
   ecosVencidos = 0;
   corazones = CORAZONES_INICIALES;
   subarma: IdSubarma | null = null;
+  /** Piso más hondo desde el que se puede empezar a bajar (se desbloquea venciendo guardianes). */
+  pisoDesbloqueado = 1;
+  /** Tablón de misiones de la taberna (minialu/RegistroMisiones). */
+  readonly misiones = new RegistroMisiones(mision, MAX_MISIONES_ACTIVAS);
   /** Dos ranuras de runa (pasivas equipables). */
   runas: [IdRuna | null, IdRuna | null] = [null, null];
   segundaVidaUsada = false;
@@ -210,7 +238,7 @@ export class Partida {
 
   /** Suma de rasgos de equipo + rasgo de la Forma + pasiva. */
   combate(): ModCombate {
-    const m = { alcance: 0, velocidad: 0, critDanio: 0, agilidad: 0, tecnicaDanio: 0, tecnicaCosto: 0, robo: 0, eterGolpe: 0 };
+    const m = { alcance: 0, velocidad: 0, critDanio: 0, agilidad: 0, tecnicaDanio: 0, tecnicaCosto: 0, robo: 0, eterGolpe: 0, esquiva: 0, resistencia: 0 };
     for (const r of RANURAS) {
       const rasgos = this.equipo[r]?.rasgos;
       if (rasgos === undefined) continue;
@@ -219,6 +247,10 @@ export class Partida {
       m.critDanio += rasgos.critDanio ?? 0;
       m.agilidad += rasgos.agilidad ?? 0;
       m.eterGolpe += rasgos.eterGolpe ?? 0;
+      m.robo += rasgos.robo ?? 0;
+      m.esquiva += rasgos.esquiva ?? 0;
+      m.resistencia += rasgos.resistencia ?? 0;
+      m.tecnicaDanio += rasgos.tecnicaDanio ?? 0;
     }
     switch (this.forma?.rasgo) {
       case "veloz": m.velocidad += 0.12; break;
@@ -244,7 +276,18 @@ export class Partida {
       m.critDanio += b.critDanio ?? 0;
     }
     m.tecnicaCosto = Math.min(0.75, m.tecnicaCosto);
+    m.esquiva = Math.min(0.3, m.esquiva);
+    m.resistencia = Math.min(0.4, m.resistencia);
     return m;
+  }
+
+  /** Elemento del arma equipada y su potencia (daño extra como fracción del golpe), sumando los rasgos "Daño elemental". */
+  elementoArma(): { readonly elemento: Elemento; readonly potencia: number } | null {
+    const arma = this.equipo.arma;
+    if (arma?.elemento === undefined) return null;
+    let extra = 0;
+    for (const r of RANURAS) extra += this.equipo[r]?.rasgos?.elemental ?? 0;
+    return { elemento: arma.elemento, potencia: potenciaElemental(arma.rareza) + extra };
   }
 
   // ---------------- Runas y conjuntos ----------------
@@ -287,13 +330,14 @@ export class Partida {
     return cuenta;
   }
 
-  /** Bonos activos (2 piezas, y 3 piezas además del de 2). */
+  /** Bonos activos (2 piezas, y 4 piezas además del de 2). */
   bonosConjunto(): BonoConjunto[] {
     const bonos: BonoConjunto[] = [];
     for (const [id, n] of this.piezasConjunto()) {
       const def = CONJUNTOS.find((c) => c.id === id)!;
       if (n >= 2) bonos.push(def.dos);
-      if (n >= 3) bonos.push(def.tres);
+      if (n >= 4) bonos.push(def.cuatro);
+      if (n >= 6) bonos.push(def.seis);
     }
     return bonos;
   }
@@ -354,7 +398,10 @@ export class Partida {
       ),
       Habilidades: this.puntos.capa(PORTADOR),
       Pasiva: this.pasiva() === "filo" ? { critico: 12 } : this.pasiva() === "raiz" ? { defensa: 6 + this.nivel() } : {},
-      Rasgo: this.forma?.rasgo === "afilada" ? { critico: 8 } : {},
+      Rasgo: {
+        critico: this.forma?.rasgo === "afilada" ? 8 : 0,
+        mp: RANURAS.reduce((s, r) => s + (this.equipo[r]?.rasgos?.eterMax ?? 0), 0),
+      },
       Runas: { regen: this.tieneRuna("calma") ? 8 : 0, suerte: this.tieneRuna("coleccionista") ? 30 : 0 },
       Conjuntos: { critico: this.bonoConjuntoActivo("critico"), hp: this.bonoConjuntoActivo("hp") },
       Equipo: capaEquipo(RANURAS.map((r) => this.equipo[r])),
@@ -373,11 +420,11 @@ export class Partida {
   /** Multiplicador de daño infligido y recibido por efectos únicos. */
   multiplicadorDanio(): number {
     const furia = this.tieneRuna("furia") && this.hp < this.stats().hp * 0.4 ? 1.3 : 1;
-    return (this.tiene("vidrio") ? 1.6 : 1) * furia;
+    return (this.tiene("vidrio") ? 1.6 : 1) * furia * (1 + this.bonoConjuntoActivo("danio"));
   }
 
   multiplicadorRecibido(): number {
-    return (this.tiene("corona") ? 1.3 : 1) * (this.pasiva() === "muro" ? 0.85 : 1) * (1 - this.bonoConjuntoActivo("recibido"));
+    return (this.tiene("corona") ? 1.3 : 1) * (this.pasiva() === "muro" ? 0.85 : 1) * (1 - this.bonoConjuntoActivo("recibido")) * (1 - this.combate().resistencia);
   }
 
   modificadoresBotin(): ModificadoresBotin {
@@ -483,14 +530,22 @@ export class Partida {
 
   // ---------------- Equipo ----------------
 
-  equiparDesde(pos: Posicion): Resultado<ObjetoEquipo, "no-es-equipo" | "casilla-vacia"> {
+  /** Ranura donde iría una pieza: la pedida si es válida; si no, la primera libre de su clase (anillos: I o II). */
+  ranuraPara(obj: ObjetoEquipo, pedida?: Ranura): Ranura {
+    const destinos = ranurasDePieza(obj.ranura);
+    if (pedida !== undefined && destinos.includes(pedida)) return pedida;
+    return destinos.find((d) => this.equipo[d] === null) ?? destinos[0];
+  }
+
+  equiparDesde(pos: Posicion, pedida?: Ranura): Resultado<ObjetoEquipo, "no-es-equipo" | "casilla-vacia"> {
     const pila = this.mochila.en(pos);
     if (pila === null) return fallo("casilla-vacia");
     const obj = equipoDe(pila);
     if (obj === undefined) return fallo("no-es-equipo");
     this.mochila.sacarDe(pos);
-    const anterior = this.equipo[obj.ranura];
-    this.equipo[obj.ranura] = obj;
+    const ranura = this.ranuraPara(obj, pedida);
+    const anterior = this.equipo[ranura];
+    this.equipo[ranura] = obj;
     if (anterior !== null) this.mochila.ponerEn(pos, { objeto: anterior.base, cantidad: 1, extra: { equipo: anterior } });
     this.ajustarRecursos();
     return exito(obj);
@@ -575,6 +630,7 @@ export class Partida {
     for (const p of posiciones) this.mazo.sacarDe(p);
     this.mazo.ponerEn(posiciones[0], { objeto: OBJ_CARTA, cantidad: 1, extra: { carta: r.valor.carta } });
     this.meta.verAlma(r.valor.carta.personaje);
+    this.registrarMision("fusionar");
     return exito({ ...r.valor, costo });
   }
 
@@ -639,6 +695,111 @@ export class Partida {
     return exito(this.subarma);
   }
 
+  // ---------------- Pueblo: descensos, muerte y misiones ----------------
+
+  /** Antes de bajar: elegir piso inicial (hasta el desbloqueado) y salir descansado. */
+  prepararDescenso(piso: number): void {
+    this.piso = Math.max(1, Math.min(piso, this.pisoDesbloqueado));
+    this.segundaVidaUsada = false;
+    this.curarTodo();
+  }
+
+  curarTodo(): void {
+    const s = this.stats();
+    this.hp = s.hp;
+    this.mp = s.mp;
+  }
+
+  /** Vencer al guardián de un piso desbloquea empezar desde el siguiente. */
+  desbloquearPiso(pisoVencido: number, pisosTotales: number): boolean {
+    const nuevo = Math.min(pisosTotales, pisoVencido + 1);
+    if (nuevo <= this.pisoDesbloqueado) return false;
+    this.pisoDesbloqueado = nuevo;
+    return true;
+  }
+
+  // ---------------- Extracción ----------------
+
+  /**
+   * Morir en el Pozo (como en Tarkov): se pierde TODO lo equipado, la mochila, la subarma y las esquirlas que llevabas.
+   * Se conservan el contenedor seguro, las cartas, el nivel, los talentos, las runas engarzadas y el banco.
+   * Devuelve lo perdido (el Eco del piso lo guarda: si lo vences, lo recuperas).
+   */
+  perderTodo(): BotinPerdido {
+    const equipo: ObjetoEquipo[] = [];
+    for (const r of RANURAS) {
+      const o = this.equipo[r];
+      if (o !== null) equipo.push(o);
+      this.equipo[r] = null;
+    }
+    const pilas: Pila[] = [];
+    for (const pos of [...this.mochila.posiciones()]) {
+      const p = this.mochila.en(pos);
+      if (p === null) continue;
+      pilas.push({ ...p });
+      this.mochila.sacarDe(pos, p.cantidad);
+    }
+    const esquirlas = this.esquirlas;
+    if (esquirlas > 0) this.billetera.debitar("esquirlas", esquirlas);
+    this.subarma = null;
+    this.curarTodo();
+    return { equipo, pilas, esquirlas };
+  }
+
+  /** Valor en riesgo (esquirlas + lo que valen equipo y mochila): lo que perderías si mueres ahora. */
+  valorEnRiesgo(): number {
+    let v = this.esquirlas;
+    for (const r of RANURAS) {
+      const o = this.equipo[r];
+      if (o !== null) v += valorDesguace(o);
+    }
+    for (const pos of this.mochila.posiciones()) {
+      const p = this.mochila.en(pos);
+      if (p === null) continue;
+      const o = equipoDe(p);
+      v += o !== undefined ? valorDesguace(o) : (apilable(p.objeto)?.precio ?? 5) * p.cantidad;
+    }
+    return v;
+  }
+
+  /** Mueve una pila de la mochila al contenedor seguro (todo o nada). */
+  guardarEnSeguro(pos: Posicion): Resultado<void, string> {
+    const r = transferir(this.mochila, pos, this.seguro);
+    return r.ok ? exito(undefined) : fallo(r.error);
+  }
+
+  sacarDeSeguro(pos: Posicion): Resultado<void, string> {
+    const r = transferir(this.seguro, pos, this.mochila);
+    return r.ok ? exito(undefined) : fallo(r.error);
+  }
+
+  /** Avisa algo al tablón ("matar", "jefe"...). Devuelve true si alguna misión quedó completa. */
+  registrarMision(tipo: string, objetivo = -1, cantidad = 1): boolean {
+    const cambiadas = this.misiones.registrar(tipo, objetivo, cantidad);
+    return cambiadas.some((c) => this.misiones.completa(c.id));
+  }
+
+  /** Entrega una misión completa y cobra la recompensa (la esencia va a la Meta). */
+  entregarMision(id: number): Resultado<string[], ErrorMision> {
+    const r = this.misiones.entregar(id);
+    if (!r.ok) return r;
+    const premio = r.valor;
+    const textos: string[] = [];
+    if (premio.exp !== undefined) {
+      this.ganarExperiencia(premio.exp);
+      textos.push(`+${premio.exp} EXP`);
+    }
+    for (const [moneda, n] of Object.entries(premio.monedas ?? {})) {
+      if (moneda === "esencia") this.meta.ganarEsencia(n);
+      else this.billetera.acreditar(moneda, n);
+      textos.push(`+${n} ${moneda}`);
+    }
+    for (const o of premio.objetos ?? []) {
+      if (this.mochila.agregar(o.objeto, o.cantidad).ok) textos.push(`${apilable(o.objeto)?.nombre ?? "Objeto"} ×${o.cantidad}`);
+    }
+    return exito(textos);
+  }
+
   // ---------------- Guardado ----------------
 
   serializar(): DatosPartida {
@@ -654,6 +815,7 @@ export class Partida {
       enemigos: this.enemigos, jefes: this.jefes, ecosVencidos: this.ecosVencidos,
       segundaVidaUsada: this.segundaVidaUsada, contadorCorazon: this.contadorCorazon,
       puntos, talentos: [...this.talentos], corazones: this.corazones, subarma: this.subarma, runas: [this.runas[0], this.runas[1]],
+      pisoDesbloqueado: this.pisoDesbloqueado, misiones: this.misiones.exportar(), seguro: volcar(this.seguro),
     };
   }
 
@@ -665,7 +827,13 @@ export class Partida {
     p.billetera.acreditar("esquirlas", d.esquirlas);
     cargarEn(p.mochila, d.mochila);
     cargarEn(p.mazo, d.mazo);
-    for (const r of RANURAS) p.equipo[r] = d.equipo[r] ?? null;
+    if (d.seguro !== undefined) cargarEn(p.seguro, d.seguro);
+    // Guardados viejos tenían 3 ranuras: arma, armadura (→ pecho) y amuleto (→ collar).
+    const viejo = d.equipo as Readonly<Record<string, ObjetoEquipo | null | undefined>>;
+    for (const r of RANURAS) {
+      const o = viejo[r] ?? (r === "pecho" ? viejo.armadura : r === "collar" ? viejo.amuleto : undefined) ?? null;
+      p.equipo[r] = o === null ? null : normalizarEquipo(o);
+    }
     p.forma = d.forma;
     p.resonancias = [d.resonancias[0], d.resonancias[1]];
     p.enemigos = d.enemigos;
@@ -682,6 +850,8 @@ export class Partida {
     p.corazones = d.corazones ?? CORAZONES_INICIALES;
     p.subarma = d.subarma ?? null;
     p.runas = d.runas !== undefined ? [d.runas[0], d.runas[1]] : [null, null];
+    p.pisoDesbloqueado = Math.max(1, d.pisoDesbloqueado ?? 1);
+    if (d.misiones !== undefined) p.misiones.importar(d.misiones);
     p.hp = d.hp;
     p.mp = d.mp;
     p.ajustarRecursos();
@@ -717,11 +887,21 @@ function volcar(inv: Inventario): (Pila | null)[] {
   });
 }
 
-function cargarEn(inv: Inventario, pilas: readonly (Pila | null)[]): void {
+export function cargarEn(inv: Inventario, pilas: readonly (Pila | null)[]): void {
   const posiciones = [...inv.posiciones()];
   pilas.forEach((p, i) => {
-    if (p !== null && posiciones[i] !== undefined) inv.ponerEn(posiciones[i], p);
+    if (p === null || posiciones[i] === undefined) return;
+    const eq = equipoDe(p);
+    inv.ponerEn(posiciones[i], eq !== undefined ? { ...p, extra: { equipo: normalizarEquipo(eq) } } : p);
   });
+}
+
+export function volcarInventario(inv: Inventario): (Pila | null)[] {
+  return volcar(inv);
+}
+
+export function equipoVacio(): Record<Ranura, ObjetoEquipo | null> {
+  return Object.fromEntries(RANURAS.map((r) => [r, null])) as Record<Ranura, ObjetoEquipo | null>;
 }
 
 function sumarCapas(a: Capa, b: Capa): Record<string, number> {

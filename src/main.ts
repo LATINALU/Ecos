@@ -1,17 +1,31 @@
-// Raíz de composición: canvas, bucle de paso fijo, entrada, audio, persistencia, juego e interfaz.
+// Raíz de composición: canvas, bucle de paso fijo, entrada, audio, persistencia, interfaz y las dos escenas:
+//   título → partidas → PUEBLO ⇄ DESCENSO (Juego)
+// El personaje (Partida) es persistente por ranura: baja con todo, vuelve con todo; al caer pierde un 25 %
+// de las esquirlas que lleva. El banco y la Meta (reliquias, esencia, ecos) también son de la ranura.
 
-import { borrarDescenso, cargarDescenso, cargarMeta, guardarDescenso, guardarMeta } from "./infra/repositorio.ts";
-import { Juego, type EventosJuego, type InicioJuego } from "./juego/juego.ts";
+import { AzarSistema } from "minialu";
+import { Banco } from "./dominio/banco.ts";
+import { generarStockArmero, type ArticuloArmero } from "./dominio/comercio.ts";
+import { Meta } from "./dominio/meta.ts";
+import { Partida } from "./dominio/partida.ts";
+import {
+  cargarRanura, guardarRanura, metaDesde, migrarGuardadoViejo, resumenRanuras,
+} from "./infra/repositorio.ts";
+import { Juego, type DatosDescenso, type EventosJuego, type InicioJuego } from "./juego/juego.ts";
+import { Pueblo, type EventosPueblo } from "./juego/pueblo.ts";
+import { dibujarPortador, type Pose } from "./juego/render-portador.ts";
 import { Audio } from "./motor/audio.ts";
 import { Entrada } from "./motor/entrada.ts";
-import { dibujarPortador, type Pose } from "./juego/render-portador.ts";
 import { sprites } from "./motor/sprites.ts";
-import { dibujarHud } from "./ui/hud.ts";
+import { dibujarHud, dibujarHudPueblo } from "./ui/hud.ts";
 import { Interfaz } from "./ui/interfaz.ts";
+import { PISOS_TOTALES } from "./contenido/biomas.ts";
 
 const ANCHO = 480;
 const ALTO = 270;
 const PASO = 1 / 60;
+/** Ranura oculta que usan los parámetros de desarrollo (?auto, ?pueblo): nunca pisa las partidas reales. */
+const RANURA_PRUEBAS = 9;
 
 const lienzo = document.getElementById("lienzo") as HTMLCanvasElement;
 const capaUi = document.getElementById("capa-ui") as HTMLDivElement;
@@ -19,76 +33,187 @@ const marco = document.getElementById("marco") as HTMLDivElement;
 const g = lienzo.getContext("2d")!;
 g.imageSmoothingEnabled = false;
 
-const meta = cargarMeta();
+migrarGuardadoViejo();
+
 const audio = new Audio();
 const entrada = new Entrada(window);
-let juego: Juego | null = null;
 
-const guardar = (): void => guardarMeta(meta);
+// ---------------- Estado de la sesión ----------------
+let ranura: number | null = null;
+let nombreRanura = "";
+let creada = Date.now();
+let meta = Meta.nueva();
+let partida: Partida | null = null;
+let banco = new Banco();
+let stock: ArticuloArmero[] = [];
+let juego: Juego | null = null;
+let pueblo: Pueblo | null = null;
+
+/** Guarda la ranura activa. `descenso`: undefined = no tocar el guardado; null = borrarlo. */
+function guardarTodo(descenso?: DatosDescenso | null): void {
+  if (ranura === null) return;
+  const anterior = cargarRanura(ranura);
+  guardarRanura(ranura, {
+    nombre: nombreRanura,
+    creada,
+    meta: meta.serializar(),
+    personaje: partida?.serializar() ?? anterior?.personaje ?? null,
+    banco: banco.serializar(),
+    descenso: descenso !== undefined ? descenso : anterior?.descenso ?? null,
+  });
+}
 
 const ui = new Interfaz(capaUi, meta, audio, {
-  descender: (opciones) => iniciar({ tipo: "nueva", opciones }),
-  continuar: () => {
-    const d = cargarDescenso();
-    if (d === null) {
-      ui.toast("No se pudo leer el descenso guardado", "#ff9a4d");
-      ui.mostrarTitulo();
-      return;
-    }
-    iniciar({ tipo: "continuar", datos: d });
+  ranuras: () => resumenRanuras(),
+  jugarRanura: (i) => jugarRanura(i),
+  crearPartida: (i, nombre, opciones) => {
+    const existente = cargarRanura(i);
+    // Una ranura migrada del formato viejo (sin personaje) conserva su mundo; si no, todo nuevo.
+    meta = existente !== null && existente.personaje === null ? metaDesde(existente.meta) : Meta.nueva();
+    ui.usarMeta(meta);
+    ranura = i;
+    nombreRanura = nombre;
+    creada = Date.now();
+    banco = new Banco();
+    partida = new Partida(meta, (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, opciones);
+    guardarTodo(null);
+    entrarPueblo("inicio");
+    ui.anunciar(`Bienvenido, ${nombre}`, "Último Refugio · el pueblo sobre el Pozo", "#ffd27a");
   },
-  descensoGuardado: () => cargarDescenso()?.partida.piso ?? null,
-  refrescarArte: () => juego?.refrescarArte(),
-  guardarYSalir: () => {
-    juego?.guardarProgreso();
-    juego = null;
-    audio.silenciarAmbiente();
-    ui.cerrarForzado();
-    ui.mostrarTitulo();
-  },
-  aTitulo: () => {
-    juego = null;
-    ui.mostrarTitulo();
-  },
+  descender: (piso) => descender(piso),
+  volverAlPueblo: () => entrarPueblo("pozo"),
+  stockArmero: () => stock,
+  banco: () => banco,
+  aTitulo: () => aTitulo(),
   abandonar: () => {
     if (juego === null) return;
     ui.cerrarForzado();
     juego.rendirse();
   },
-  guardar,
+  guardarYSalir: () => {
+    if (juego !== null) juego.guardarProgreso();
+    else guardarTodo();
+    aTitulo();
+  },
+  refrescarArte: () => juego?.refrescarArte(),
+  guardar: () => guardarTodo(),
 });
+
+function aTitulo(): void {
+  juego = null;
+  pueblo = null;
+  audio.silenciarAmbiente();
+  ui.cerrarForzado();
+  ui.mostrarTitulo();
+}
+
+function jugarRanura(i: number): void {
+  const d = cargarRanura(i);
+  if (d === null) {
+    ui.mostrarPreparacion(i);
+    return;
+  }
+  ranura = i;
+  nombreRanura = d.nombre;
+  creada = d.creada;
+  meta = metaDesde(d.meta);
+  ui.usarMeta(meta);
+  banco = Banco.restaurar(d.banco);
+  audio.activar();
+  if (d.descenso !== null) {
+    // Retomar el descenso donde quedó.
+    ui.cerrarForzado();
+    entrada.limpiar();
+    pueblo = null;
+    iniciarJuego({ tipo: "continuar", datos: d.descenso });
+    return;
+  }
+  if (d.personaje === null) {
+    ui.mostrarPreparacion(i);
+    return;
+  }
+  partida = Partida.restaurar(meta, d.personaje);
+  entrarPueblo("inicio");
+}
+
+function entrarPueblo(desde: "inicio" | "pozo"): void {
+  if (partida === null) return;
+  juego = null;
+  audio.silenciarAmbiente();
+  ui.cerrarForzado();
+  entrada.limpiar();
+  stock = generarStockArmero(new AzarSistema(), Math.max(partida.pisoDesbloqueado, meta.registro.mejorPiso));
+  pueblo = new Pueblo(partida, meta, audio, entrada, eventosPueblo, desde);
+  guardarTodo(null);
+}
+
+function descender(piso: number): void {
+  if (partida === null) return;
+  audio.activar();
+  ui.cerrarForzado();
+  entrada.limpiar();
+  pueblo = null;
+  iniciarJuego({ tipo: "descenso", partida, piso });
+  guardarTodo();
+}
+
+function iniciarJuego(inicio: InicioJuego): void {
+  juego = new Juego(meta, audio, entrada, eventos, inicio);
+  partida = juego.partida;
+}
+
+const eventosPueblo: EventosPueblo = {
+  mensaje: (t, c) => ui.toast(t, c),
+  abrirServicio: (s) => {
+    if (pueblo === null) return;
+    switch (s) {
+      case "taberna": ui.abrirTaberna(pueblo); break;
+      case "mercader": ui.abrirBazar(pueblo); break;
+      case "armero": ui.abrirArmeria(pueblo); break;
+      case "banco": ui.abrirBanco(pueblo); break;
+      case "altar": ui.abrirAltar(pueblo); break;
+      case "herrero": ui.abrirYunque(pueblo); break;
+      case "santuario": ui.mostrarSantuario(); break;
+      case "pozo": ui.abrirPozo(pueblo); break;
+    }
+  },
+};
 
 const eventos: EventosJuego = {
   mensaje: (t, c) => ui.toast(t, c),
   abrirAltar: () => { if (juego !== null) ui.abrirAltar(juego); },
   abrirMercader: () => { if (juego !== null) ui.abrirMercader(juego); },
   abrirYunque: () => { if (juego !== null) ui.abrirYunque(juego); },
-  guardarDescenso: (d) => guardarDescenso(d),
-  borrarDescenso: () => borrarDescenso(),
+  abrirFaro: (op) => ui.abrirFaro(op),
+  abrirPortal: (op) => ui.abrirPortal(op),
+  volverAlPueblo: (motivo) => {
+    entrarPueblo("pozo");
+    ui.toast(motivo === "extraccion" ? "¡Extracción completada! Todo tu botín está a salvo" : "Extrajiste por el portal del guardián con tu botín", "#7dffb0");
+  },
+  guardarDescenso: (d) => guardarTodo(d),
+  borrarDescenso: () => guardarTodo(null),
   reliquia: (r) => ui.mostrarReliquia(r, () => entrada.limpiar()),
   jefe: (nombre, titulo) => ui.anunciar(nombre, titulo, "#ff6a6a"),
   nuevoPiso: (piso, b) => ui.anunciarPiso(piso, b),
-  muerte: (res, eco) => setTimeout(() => ui.mostrarMuerte(res, eco), 1400),
-  victoria: (res) => setTimeout(() => ui.mostrarVictoria(res), 600),
-  guardar,
+  muerte: (res, eco) => setTimeout(() => {
+    guardarTodo(null);
+    ui.mostrarMuerte(res, eco);
+  }, 1400),
+  victoria: (res) => setTimeout(() => {
+    partida?.curarTodo();
+    guardarTodo(null);
+    ui.mostrarVictoria(res);
+  }, 600),
+  guardar: () => guardarTodo(),
 };
-
-function iniciar(inicio: InicioJuego): void {
-  audio.activar();
-  ui.cerrarForzado();
-  entrada.limpiar();
-  juego = new Juego(meta, audio, entrada, eventos, inicio);
-  guardar();
-}
 
 // Guardar al cerrar o esconder la pestaña.
-const guardarTodo = (): void => {
-  guardar();
+const guardarAlSalir = (): void => {
   if (juego !== null && !juego.terminado) juego.guardarProgreso();
+  else if (pueblo !== null) guardarTodo();
 };
-window.addEventListener("beforeunload", guardarTodo);
-document.addEventListener("visibilitychange", () => { if (document.hidden) guardarTodo(); });
-
+window.addEventListener("beforeunload", guardarAlSalir);
+document.addEventListener("visibilitychange", () => { if (document.hidden) guardarAlSalir(); });
 
 // ---------------- Escalado entero (pixel perfect) ----------------
 function ajustar(): void {
@@ -106,15 +231,16 @@ ajustar();
 
 // ---------------- Teclas de menú ----------------
 function teclasDeMenu(): void {
-  if (juego === null || juego.terminado) return;
+  const escena = juego !== null && !juego.terminado ? juego : pueblo;
+  if (escena === null) return;
   const abierto = ui.abierto;
   if (entrada.recienSiempre("pausa")) {
     if (abierto !== null) ui.cerrar();
     else ui.abrirPausa();
   } else if (entrada.recienSiempre("inventario")) {
     if (abierto === "inventario") ui.cerrar();
-    else if (abierto === null) ui.abrirInventario(juego);
-  } else if (entrada.recienSiempre("mapa")) {
+    else if (abierto === null) ui.abrirInventario(escena);
+  } else if (entrada.recienSiempre("mapa") && juego !== null) {
     if (abierto === "mapa") ui.cerrar();
     else if (abierto === null) ui.abrirMapa(juego);
   }
@@ -128,7 +254,6 @@ function dibujarTitulo(t: number, dt: number): void {
   grad.addColorStop(1, "#1d1428");
   g.fillStyle = grad;
   g.fillRect(0, 0, ANCHO, ALTO);
-  // el pozo
   for (let i = 0; i < 9; i++) {
     const r = 30 + i * 22 + Math.sin(t * 0.6 + i) * 3;
     g.strokeStyle = `rgba(160,124,255,${0.18 - i * 0.017})`;
@@ -163,21 +288,8 @@ function dibujarGaleria(c: CanvasRenderingContext2D, t: number): void {
   c.save();
   c.scale(2, 2);
   paletas.forEach(([cuerpo, acento], fila) => {
-    poses.forEach((pose, i) => {
-      dibujarPortador(c, 10 + i * 19, 30 + fila * 32, 1, pose, { cuerpo, acento }, t, { variante: fila });
-    });
+    poses.forEach((pose, i) => dibujarPortador(c, 10 + i * 19, 30 + fila * 32, 1, pose, { cuerpo, acento }, t, { variante: fila }));
   });
-  c.restore();
-  // Golpe en 5 momentos (preparación -> remate) y golpe alto
-  c.save();
-  c.scale(2, 2);
-  for (let k = 0; k <= 4; k++) {
-    const m = dibujarPortador(c, 12 + k * 22, 128, 1, "golpe", { cuerpo: "#9c8f7a", acento: "#e0c48a" }, t, { variante: 0, progreso: k / 4 });
-    c.fillStyle = "#e8e8f0";
-    for (let d = 2; d < 14; d++) c.fillRect(Math.round(m.manoX + Math.cos(m.angulo) * d), Math.round(m.manoY + Math.sin(m.angulo) * d), 1, 1);
-  }
-  for (let k = 0; k <= 2; k++) dibujarPortador(c, 130 + k * 20, 128, 1, "golpeAlto", { cuerpo: "#3b3550", acento: "#b48cff" }, t, { variante: 1, progreso: k / 2 });
-  for (const [k, e] of [[0, 1.18], [1, 0.8]] as const) dibujarPortador(c, 200 + k * 20, 128, 1, "quieto", { cuerpo: "#2f3a6e", acento: "#9fe8ff" }, t, { variante: 2, estiramiento: e });
   c.restore();
 }
 
@@ -193,12 +305,13 @@ function cuadro(ahora: number): void {
   reloj += dt;
 
   teclasDeMenu();
-  const pausado = juego === null || ui.abierto !== null;
+  const escena = juego ?? pueblo;
+  const pausado = escena === null || ui.abierto !== null;
   entrada.bloqueada = pausado;
-  if (juego !== null && !pausado) {
+  if (escena !== null && !pausado) {
     acumulado += dt;
     while (acumulado >= PASO) {
-      juego.actualizar(PASO);
+      escena.actualizar(PASO);
       entrada.finPaso();
       acumulado -= PASO;
     }
@@ -213,23 +326,61 @@ function cuadro(ahora: number): void {
   } else if (juego !== null) {
     juego.dibujar(g);
     if (!juego.terminado) dibujarHud(g, juego);
+  } else if (pueblo !== null) {
+    pueblo.dibujar(g);
+    dibujarHudPueblo(g, pueblo, meta, nombreRanura);
   } else {
     dibujarTitulo(reloj, dt);
   }
   requestAnimationFrame(cuadro);
 }
 
-// Los sprites cargan en paralelo; mientras tanto (o si fallan) se dibuja el arte procedural.
+// ---------------- Arranque ----------------
 void sprites.cargar().then(() => {
   if (ui.abierto === "titulo" && !galeria) ui.mostrarTitulo();
-  // Solo en desarrollo: ?auto=<estilo> empieza una partida directa (para capturas y pruebas visuales).
-  const auto = import.meta.env.DEV ? new URLSearchParams(location.search).get("auto") : null;
-  if (auto !== null) {
-    iniciar({ tipo: "nueva", opciones: { estilo: (["espada", "punos", "pesada", "baston"].includes(auto) ? auto : "espada") as "espada" } });
-    const q = new URLSearchParams(location.search);
-    if (q.has("sala") || q.has("piso")) juego?.depurarIr(Number(q.get("piso") ?? 1), Number(q.get("sala") ?? 0));
-    if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
+  if (!import.meta.env.DEV) return;
+  // Solo en desarrollo, con una ranura de pruebas oculta:
+  //   ?auto=<estilo>&piso=N&sala=M&jefe  → personaje nuevo directo al Pozo
+  //   ?auto=<estilo>&extraccion[&dentro]  → sala con zona de extracción (dentro: parado en ella)
+  //   ?pueblo=<estilo>                   → personaje nuevo en el pueblo
+  const q = new URLSearchParams(location.search);
+  if (q.has("partidas")) {
+    ui.mostrarPartidas();
+    return;
+  }
+  const auto = q.get("auto") ?? q.get("pueblo");
+  if (auto === null) return;
+  const estilo = (["espada", "punos", "pesada", "baston", "arco"].includes(auto) ? auto : "espada") as "espada";
+  ranura = RANURA_PRUEBAS;
+  nombreRanura = "Pruebas";
+  meta = Meta.nueva();
+  ui.usarMeta(meta);
+  banco = new Banco();
+  partida = new Partida(meta, (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, { estilo });
+  partida.pisoDesbloqueado = PISOS_TOTALES;
+  if (q.has("pueblo")) {
+    entrarPueblo("inicio");
+    // &panel=taberna|mercader|armero|banco|altar|herrero|santuario|pozo abre ese servicio (capturas).
+    const panel = q.get("panel");
+    if (panel !== null) {
+      partida.billetera.acreditar("esquirlas", 5000);
+      eventosPueblo.abrirServicio(panel as "taberna");
+    }
+    if (q.has("inventario") && pueblo !== null) ui.abrirInventario(pueblo);
+    return;
+  }
+
+  descender(Number(q.get("piso") ?? 1));
+  if (q.has("sala")) juego?.depurarIr(Number(q.get("piso") ?? 1), Number(q.get("sala") ?? 0));
+  if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
+  if (q.has("extraccion") && juego !== null) {
+    juego.depurarIr(Number(q.get("piso") ?? 1), 0);
+    const ex = juego.mapa.extracciones?.[0];
+    if (ex !== undefined) juego.depurarIr(Number(q.get("piso") ?? 1), ex);
+    const z = juego.zonaExtraccion;
+    if (z !== null && q.has("dentro")) juego.jugador.colocar(z.x + 8, z.y + z.h - juego.jugador.h);
   }
 });
 if (!galeria) ui.mostrarTitulo();
 requestAnimationFrame(cuadro);
+

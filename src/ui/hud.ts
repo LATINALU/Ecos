@@ -7,7 +7,9 @@ import { SUBARMAS } from "../contenido/subarmas.ts";
 import { estrellas } from "../dominio/cartas.ts";
 import { dibujarIconoSubarma } from "../juego/entidades/objetos.ts";
 import { aperturas, type MapaPiso } from "../dominio/mundo/generador.ts";
-import type { Juego } from "../juego/juego.ts";
+import { SEGUNDOS_EXTRACCION, type Juego } from "../juego/juego.ts";
+import type { Pueblo } from "../juego/pueblo.ts";
+import type { Meta } from "../dominio/meta.ts";
 
 function barra(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, frac: number, color: string, fondo = "#1a1622"): void {
   g.fillStyle = "#000000";
@@ -86,6 +88,14 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
     texto(g, `↑K ${SUBARMAS[p.subarma].costo}♥`, 206, 262, puede ? "#ffd0d8" : "#776677");
   }
 
+  // Extracción: valor en riesgo y progreso de la zona.
+  texto(g, `En riesgo ◆${p.valorEnRiesgo()}`, 476, 251, "#ffb0a0", "right");
+  if (juego.cargaExtraccion > 0) {
+    const prog = Math.min(1, juego.cargaExtraccion / SEGUNDOS_EXTRACCION);
+    texto(g, `EXTRAYENDO ${Math.ceil(SEGUNDOS_EXTRACCION - juego.cargaExtraccion)} s`, 240, 200, "#7dffb0", "center");
+    barra(g, 180, 204, 120, 4, prog, "#7dffb0");
+  }
+
   // Piso
   const b = bioma(p.piso);
   texto(g, `Piso ${p.piso} · ${b.nombre}`, 476, 262, b.acento, "right");
@@ -139,6 +149,17 @@ export function dibujarMinimapa(g: CanvasRenderingContext2D, mapa: MapaPiso, jue
       }
     }
   }
+  // Las extracciones se conocen desde el principio (como los mapas de salida): un rombo verde parpadeante.
+  const brillo = Math.floor(performance.now() / 400) % 2 === 0;
+  for (const id of mapa.extracciones ?? []) {
+    const s = mapa.salas[id];
+    if (s === undefined) continue;
+    const x = ox + s.x * celda + celda / 2;
+    const y = oy + s.y * celda + celda / 2;
+    g.fillStyle = brillo ? "#7dffb0" : "#3d9a6a";
+    g.fillRect(x - 1, y - 2, 2, 4);
+    g.fillRect(x - 2, y - 1, 4, 2);
+  }
 }
 
 /** Medidor de estilo: golpes, rango (D → SSS) y la barrita que se vacía si dejás de pegar. */
@@ -173,4 +194,20 @@ function dibujarCombo(g: CanvasRenderingContext2D, juego: Juego): void {
   g.fillStyle = r.color;
   g.fillRect(x - 60, y + 27, Math.round(60 * c.resto), 3);
   g.restore();
+}
+
+/** HUD del pueblo: quién sos, cuánto tenés y qué teclas usar. */
+export function dibujarHudPueblo(g: CanvasRenderingContext2D, pueblo: Pueblo, meta: Meta, nombre: string): void {
+  const p = pueblo.partida;
+  const s = p.stats();
+  g.font = "bold 8px monospace";
+  g.fillStyle = "#000000aa";
+  g.fillRect(4, 4, 168, 34);
+  texto(g, `${nombre} · Nv ${p.nivel()}`, 8, 14, "#ffe9a8");
+  texto(g, `♥ ${s.hp}  ✦ ${s.mp}  ◆ ${p.esquirlas}  ✧ ${meta.esencia}`, 8, 24, "#d8d0e8");
+  texto(g, `Puedes bajar hasta el piso ${p.pisoDesbloqueado}`, 8, 34, "#a09ab8");
+  const completas = p.misiones.listaActivas().filter((m) => p.misiones.completa(m.id)).length;
+  if (completas > 0 && Math.floor(performance.now() / 500) % 2 === 0) texto(g, `${completas} misión(es) lista(s) para entregar en la taberna`, 8, 50, "#ffd27a");
+  texto(g, "E hablar · I inventario · Esc pausa", 476, 262, "#a09ab8", "right");
+  texto(g, "Último Refugio", 6, 262, "#ffd27a");
 }

@@ -38,6 +38,8 @@ export interface MapaPiso {
   readonly conexiones: readonly Conexion[];
   readonly inicio: number;
   readonly jefe: number;
+  /** Salas con punto de extracción (vuelta al pueblo conservando todo). Opcional: descensos guardados viejos. */
+  readonly extracciones?: readonly number[];
 }
 
 export interface OpcionesGenerador {
@@ -196,6 +198,18 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
   const mercader = tomar(salas.filter((s) => dist[s.id] >= 2));
   if (mercader !== undefined) mercader.tipo = "mercader";
 
+  // Extracción (estilo Tarkov): 1~2 salas normales lejos del inicio. Una a media distancia y otra al fondo.
+  const extracciones: number[] = [];
+  const candidatas = salas.filter((s) => s.tipo === "normal" && dist[s.id] >= 2).sort((a, b) => dist[a.id] - dist[b.id]);
+  if (candidatas.length > 0) {
+    extracciones.push(candidatas[Math.floor(candidatas.length / 2)].id);
+    const fondo = candidatas[candidatas.length - 1];
+    if (candidatas.length >= 3 && !extracciones.includes(fondo.id)) extracciones.push(fondo.id);
+  } else {
+    const resto = salas.filter((s) => s.tipo === "normal");
+    if (resto.length > 0) extracciones.push(elegirUno(azar, resto).id);
+  }
+
   if (conBarreras) {
     const prob = op.probBarrera ?? 0.3;
     for (const c of conexiones) {
@@ -205,7 +219,7 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
     }
   }
 
-  return { piso: op.piso, ancho: op.ancho, alto: op.alto, salas, conexiones, inicio, jefe };
+  return { piso: op.piso, ancho: op.ancho, alto: op.alto, salas, conexiones, inicio, jefe, extracciones };
 }
 
 export function generarPiso(azar: Azar, op: OpcionesGenerador): MapaPiso {

@@ -8,7 +8,7 @@ import { COFRE } from "../../contenido/atlas.ts";
 import { SUBARMAS } from "../../contenido/subarmas.ts";
 import { mover, type Cuerpo, type Tiles } from "../../motor/fisica.ts";
 import { dibujarRecorte, sprites } from "../../motor/sprites.ts";
-import { iconoEquipo, iconoObjeto, imagenDe, type Icono } from "../iconos.ts";
+import { dibujarIconoPieza, iconoEquipo, iconoObjeto, imagenDe, type Icono } from "../iconos.ts";
 import { GRAVEDAD } from "./criatura.ts";
 
 export function colorPremio(p: Premio): string {
@@ -128,12 +128,7 @@ export class BotinSuelo implements Cuerpo {
         g.fillRect(x + 2, y + 3, 1, 2);
         break;
       case "equipo":
-        g.fillStyle = "#1a1622";
-        g.fillRect(x, y, 8, 8);
-        g.fillStyle = color;
-        g.fillRect(x + 1, y + 1, 6, 6);
-        g.fillStyle = "#1a1622";
-        g.fillRect(x + 3, y + 2, 2, 4);
+        dibujarIconoPieza(g, this.premio.equipo.ranura, x + 4, y + 4, color);
         break;
       case "carta":
         g.fillStyle = "#f2e6d0";

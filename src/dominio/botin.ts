@@ -7,6 +7,7 @@
 import { entero, probabilidadReal, tirarDrop, type Azar, type EntradaDrop } from "minialu";
 import { ORDEN_SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
 import { conjuntoDelPiso } from "../contenido/conjuntos.ts";
+import { ARMADURAS } from "./tipos.ts";
 import { MAT_FRAGMENTO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
 import { RAREZA_CARTA_JEFE, RAREZA_CARTA_PISO, cartaAleatoria, type Carta } from "./cartas.ts";
 import { crearUnico, generarEquipo, type ObjetoEquipo, type Rareza } from "./equipo.ts";
@@ -63,7 +64,7 @@ function resolverFicha(azar: Azar, piso: number, ficha: number, minima: Rareza =
     case FICHA_RUNA:
       return { tipo: "objeto", objeto: RUNAS[entero(azar, RUNAS.length)].objeto, cantidad: 1 };
     case FICHA_CONJUNTO:
-      return { tipo: "equipo", equipo: generarEquipo(azar, piso, 2, undefined, conjuntoDelPiso(piso).id) };
+      return { tipo: "equipo", equipo: generarEquipo(azar, piso, 2, ARMADURAS, conjuntoDelPiso(piso).id) };
     default:
       return { tipo: "objeto", objeto: ficha, cantidad: 1 };
   }

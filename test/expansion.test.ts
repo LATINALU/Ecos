@@ -75,19 +75,29 @@ describe("runas", () => {
 });
 
 describe("conjuntos", () => {
-  it("2 piezas activan el primer bono y 3 el segundo", () => {
+  it("2 piezas activan el primer bono, 4 el segundo y el set completo de 6 el tercero", () => {
     const azar = new AzarSemilla(5);
     const p = new Partida(Meta.nueva(), 1);
     const c = CONJUNTOS.find((x) => x.id === "astral")!;
     const critBase = p.stats().critico;
+    // Las armas y joyas no pueden ser de conjunto.
     p.equipo.arma = generarEquipo(azar, 9, 2, "arma", "astral");
+    expect(p.equipo.arma.conjunto).toBeUndefined();
+    p.equipo.pecho = generarEquipo(azar, 9, 2, "pecho", "astral");
     expect(p.bonosConjunto()).toHaveLength(0);
-    p.equipo.armadura = generarEquipo(azar, 9, 2, "armadura", "astral");
+    p.equipo.casco = generarEquipo(azar, 9, 2, "casco", "astral");
     expect(p.bonosConjunto()).toEqual([c.dos]);
     expect(p.stats().critico).toBeGreaterThanOrEqual(critBase + 15);
-    p.equipo.amuleto = generarEquipo(azar, 9, 2, "amuleto", "astral");
+    p.equipo.botas = generarEquipo(azar, 9, 2, "botas", "astral");
+    expect(p.bonosConjunto()).toHaveLength(1);
+    p.equipo.cinturon = generarEquipo(azar, 9, 2, "cinturon", "astral");
     expect(p.bonosConjunto()).toHaveLength(2);
     expect(p.combate().critDanio).toBeGreaterThanOrEqual(0.6);
+    const danio = p.multiplicadorDanio();
+    p.equipo.hombros = generarEquipo(azar, 9, 2, "hombros", "astral");
+    p.equipo.pantalones = generarEquipo(azar, 9, 2, "pantalones", "astral");
+    expect(p.bonosConjunto()).toEqual([c.dos, c.cuatro, c.seis]);
+    expect(p.multiplicadorDanio()).toBeCloseTo(danio * 1.25);
   });
 });
 

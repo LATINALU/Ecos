@@ -2,6 +2,7 @@
 // mercader, mapa, pausa, reliquias, muerte y victoria. La lógica vive en el dominio; acá solo se muestra
 // y se llama a Partida/Meta, mostrando el Resultado (ok / código de error) que devuelven.
 
+import { ELEMENTOS, potenciaElemental } from "../contenido/elementos.ts";
 import type { Posicion } from "minialu";
 import { ALMAS, COLOR_FAMILIA, FAMILIAS, INFO_PASIVA, INFO_TECNICA, alma } from "../contenido/almas.ts";
 import { ESTILOS, ORDEN_ESTILOS } from "../contenido/armas.ts";
@@ -19,23 +20,44 @@ import type { Eco } from "../dominio/eco.ts";
 import { valorDesguace, type ObjetoEquipo } from "../dominio/equipo.ts";
 import { MEJORAS_SANTUARIO, type Meta } from "../dominio/meta.ts";
 import type { OpcionesInicio, Partida, RanuraCarta, ResumenPartida } from "../dominio/partida.ts";
+import type { ResumenRanura } from "../infra/repositorio.ts";
+import type { Banco } from "../dominio/banco.ts";
+import {
+  comprarAlArmero, comprarEnPueblo, precioPueblo, valorCarta, valorVenta, vender, venderCarta, type ArticuloArmero,
+  kitRecluta, tieneArma,
+} from "../dominio/comercio.ts";
+import { INFO_MISIONES, MAX_MISIONES_ACTIVAS, MISIONES, mision } from "../contenido/misiones.ts";
+import { PISOS_TOTALES } from "../contenido/biomas.ts";
+import type { Inventario } from "minialu";
 import { HABILIDADES_PORTADOR } from "../dominio/partida.ts";
-import { cartaDe, equipoDe } from "../dominio/partida.ts";
+import { TAM_SEGURO, cartaDe, equipoDe } from "../dominio/partida.ts";
 import { NOMBRE_STAT, STATS, bloque, type Stat } from "../dominio/stats.ts";
-import { INFO_RELIQUIA, RANURAS, RELIQUIAS, type Ranura, type Reliquia } from "../dominio/tipos.ts";
+import { INFO_RELIQUIA, NOMBRE_PIEZA, NOMBRE_RANURA, RANURAS, RELIQUIAS, piezaDeRanura, ranurasDePieza, type Ranura, type Reliquia } from "../dominio/tipos.ts";
 import type { Audio } from "../motor/audio.ts";
 import { AYUDA_CONTROLES } from "../motor/entrada.ts";
 import type { Juego } from "../juego/juego.ts";
-import { iconoEquipo, iconoObjeto, lienzoIcono } from "../juego/iconos.ts";
+import { iconoObjeto, lienzoEquipo, lienzoIcono, lienzoPieza } from "../juego/iconos.ts";
 import { sprites } from "../motor/sprites.ts";
 import { h, limpiar } from "./dom.ts";
 import { dibujarMinimapa } from "./hud.ts";
 
+/** Lo único que los menús necesitan del juego o del pueblo: la partida (el personaje). */
+export interface ConPartida {
+  readonly partida: Partida;
+}
+
 export interface Acciones {
-  descender(opciones: OpcionesInicio): void;
-  continuar(): void;
-  /** Piso de la partida guardada, si hay una. */
-  descensoGuardado(): number | null;
+  /** Resumen de las ranuras de partida (null = vacía). */
+  ranuras(): (ResumenRanura | null)[];
+  /** Continuar una partida guardada (al pueblo o al descenso a medias). */
+  jugarRanura(i: number): void;
+  crearPartida(i: number, nombre: string, opciones: OpcionesInicio): void;
+  /** Desde el Pozo del pueblo. */
+  descender(piso: number): void;
+  /** Tras morir o ganar. */
+  volverAlPueblo(): void;
+  stockArmero(): ArticuloArmero[];
+  banco(): Banco;
   aTitulo(): void;
   abandonar(): void;
   guardarYSalir(): void;
@@ -44,7 +66,6 @@ export interface Acciones {
   guardar(): void;
 }
 
-const NOMBRE_RANURA: Readonly<Record<Ranura, string>> = { arma: "Arma", armadura: "Armadura", amuleto: "Amuleto" };
 const ERRORES: Readonly<Record<string, string>> = {
   "sin-fondos": "No tienes suficientes esquirlas",
   "sin-espacio": "No hay espacio",
@@ -78,6 +99,25 @@ function formatoStats(stats: Readonly<Record<string, number>>): HTMLElement {
     h("span", { class: "stat" }, `${NOMBRE_STAT[s]} `, h("b", {}, `+${stats[s]}`))));
 }
 
+/** Grilla de casillas de un inventario (banco, contenedor seguro). */
+function grillaInventario(inv: Inventario, alClic: (pos: Posicion) => void): HTMLElement {
+  const g = h("div", { class: "grilla" });
+  for (const pos of inv.posiciones()) {
+    const pila = inv.en(pos);
+    const eq = pila !== null ? equipoDe(pila) : undefined;
+    const cons = pila !== null ? apilable(pila.objeto) : undefined;
+    g.append(h("button", {
+      class: `celda${pila === null ? " vacia" : ""}`,
+      style: eq !== undefined ? `--c:${COLORES_RAREZA[eq.rareza]}` : cons !== undefined ? `--c:${cons.color}` : "",
+      title: eq?.nombre ?? cons?.nombre ?? "",
+      disabled: pila === null,
+      onclick: () => alClic(pos),
+    }, pila !== null ? (eq !== undefined ? lienzoEquipo(eq, COLORES_RAREZA[eq.rareza]) : lienzoIcono(iconoObjeto(pila.objeto)) ?? h("span", { class: "icono pocion" })) : null,
+    pila !== null && pila.cantidad > 1 ? h("small", {}, pila.cantidad) : null));
+  }
+  return g;
+}
+
 function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLElement {
   const u = unico(o.base);
   const dif = comparar !== undefined && comparar !== null
@@ -89,8 +129,13 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
     : null;
   return h("div", { class: "ficha" },
     h("div", { class: "nombre", style: `color:${COLORES_RAREZA[o.rareza]}` }, o.nombre),
-    h("div", { class: "sub" }, `${NOMBRES_RAREZA[o.rareza]} · ${NOMBRE_RANURA[o.ranura]} · Nv ${o.nivel}`),
+    h("div", { class: "sub" }, `${NOMBRES_RAREZA[o.rareza]} · ${NOMBRE_PIEZA[o.ranura]} · Nv ${o.nivel}`),
     formatoStats(o.stats),
+    o.elemento !== undefined ? (() => {
+      const e = ELEMENTOS[o.elemento];
+      return h("div", { class: "elemento", style: `color:${e.color}` },
+        `${e.nombre} · +${Math.round(potenciaElemental(o.rareza) * 100)} % de daño elemental — ${e.efecto}`);
+    })() : null,
     o.calidad !== undefined ? h("div", { class: o.calidad >= 1.1 ? "sube" : o.calidad < 0.9 ? "baja" : "sub" }, `Calidad de forja: ${Math.round(o.calidad * 100)} %`) : null,
     ...Object.entries(o.rasgos ?? {}).map(([id, v]) => {
       const def = RASGOS_EQUIPO.find((r) => r.id === id);
@@ -103,7 +148,8 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
       return h("div", { class: "conjunto", style: `--c:${c.color}` },
         h("b", {}, `Conjunto: ${c.nombre}`),
         h("div", {}, `(2) ${c.dos.descripcion}`),
-        h("div", {}, `(3) ${c.tres.descripcion}`));
+        h("div", {}, `(4) ${c.cuatro.descripcion}`),
+        h("div", {}, `(6) ${c.seis.descripcion}`));
     })() : null,
     dif);
 }
@@ -137,7 +183,7 @@ export class Interfaz {
   private readonly panel: HTMLElement;
   private readonly toasts: HTMLElement;
   private readonly banner: HTMLElement;
-  private readonly meta: Meta;
+  private meta: Meta;
   private readonly audio: Audio;
   private readonly acciones: Acciones;
   private abiertoActual: string | null = null;
@@ -152,6 +198,11 @@ export class Interfaz {
     this.toasts = h("div", { class: "toasts" });
     this.banner = h("div", { class: "banner" });
     raiz.append(this.toasts, this.banner, this.panel);
+  }
+
+  /** Cada ranura de partida tiene su propia Meta (reliquias, esencia, ecos). */
+  usarMeta(m: Meta): void {
+    this.meta = m;
   }
 
   /** ¿Hay un panel que pausa el juego? */
@@ -211,38 +262,56 @@ export class Interfaz {
   // =============================== Título ===============================
 
   mostrarTitulo(): void {
-    const m = this.meta;
-    const reliquias = h("div", { class: "reliquias" }, ...RELIQUIAS.map((r) =>
-      h("span", { class: m.tieneReliquia(r) ? "rel si" : "rel no", style: `--c:${INFO_RELIQUIA[r].color}`, title: INFO_RELIQUIA[r].descripcion },
-        m.tieneReliquia(r) ? INFO_RELIQUIA[r].nombre : "???")));
     this.abrir("titulo",
       h("div", { class: "titulo" },
         h("h1", {}, "ECOS"),
         h("div", { class: "lema" }, "El Pozo que Recuerda"),
         h("p", { class: "intro" },
-          "Cada guerrero que cae en el Pozo deja un eco. Tú bajas a buscar el Corazón que los guarda a todos. ",
-          "Cuando mueras —y morirás— tu Eco te esperará abajo, con tu forma y tu mejor arma."),
+          "Cada guerrero que cae en el Pozo deja un eco. Desde el último pueblo de la superficie bajas una y otra vez ",
+          "a buscar el Corazón que los guarda a todos. Cuando caigas, tu Eco te esperará abajo."),
         h("div", { class: "menu" },
-          this.acciones.descensoGuardado() !== null
-            ? h("button", { class: "principal", onclick: () => { this.audio.activar(); this.acciones.continuar(); } }, `Continuar descenso · Piso ${this.acciones.descensoGuardado()}`)
-            : null,
-          h("button", { class: this.acciones.descensoGuardado() === null ? "principal" : "", onclick: () => { this.audio.activar(); this.mostrarPreparacion(); } },
-            this.acciones.descensoGuardado() === null ? "Descender" : "Nuevo descenso"),
-          h("button", { onclick: () => { this.audio.activar(); this.mostrarSantuario(); } }, `Santuario · ${m.esencia} esencia`),
-          h("button", { onclick: () => this.mostrarMemorial() }, `Memorial · ${m.listaEcos().length} ecos`),
+          h("button", { class: "principal", onclick: () => { this.audio.activar(); this.mostrarPartidas(); } }, "Jugar"),
           h("button", { onclick: () => this.mostrarControles(() => this.mostrarTitulo()) }, "Controles")),
-        reliquias,
-        h("div", { class: "creditos" }, "Arte de escenario y criaturas: Anokolisa (Vaca Roxa) y 0x72 · CC0"),
-        h("div", { class: "pie" }, `Descensos ${m.registro.partidas} · Muertes ${m.registro.muertes} · Victorias ${m.registro.victorias} · Mejor piso ${m.registro.mejorPiso}`)));
+        h("div", { class: "creditos" }, "Arte de escenario y criaturas: Anokolisa (Vaca Roxa) y 0x72 · CC0")));
+  }
+
+  /** Las tres ranuras de partida. */
+  mostrarPartidas(confirmar: number | null = null): void {
+    const tarjetas = this.acciones.ranuras().map((r, i) => {
+      if (r === null) {
+        return h("div", { class: "ranura-partida vacia" },
+          h("b", {}, `Partida ${i + 1}`),
+          h("p", { class: "sub" }, "Vacía"),
+          h("button", { class: "principal", onclick: () => this.mostrarPreparacion(i) }, "Nueva partida"));
+      }
+      const fecha = new Date(r.actualizada).toLocaleString();
+      return h("div", { class: "ranura-partida" },
+        h("b", {}, r.nombre),
+        h("div", { class: "sub" }, r.nivel !== null ? `Nivel ${r.nivel} · Piso desbloqueado ${r.pisoDesbloqueado}` : "Sin personaje"),
+        h("div", { class: "sub" }, `Mejor piso ${r.mejorPiso} · Muertes ${r.muertes} · Victorias ${r.victorias}`),
+        r.enDescenso !== null ? h("div", { class: "aviso-descenso" }, `En el Pozo: piso ${r.enDescenso}`) : null,
+        h("small", { class: "sub" }, fecha),
+        h("div", { class: "botones" },
+          h("button", { class: "principal", onclick: () => { this.audio.activar(); this.acciones.jugarRanura(i); } }, r.enDescenso !== null ? "Continuar descenso" : "Continuar"),
+          confirmar === i
+            ? h("button", { class: "peligro", onclick: () => this.mostrarPreparacion(i) }, "Sí, sobrescribir")
+            : h("button", { onclick: () => this.mostrarPartidas(i) }, "Nueva aquí")),
+        confirmar === i ? h("p", { class: "baja" }, "Esto reemplaza esta partida (personaje, banco y mundo).") : null);
+    });
+    this.abrir("partidas",
+      h("h2", {}, "Partidas"),
+      h("div", { class: "ranuras-partida" }, ...tarjetas),
+      h("button", { onclick: () => this.mostrarTitulo() }, "Volver"));
   }
 
   /** Antes de bajar: elegir arma inicial (estilo de combate) y alma inicial. */
-  mostrarPreparacion(estilo: EstiloArma = "espada", almaId: number | null = null): void {
+  mostrarPreparacion(ranura: number, estilo: EstiloArma = "espada", almaId: number | null = null, nombre = ""): void {
     const m = this.meta;
-    const hayGuardado = this.acciones.descensoGuardado() !== null;
+    const campo = h("input", { type: "text", maxlength: 18, placeholder: `Portador ${ranura + 1}`, value: nombre, class: "nombre-portador" });
+    const nombreActual = (): string => campo.value.trim();
     const armas = h("div", { class: "estilos" }, ...ORDEN_ESTILOS.map((id) => {
       const e = ESTILOS[id];
-      return h("button", { class: `estilo${id === estilo ? " sel" : ""}`, style: `--c:${e.color}`, onclick: () => this.mostrarPreparacion(id, almaId) },
+      return h("button", { class: `estilo${id === estilo ? " sel" : ""}`, style: `--c:${e.color}`, onclick: () => this.mostrarPreparacion(ranura, id, almaId, nombreActual()) },
         h("span", { class: `icono-estilo ${id}` }),
         h("b", {}, e.nombre),
         h("small", {}, `Combo de ${e.mults.length}`),
@@ -250,25 +319,28 @@ export class Interfaz {
     }));
     const vistas = ALMAS.filter((a) => m.almaVista(a.id));
     const almas = h("div", { class: "almas" },
-      h("button", { class: `alma${almaId === null ? " sel" : ""}`, onclick: () => this.mostrarPreparacion(estilo, null) },
+      h("button", { class: `alma${almaId === null ? " sel" : ""}`, onclick: () => this.mostrarPreparacion(ranura, estilo, null, nombreActual()) },
         h("span", { class: "retrato azar" }), h("b", {}, "Al azar"), h("small", {}, "Que el Pozo decida")),
       ...vistas.map((a) => h("button", {
         class: `alma${almaId === a.id ? " sel" : ""}`, style: `--c1:${a.color};--c2:${a.colorSec}`, title: a.lore,
-        onclick: () => this.mostrarPreparacion(estilo, a.id),
+        onclick: () => this.mostrarPreparacion(ranura, estilo, a.id, nombreActual()),
       }, h("span", { class: "retrato" }), h("b", {}, a.nombre), h("small", {}, INFO_TECNICA[a.tecnica].nombre), h("small", { class: "pasiva" }, INFO_PASIVA[a.pasiva].nombre))));
     const elegida = almaId !== null ? alma(almaId) : null;
     this.abrir("preparacion",
-      h("h2", {}, "Preparar el descenso"),
+      h("h2", {}, `Nuevo Portador · Partida ${ranura + 1}`),
+      h("label", { class: "campo" }, "Nombre ", campo),
       h("h3", {}, "Arma inicial — define tu combo"),
       armas,
       h("h3", {}, "Alma inicial — tu Forma, su técnica y su pasiva"),
       vistas.length === 0 ? h("p", { class: "sub" }, "Todavía no conoces ningún alma: la primera será al azar. Las almas que encuentres quedarán disponibles aquí.") : null,
       almas,
       elegida !== null ? h("p", { class: "sub" }, `${elegida.nombre}: ${INFO_TECNICA[elegida.tecnica].descripcion} · ${INFO_PASIVA[elegida.pasiva].descripcion}`) : null,
-      hayGuardado ? h("p", { class: "baja" }, "Empezar un descenso nuevo reemplaza el que tienes guardado.") : null,
       h("div", { class: "menu fila" },
-        h("button", { onclick: () => this.mostrarTitulo() }, "Volver"),
-        h("button", { class: "principal", onclick: () => this.acciones.descender({ estilo, alma: almaId ?? undefined }) }, "Descender")));
+        h("button", { onclick: () => this.mostrarPartidas() }, "Volver"),
+        h("button", {
+          class: "principal",
+          onclick: () => this.acciones.crearPartida(ranura, nombreActual() || `Portador ${ranura + 1}`, { estilo, alma: almaId ?? undefined }),
+        }, "Comenzar")));
   }
 
   mostrarControles(volver: () => void): void {
@@ -309,7 +381,7 @@ export class Interfaz {
       h("p", { class: "sub" }, "La esencia de cada descenso fortalece al próximo Portador."),
       h("div", { class: "esencia" }, `${m.esencia} ✧ esencia`),
       ...filas,
-      h("button", { class: "principal", onclick: () => this.mostrarTitulo() }, "Volver"));
+      h("button", { class: "principal", onclick: () => this.cerrar() }, "Volver al pueblo"));
   }
 
   mostrarMemorial(): void {
@@ -329,12 +401,12 @@ export class Interfaz {
         ? h("div", { class: "alma", style: `--c1:${a.color};--c2:${a.colorSec}`, title: a.lore },
           h("span", { class: "retrato" }), h("b", {}, a.nombre), h("small", {}, a.titulo), h("small", {}, INFO_TECNICA[a.tecnica].nombre))
         : h("div", { class: "alma oculta" }, h("span", { class: "retrato" }), h("b", {}, "???")))),
-      h("button", { class: "principal", onclick: () => this.mostrarTitulo() }, "Volver"));
+      h("button", { class: "principal", onclick: () => this.cerrar() }, "Volver al pueblo"));
   }
 
   // =============================== Inventario ===============================
 
-  abrirInventario(juego: Juego, pestana: "equipo" | "cartas" | "habilidades" | "stats" = "equipo", seleccion?: Posicion | Ranura | RanuraCarta): void {
+  abrirInventario(juego: ConPartida, pestana: "equipo" | "cartas" | "habilidades" | "stats" = "equipo", seleccion?: Posicion | Ranura | RanuraCarta): void {
     const p = juego.partida;
     const tabs = h("div", { class: "tabs" },
       ...([["equipo", "Equipo"], ["cartas", "Cartas de Alma"], ["habilidades", "Habilidades"], ["stats", "Stats y daño"]] as const).map(([id, txt]) =>
@@ -348,14 +420,16 @@ export class Interfaz {
     this.abrir("inventario", this.botonCerrar(), h("h2", {}, "Portador"), tabs, cuerpo);
   }
 
-  private vistaEquipo(juego: Juego, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
-    const ranuras = h("div", { class: "ranuras" }, ...RANURAS.map((r) => {
+  private vistaEquipo(juego: ConPartida, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
+    // Muñeco: 11 ranuras (arma, 6 de armadura, 2 anillos, aretes y collar).
+    const ranuras = h("div", { class: "ranuras munieco" }, ...RANURAS.map((r) => {
       const o = p.equipo[r];
       return h("button", {
-        class: `ranura${sel === r ? " sel" : ""}`, style: o !== null ? `border-color:${COLORES_RAREZA[o.rareza]}` : "",
+        class: `ranura r-${r}${sel === r ? " sel" : ""}${o === null ? " libre" : ""}`, style: o !== null ? `border-color:${COLORES_RAREZA[o.rareza]}` : "",
+        title: o?.nombre ?? NOMBRE_RANURA[r],
         onclick: () => this.abrirInventario(juego, "equipo", r),
       }, h("small", {}, NOMBRE_RANURA[r]),
-      o !== null ? h("span", { class: "con-icono", style: `color:${COLORES_RAREZA[o.rareza]}` }, lienzoIcono(iconoEquipo(o), 2), o.nombre) : "—");
+      o !== null ? lienzoEquipo(o, COLORES_RAREZA[o.rareza], 2) : lienzoPieza(piezaDeRanura(r), "#3a3050", 2));
     }));
     const grilla = h("div", { class: "grilla" });
     for (const pos of p.mochila.posiciones()) {
@@ -369,8 +443,7 @@ export class Interfaz {
         title: eq?.nombre ?? cons?.nombre ?? "",
         onclick: () => this.abrirInventario(juego, "equipo", pos),
       }, pila !== null
-        ? lienzoIcono(eq !== undefined ? iconoEquipo(eq) : iconoObjeto(pila.objeto))
-          ?? h("span", { class: eq !== undefined ? `icono ${eq.ranura}` : "icono pocion" })
+        ? (eq !== undefined ? lienzoEquipo(eq, COLORES_RAREZA[eq.rareza]) : lienzoIcono(iconoObjeto(pila.objeto)) ?? h("span", { class: "icono pocion" }))
         : null,
       pila !== null && pila.cantidad > 1 ? h("small", {}, pila.cantidad) : null));
     }
@@ -393,16 +466,17 @@ export class Interfaz {
       const eq = pila !== null ? equipoDe(pila) : undefined;
       const cons = pila !== null ? apilable(pila.objeto) : undefined;
       if (eq !== undefined) {
-        detalle = h("div", { class: "detalle" }, fichaEquipo(eq, p.equipo[eq.ranura]),
+        const destinos = ranurasDePieza(eq.ranura);
+        detalle = h("div", { class: "detalle" }, fichaEquipo(eq, p.equipo[p.ranuraPara(eq)]),
           h("div", { class: "botones" },
-            h("button", {
-              class: "principal",
+            ...destinos.map((d, k) => h("button", {
+              class: k === 0 ? "principal" : "",
               onclick: () => {
-                p.equiparDesde(sel);
+                p.equiparDesde(sel, d);
                 this.audio.reproducir("recoger");
-                this.abrirInventario(juego, "equipo", eq.ranura);
+                this.abrirInventario(juego, "equipo", d);
               },
-            }, "Equipar"),
+            }, destinos.length > 1 ? `Equipar en ${NOMBRE_RANURA[d]}` : "Equipar")),
             h("button", {
               onclick: () => {
                 const r = p.desguazar(sel);
@@ -444,7 +518,7 @@ export class Interfaz {
     return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipado"), ranuras, runas, h("h3", {}, `Mochila · ◆ ${p.esquirlas}`), grilla), detalle);
   }
 
-  private vistaCartas(juego: Juego, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
+  private vistaCartas(juego: ConPartida, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
     const ranuras: [RanuraCarta, string][] = [["forma", "Forma"], [0, "Resonancia I"], [1, "Resonancia II"]];
     const slots = h("div", { class: "slots-cartas" }, ...ranuras.map(([r, txt]) =>
       miniCarta(p.cartaEn(r), txt, sel === r, () => this.abrirInventario(juego, "cartas", r))));
@@ -489,7 +563,7 @@ export class Interfaz {
     return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipadas"), slots, h("h3", {}, "Mazo"), mazo), detalle);
   }
 
-  private vistaHabilidades(juego: Juego, p: Partida): HTMLElement {
+  private vistaHabilidades(juego: ConPartida, p: Partida): HTMLElement {
     const refrescar = (): void => this.abrirInventario(juego, "habilidades");
     const filas = STATS.map((stat: Stat) => {
       const pts = p.puntoEn(stat);
@@ -606,9 +680,10 @@ export class Interfaz {
       ...[...p.piezasConjunto()].map(([id, n]) => {
         const c = CONJUNTOS.find((x) => x.id === id)!;
         return h("div", { class: "conjunto", style: `--c:${c.color}` },
-          h("b", {}, `${c.nombre} (${n}/3)`),
+          h("b", {}, `${c.nombre} (${n} piezas)`),
           h("div", { class: n >= 2 ? "sube" : "sub" }, `(2) ${c.dos.descripcion}`),
-          h("div", { class: n >= 3 ? "sube" : "sub" }, `(3) ${c.tres.descripcion}`));
+          h("div", { class: n >= 4 ? "sube" : "sub" }, `(4) ${c.cuatro.descripcion}`),
+          h("div", { class: n >= 6 ? "sube" : "sub" }, `(6) ${c.seis.descripcion}`));
       }),
       ...p.runas.filter((r) => r !== null).map((r) => {
         const def = RUNAS.find((x) => x.id === r)!;
@@ -624,7 +699,7 @@ export class Interfaz {
 
   // =============================== Altar ===============================
 
-  abrirAltar(juego: Juego, elegidas: Posicion[] = [], lagrima = false, mensaje?: HTMLElement): void {
+  abrirAltar(juego: ConPartida, elegidas: Posicion[] = [], lagrima = false, mensaje?: HTMLElement): void {
     const p = juego.partida;
     const cartasMazo: { pos: Posicion; carta: Carta }[] = [];
     for (const pos of p.mazo.posiciones()) {
@@ -709,7 +784,7 @@ export class Interfaz {
 
   // =============================== Yunque ===============================
 
-  abrirYunque(juego: Juego, resultado?: HTMLElement): void {
+  abrirYunque(juego: ConPartida, resultado?: HTMLElement): void {
     const p = juego.partida;
     const refrescar = (r?: HTMLElement): void => this.abrirYunque(juego, r);
     const materiales = h("div", { class: "materiales" }, ...MATERIALES.map((m) =>
@@ -774,7 +849,7 @@ export class Interfaz {
 
   // =============================== Mercader ===============================
 
-  abrirMercader(juego: Juego): void {
+  abrirMercader(juego: ConPartida): void {
     const p = juego.partida;
     const venta = CONSUMIBLES.map((c) => h("div", { class: "articulo" },
       h("span", { style: `color:${c.color}` }, c.nombre),
@@ -815,6 +890,252 @@ export class Interfaz {
       h("h3", {}, "Desguazar equipo"), desguace.length > 0 ? h("div", {}, ...desguace) : h("p", { class: "sub" }, "No llevas equipo para desguazar."));
   }
 
+  // =============================== Pueblo ===============================
+
+  /** Taberna: tablón de misiones (minialu/RegistroMisiones) y memorial. */
+  abrirTaberna(juego: ConPartida, aviso?: HTMLElement): void {
+    const p = juego.partida;
+    const refrescar = (a?: HTMLElement): void => this.abrirTaberna(juego, a);
+    const activas = p.misiones.listaActivas();
+    const recompensa = (id: number): string => {
+      const r = mision(id)?.recompensa;
+      if (r === undefined) return "";
+      const partes = [r.exp !== undefined ? `${r.exp} EXP` : null, ...Object.entries(r.monedas ?? {}).map(([m, n]) => `${n} ${m}`),
+        ...(r.objetos ?? []).map((o) => `${apilable(o.objeto)?.nombre ?? "objeto"} ×${o.cantidad}`)];
+      return partes.filter((x) => x !== null).join(" · ");
+    };
+    const filaActiva = (a: { id: number; progreso: number[] }): HTMLElement => {
+      const def = mision(a.id)!;
+      const info = INFO_MISIONES[a.id];
+      const completa = p.misiones.completa(a.id);
+      return h("div", { class: `mision${completa ? " completa" : ""}` },
+        h("b", {}, info?.titulo ?? `Misión ${a.id}`),
+        ...def.objetivos.map((o, k) => h("div", { class: "objetivo" },
+          h("span", {}, info?.objetivos[k] ?? o.tipo), h("span", { class: "sub" }, ` ${a.progreso[k]}/${o.cantidad}`),
+          h("span", { class: "barra" }, h("i", { style: `width:${Math.round((a.progreso[k] / o.cantidad) * 100)}%` })))),
+        h("div", { class: "sub" }, `Recompensa: ${recompensa(a.id)}`),
+        h("div", { class: "botones" },
+          completa
+            ? h("button", {
+              class: "principal",
+              onclick: () => {
+                const r = p.entregarMision(a.id);
+                this.audio.reproducir(r.ok ? "nivel" : "fallo");
+                this.acciones.guardar();
+                refrescar(h("p", { class: r.ok ? "resultado sube" : "baja" }, r.ok ? `Recompensa: ${r.valor.join(" · ")}` : String(r.error)));
+              },
+            }, "Entregar")
+            : h("button", { onclick: () => { p.misiones.abandonar(a.id); refrescar(); } }, "Abandonar")));
+    };
+    const disponibles = MISIONES.filter((m) => p.misiones.puedeAceptar(m.id, p.nivel()).ok).slice(0, 6);
+    this.abrir("taberna", this.botonCerrar(),
+      h("h2", {}, "Taberna «El Último Eco»"),
+      h("p", { class: "cita" }, "«Los que vuelven pagan la ronda. Los que no, la deben.» — Ilse"),
+      aviso ?? null,
+      h("div", { class: "vista" },
+        h("div", { class: "col" },
+          h("h3", {}, `Misiones activas (${activas.length}/${MAX_MISIONES_ACTIVAS})`),
+          activas.length === 0 ? h("p", { class: "sub" }, "Ninguna. Elige del tablón.") : null,
+          ...activas.map(filaActiva)),
+        h("div", { class: "col" },
+          h("h3", {}, "Tablón"),
+          disponibles.length === 0 ? h("p", { class: "sub" }, "No hay encargos nuevos por ahora.") : null,
+          ...disponibles.map((m) => h("div", { class: "mision" },
+            h("b", {}, INFO_MISIONES[m.id]?.titulo ?? `Misión ${m.id}`),
+            h("div", { class: "sub" }, INFO_MISIONES[m.id]?.descripcion ?? ""),
+            h("div", { class: "sub" }, `Recompensa: ${recompensa(m.id)}`),
+            h("button", {
+              disabled: activas.length >= MAX_MISIONES_ACTIVAS,
+              onclick: () => {
+                const r = p.misiones.aceptar(m.id, p.nivel());
+                this.audio.reproducir(r.ok ? "recoger" : "fallo");
+                refrescar();
+              },
+            }, "Aceptar"))),
+          h("button", { onclick: () => this.mostrarMemorial() }, "Memorial de los Ecos"))));
+  }
+
+  /** Bazar: compra (minialu/Catalogo + comprar) y venta (precioDeVenta) de consumibles, materiales, runas y cartas. */
+  abrirBazar(juego: ConPartida, pestana: "comprar" | "vender" = "comprar"): void {
+    const p = juego.partida;
+    const tabs = h("div", { class: "tabs" },
+      h("button", { class: pestana === "comprar" ? "tab on" : "tab", onclick: () => this.abrirBazar(juego, "comprar") }, "Comprar"),
+      h("button", { class: pestana === "vender" ? "tab on" : "tab", onclick: () => this.abrirBazar(juego, "vender") }, "Vender"));
+    let cuerpo: HTMLElement;
+    if (pestana === "comprar") {
+      cuerpo = h("div", {}, ...[...CONSUMIBLES, ...MATERIALES].map((c) => {
+        const precio = precioPueblo(c.id);
+        return h("div", { class: "articulo" },
+          h("span", { class: "con-icono", style: `color:${c.color}` }, lienzoIcono(iconoObjeto(c.id), 2), c.nombre),
+          h("span", { class: "sub" }, `${c.descripcion} · tienes ${p.mochila.contar(c.id)}`),
+          h("button", {
+            disabled: p.esquirlas < precio,
+            onclick: () => {
+              const r = comprarEnPueblo(p, c.id);
+              this.audio.reproducir(r.ok ? "recoger" : "fallo");
+              if (!r.ok) this.toast(textoError(r.error), "#ff9a4d");
+              this.abrirBazar(juego, "comprar");
+            },
+          }, `${precio} ◆`));
+      }));
+    } else {
+      const filas: HTMLElement[] = [];
+      for (const pos of p.mochila.posiciones()) {
+        const pila = p.mochila.en(pos);
+        if (pila === null) continue;
+        const eq = equipoDe(pila);
+        const def = apilable(pila.objeto);
+        const valor = valorVenta(p, pos);
+        filas.push(h("div", { class: "articulo" },
+          h("span", { style: `color:${eq !== undefined ? COLORES_RAREZA[eq.rareza] : def?.color ?? "#fff"}` }, `${eq?.nombre ?? def?.nombre ?? "?"}${pila.cantidad > 1 ? ` ×${pila.cantidad}` : ""}`),
+          h("span", { class: "sub" }, eq !== undefined ? `${NOMBRES_RAREZA[eq.rareza]} · ${NOMBRE_PIEZA[eq.ranura]}` : ""),
+          h("button", {
+            disabled: valor <= 0,
+            onclick: () => {
+              const r = vender(p, pos);
+              this.audio.reproducir(r.ok ? "recoger" : "fallo");
+              this.abrirBazar(juego, "vender");
+            },
+          }, `+${valor} ◆`)));
+      }
+      for (const pos of p.mazo.posiciones()) {
+        const pila = p.mazo.en(pos);
+        const c = pila !== null ? cartaDe(pila) : undefined;
+        if (c === undefined) continue;
+        filas.push(h("div", { class: "articulo" },
+          h("span", { style: `color:${alma(c.personaje).colorSec}` }, `${nombreCarta(c)} ${estrellas(c)}`),
+          h("span", { class: "sub" }, "Carta de Alma"),
+          h("button", {
+            onclick: () => {
+              venderCarta(p, pos);
+              this.audio.reproducir("recoger");
+              this.abrirBazar(juego, "vender");
+            },
+          }, `+${valorCarta(p, pos)} ◆`)));
+      }
+      cuerpo = filas.length > 0 ? h("div", {}, ...filas) : h("p", { class: "sub" }, "No llevas nada para vender.");
+    }
+    this.abrir("bazar", this.botonCerrar(),
+      h("h2", {}, "Bazar del Pozo"),
+      h("p", { class: "cita" }, "«Todo se compra, todo se vende. Hasta los recuerdos.» — Tobías"),
+      h("div", { class: "esencia" }, `◆ ${p.esquirlas} esquirlas`),
+      tabs, cuerpo);
+  }
+
+  /** Armería: stock de equipo al azar (cambia en cada vuelta del Pozo). */
+  abrirArmeria(juego: ConPartida, mensaje?: HTMLElement): void {
+    const p = juego.partida;
+    const stock = this.acciones.stockArmero();
+    this.abrir("armeria", this.botonCerrar(),
+      h("h2", {}, "Armería Hierro Viejo"),
+      h("p", { class: "cita" }, "«Cuanto más hondo bajes, mejor el acero que te traigo.» — Brunhild"),
+      h("div", { class: "esencia" }, `◆ ${p.esquirlas} esquirlas`),
+      mensaje ?? null,
+      tieneArma(p) ? null : h("div", { class: "kit-recluta" },
+        h("p", {}, h("b", {}, "Kit de recluta"), " — «¿Te dejó el Pozo con las manos vacías? Toma, que no se diga.»"),
+        h("div", { class: "botones" }, ...ORDEN_ESTILOS.map((id) => h("button", {
+          onclick: () => {
+            const r = kitRecluta(p, p.azar, id);
+            this.audio.reproducir(r.ok ? "raro" : "fallo");
+            this.acciones.guardar();
+            this.abrirArmeria(juego, r.ok ? h("p", { class: "resultado sube" }, `Recibiste: ${r.valor.nombre}`) : h("p", { class: "baja" }, textoError(r.error)));
+          },
+        }, `${ESTILOS[id].nombre} (gratis)`)))),
+      stock.length === 0 ? h("p", { class: "sub" }, "Agotado. Vuelve después de tu próximo descenso.") : null,
+      h("div", { class: "stock" }, ...stock.map((a, i) => h("div", { class: "detalle" },
+        fichaEquipo(a.equipo, p.equipo[p.ranuraPara(a.equipo)]),
+        h("button", {
+          class: "principal",
+          disabled: p.esquirlas < a.precio,
+          onclick: () => {
+            const r = comprarAlArmero(p, stock, i);
+            this.audio.reproducir(r.ok ? "raro" : "fallo");
+            this.acciones.guardar();
+            this.abrirArmeria(juego, r.ok ? h("p", { class: "resultado sube" }, `Compraste: ${r.valor.nombre}`) : h("p", { class: "baja" }, textoError(r.error)));
+          },
+        }, `Comprar · ${a.precio} ◆`)))),
+      h("p", { class: "sub" }, "Para vender equipo, ve al Bazar."));
+  }
+
+  /** Bóveda de los Caídos: banco (minialu/Inventario + transferir) y esquirlas a salvo. */
+  abrirBanco(juego: ConPartida): void {
+    const p = juego.partida;
+    const banco = this.acciones.banco();
+    const refrescar = (): void => this.abrirBanco(juego);
+    const grilla = grillaInventario;
+    const mover = (r: { ok: boolean; error?: string }): void => {
+      this.audio.reproducir(r.ok ? "recoger" : "fallo");
+      if (!r.ok) this.toast(textoError(String(r.error)), "#ff9a4d");
+      this.acciones.guardar();
+      refrescar();
+    };
+    const boton = (txt: string, f: () => { ok: boolean }): HTMLElement => h("button", { onclick: () => mover(f()) }, txt);
+    this.abrir("banco", this.botonCerrar(),
+      h("h2", {}, "Bóveda de los Caídos"),
+      h("p", { class: "cita" }, "«Lo que dejes aquí no lo reclama el Pozo.» — Custodio Vael"),
+      h("div", { class: "botones" },
+        h("span", { class: "esencia" }, `Llevas ◆ ${p.esquirlas}`),
+        boton("Depositar 100", () => banco.depositarEsquirlas(p, 100)),
+        boton("Depositar todo", () => banco.depositarEsquirlas(p, p.esquirlas)),
+        h("span", { class: "esencia" }, `En la bóveda ◆ ${banco.esquirlas}`),
+        boton("Retirar 100", () => banco.retirarEsquirlas(p, 100)),
+        boton("Retirar todo", () => banco.retirarEsquirlas(p, banco.esquirlas))),
+      h("div", { class: "vista" },
+        h("div", { class: "col" }, h("h3", {}, "Mochila (clic para guardar)"), grilla(p.mochila, (pos) => mover(banco.depositar(p, pos)))),
+        h("div", { class: "col" }, h("h3", {}, `Bóveda (clic para retirar)`), grilla(banco.inventario, (pos) => mover(banco.retirar(p, pos))))));
+  }
+
+  /** El Pozo: elegir desde qué piso bajar (hasta el más hondo con guardián vencido + 1). */
+  abrirPozo(juego: ConPartida): void {
+    const p = juego.partida;
+    const moverSeguro = (r: { ok: boolean; error?: string }): void => {
+      this.audio.reproducir(r.ok ? "recoger" : "fallo");
+      if (!r.ok) this.toast(textoError(String(r.error)), "#ff9a4d");
+      this.acciones.guardar();
+      this.abrirPozo(juego);
+    };
+    const pisos = Array.from({ length: p.pisoDesbloqueado }, (_, k) => k + 1);
+    this.abrir("pozo", this.botonCerrar(),
+      h("h2", {}, "El Pozo"),
+      h("p", { class: "sub" }, "Bajas con todo lo que llevas. Para volver con tu botín hay que EXTRAER: aguanta 5 s en una zona de "
+        + "extracción (verde en el mapa) o toma el portal del guardián. Si caes, pierdes TODO lo que llevas encima (equipo, mochila "
+        + "y esquirlas); tu Eco lo guarda en ese piso."),
+      h("p", { class: "baja" }, `En riesgo: ◆ ${p.valorEnRiesgo()}`),
+      tieneArma(p) ? null : h("p", { class: "baja" }, "No tienes arma: pide el kit de recluta en la Armería antes de bajar."),
+      h("h3", {}, "Contenedor seguro (no se pierde al morir)"),
+      h("div", { class: "vista" },
+        h("div", { class: "col" }, h("h3", {}, "Mochila (clic para asegurar)"), grillaInventario(p.mochila, (pos) => moverSeguro(p.guardarEnSeguro(pos)))),
+        h("div", { class: "col" }, h("h3", {}, `Seguro · ${TAM_SEGURO} casillas (clic para sacar)`), grillaInventario(p.seguro, (pos) => moverSeguro(p.sacarDeSeguro(pos))))),
+      h("div", { class: "pisos" }, ...pisos.map((n) => {
+        const b = bioma(n);
+        return h("button", { class: n === p.pisoDesbloqueado ? "principal" : "", style: `border-color:${b.acento}`, onclick: () => this.acciones.descender(n) },
+          h("b", { style: `color:${b.acento}` }, `Piso ${n}`), h("small", {}, b.nombre));
+      })),
+      p.pisoDesbloqueado < PISOS_TOTALES ? h("p", { class: "sub" }, "Vence al guardián de un piso para poder empezar desde el siguiente.") : null);
+  }
+
+  /** Faro de cada piso: descansar o volver al pueblo. */
+  abrirFaro(op: { puedeDescansar: boolean; descansar: () => void }): void {
+    this.abrir("faro",
+      h("h2", {}, "Faro de descenso"),
+      h("p", { class: "sub" }, "La luz del faro reconforta, pero no lleva a ninguna parte. Para volver al pueblo con tu botín, "
+        + "busca una zona de EXTRACCIÓN (verde en el mapa) o vence al guardián."),
+      h("div", { class: "menu" },
+        h("button", { class: "principal", disabled: !op.puedeDescansar, onclick: () => { this.cerrar(); op.descansar(); } }, op.puedeDescansar ? "Descansar (vida y éter)" : "Ya descansaste en este piso"),
+        h("button", { onclick: () => this.cerrar() }, "Seguir explorando")));
+  }
+
+  abrirPortal(op: { final: boolean; seguir: () => void; volver: () => void }): void {
+    this.abrir("faro",
+      h("h2", {}, op.final ? "El Corazón calla" : "Portal hacia abajo"),
+      h("p", { class: "sub" }, op.final ? "El camino a la superficie está abierto."
+        : "El guardián cayó. Extrae ahora y pon tu botín a salvo, o sigue bajando arriesgándolo todo: si caes, lo pierdes."),
+      h("div", { class: "menu" },
+        op.final ? null : h("button", { class: "principal", onclick: () => { this.cerrarForzado(); op.volver(); } }, "Extraer al pueblo"),
+        h("button", { class: op.final ? "principal" : "", onclick: () => { this.cerrar(); op.seguir(); } }, op.final ? "Ascender con el Corazón" : "Seguir bajando (arriesgar)"),
+        h("button", { onclick: () => this.cerrar() }, "Todavía no")));
+  }
+
   // =============================== Mapa y pausa ===============================
 
   abrirMapa(juego: Juego): void {
@@ -824,7 +1145,7 @@ export class Interfaz {
     dibujarMinimapa(g, juego.mapa, juego, 4, 4, 34);
     const leyenda: [string, string][] = [
       ["#ffe9a8", "Tú"], ["#ffffff", "Faro"], ["#ff3d3d", "Guardián"], ["#a07cff", "Altar"], ["#ffd23d", "Tesoro"],
-      ["#7fe3ff", "Reliquia"], ["#ffb23d", "Mercader"], ["#ff8aff", "Eco"],
+      ["#7fe3ff", "Reliquia"], ["#ffb23d", "Mercader"], ["#ff8aff", "Eco"], ["#7dffb0", "Extracción"],
     ];
     this.abrir("mapa", this.botonCerrar(),
       h("h2", {}, `Piso ${juego.partida.piso} · ${bioma(juego.partida.piso).nombre}`),
@@ -861,7 +1182,7 @@ export class Interfaz {
           this.abrirPausa();
         },
       }, `Gráficos: ${sprites.activado ? "sprites (Anokolisa · 0x72)" : "clásicos (procedurales)"}`),
-      h("button", { onclick: () => this.acciones.guardarYSalir() }, "Guardar y volver a la superficie"),
+      h("button", { onclick: () => this.acciones.guardarYSalir() }, "Guardar y volver al título"),
       botonAbandonar);
   }
 
@@ -879,6 +1200,14 @@ export class Interfaz {
   }
 
   mostrarMuerte(res: ResumenPartida, eco: Eco): void {
+    const b = eco.botin;
+    const perdido = b === undefined ? null : h("div", { class: "perdido" },
+      h("p", { class: "baja" }, "Lo que llevabas encima se quedó en el Pozo:"),
+      h("p", { class: "sub" },
+        `${b.equipo.length} piezas equipadas · ${b.pilas.length} pilas de la mochila · ${b.esquirlas} esquirlas`),
+      h("div", { class: "lista-perdida" }, ...b.equipo.slice(0, 12).map((o) =>
+        h("span", { style: `color:${COLORES_RAREZA[o.rareza]}` }, o.nombre))),
+      h("p", { class: "sub" }, "A salvo: el contenedor seguro, tus cartas, tu nivel, los talentos, las runas y el banco."));
     this.abrir("muerte",
       h("h1", { class: "caido" }, "HAS CAÍDO"),
       h("p", { class: "sub" }, `Ante ${eco.causa}, en el piso ${res.pisoAlcanzado}.`),
@@ -888,10 +1217,12 @@ export class Interfaz {
         h("p", {}, h("b", {}, eco.nombre), ` te esperará en el piso ${eco.piso}`,
           eco.legado !== null ? h("span", {}, ", guardando ", h("b", { style: `color:${COLORES_RAREZA[eco.legado.rareza]}` }, eco.legado.nombre)) : null,
           eco.forma !== null ? h("span", {}, " y tu forma de ", h("b", {}, alma(eco.forma.personaje).nombre)) : null, "."),
-        h("p", { class: "sub" }, "Véncelo para recuperar lo que llevabas.")),
+        h("p", { class: "sub" }, b !== undefined
+          ? "Véncelo y te devolverá TODO lo que perdiste. Si vuelves a caer en ese piso antes, el botín se pierde para siempre."
+          : "Véncelo y te devolverá una copia de su legado.")),
+      perdido,
       h("div", { class: "menu" },
-        h("button", { class: "principal", onclick: () => this.mostrarPreparacion() }, "Descender de nuevo"),
-        h("button", { onclick: () => this.acciones.aTitulo() }, "Volver a la superficie")));
+        h("button", { class: "principal", onclick: () => this.acciones.volverAlPueblo() }, "Volver al pueblo")));
   }
 
   mostrarVictoria(res: ResumenPartida): void {
@@ -901,8 +1232,7 @@ export class Interfaz {
       h("p", { class: "sub" }, "Pero el Pozo es antiguo… y los ecos siempre vuelven."),
       this.resumen(res),
       h("div", { class: "menu" },
-        h("button", { class: "principal", onclick: () => this.mostrarPreparacion() }, "Descender otra vez"),
-        h("button", { onclick: () => this.acciones.aTitulo() }, "Volver a la superficie")));
+        h("button", { class: "principal", onclick: () => this.acciones.volverAlPueblo() }, "Volver al pueblo")));
   }
 
   private resumen(r: ResumenPartida): HTMLElement {

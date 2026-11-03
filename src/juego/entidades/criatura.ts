@@ -39,6 +39,16 @@ export abstract class Criatura implements Cuerpo {
   quemadura = 0;
   private danioQuemadura = 0;
   private tickQuemadura = 0;
+  /** Cargas de frío (arma de Hielo): a las 4 se congela. */
+  frio = 0;
+  private tiempoFrio = 0;
+  /** Congelado (no se mueve; los jefes solo se ralentizan). */
+  congelado = 0;
+  /** Dosis de veneno (hasta 3) y su duración. */
+  veneno = 0;
+  private tiempoVeneno = 0;
+  private danioVeneno = 0;
+  private tickVeneno = 0;
   muerto = false;
   t = Math.random() * 10;
   /** Índice del spawn en la plantilla (para que no reaparezca en la misma bajada). */
@@ -82,6 +92,20 @@ export abstract class Criatura implements Cuerpo {
     this.t += dt;
     this.flash = Math.max(0, this.flash - dt);
     this.lento = Math.max(0, this.lento - dt);
+    this.congelado = Math.max(0, this.congelado - dt);
+    if (this.frio > 0 && (this.tiempoFrio -= dt) <= 0) this.frio = 0;
+    if (this.veneno > 0) {
+      this.tiempoVeneno -= dt;
+      this.tickVeneno -= dt;
+      if (this.tickVeneno <= 0) {
+        this.tickVeneno = 0.5;
+        const n = Math.max(1, Math.round(this.danioVeneno * this.veneno));
+        this.aplicarDanio(n, ctx);
+        ctx.fx.texto(this.cx, this.y - 2, `${n}`, "#9aff5a");
+        ctx.fx.chispas(this.cx, this.cy, "#9aff5a", 3, { velocidad: 30, gravedad: -60 });
+      }
+      if (this.tiempoVeneno <= 0) this.veneno = 0;
+    }
     if (this.quemadura > 0) {
       this.quemadura -= dt;
       this.tickQuemadura -= dt;
@@ -105,6 +129,27 @@ export abstract class Criatura implements Cuerpo {
 
   protected moverFisica(dt: number, ctx: Contexto, fantasma = false): Contacto {
     return mover(this, ctx.tiles, dt, { fantasma });
+  }
+
+  /** Arma de Hielo: ralentiza y acumula frío; a las 4 cargas congela (los jefes, solo más lentos). */
+  enfriar(): boolean {
+    this.lento = Math.max(this.lento, 2);
+    this.tiempoFrio = 2.5;
+    this.frio++;
+    if (this.frio < 4) return false;
+    this.frio = 0;
+    this.congelado = this.pesado ? 0 : 1.2;
+    if (!this.pesado) this.aturdido = Math.max(this.aturdido, 1.2);
+    else this.lento = Math.max(this.lento, 4);
+    return true;
+  }
+
+  /** Arma de Veneno: suma una dosis (hasta 3) y renueva la duración. */
+  envenenar(danioPorTick: number): void {
+    this.veneno = Math.min(3, this.veneno + 1);
+    this.tiempoVeneno = 4;
+    this.danioVeneno = Math.max(this.danioVeneno, danioPorTick);
+    if (this.tickVeneno <= 0) this.tickVeneno = 0.5;
   }
 
   quemar(danioPorTick: number): void {

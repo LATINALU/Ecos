@@ -8,11 +8,12 @@ import { crearEco, premiosEco, type Eco } from "../dominio/eco.ts";
 import type { Meta } from "../dominio/meta.ts";
 import { aperturas, generarPiso, type MapaPiso, type SalaMapa } from "../dominio/mundo/generador.ts";
 import {
-  ALTO_SALA, ANCHO_SALA, COLS, ENEMIGOS_SPAWN, FILAS, FILAS_PUERTA, T_CRISTAL, T_RAICES, T_ROCA, T_VACIO, TILE,
-  construirSala, indice,
+  ALTO_SALA, ANCHO_SALA, COLS, ENEMIGOS_SPAWN, FILAS, FILAS_PUERTA, T_CRISTAL, T_PINCHOS, T_RAICES, T_ROCA, T_VACIO, TILE,
+  construirSala, esSolido, indice,
 } from "../dominio/mundo/sala.ts";
-import { Partida, type DatosPartida, type OpcionesInicio, type ResumenPartida } from "../dominio/partida.ts";
+import { Partida, type DatosPartida, type ResumenPartida } from "../dominio/partida.ts";
 import { calcularGolpe } from "../dominio/stats.ts";
+import { ELEMENTOS, afinidadPiso, multiplicadorElemental } from "../contenido/elementos.ts";
 import { INFO_RELIQUIA, OPUESTA, RANURAS, type Dir, type Reliquia } from "../dominio/tipos.ts";
 import type { Audio } from "../motor/audio.ts";
 import type { Entrada } from "../motor/entrada.ts";
@@ -38,6 +39,12 @@ export interface EventosJuego {
   mensaje(texto: string, color: string): void;
   abrirAltar(): void;
   abrirYunque(): void;
+  /** Faro: descansar (una vez por piso). Ya no lleva al pueblo: para salir hay que extraer. */
+  abrirFaro(op: { puedeDescansar: boolean; descansar: () => void }): void;
+  /** Portal del guardián: seguir bajando (arriesgando lo que llevas) o extraer al pueblo. */
+  abrirPortal(op: { final: boolean; seguir: () => void; volver: () => void }): void;
+  /** Termina el descenso y vuelve al pueblo (el personaje conserva todo). */
+  volverAlPueblo(motivo: "extraccion" | "portal"): void;
   guardarDescenso(d: DatosDescenso): void;
   borrarDescenso(): void;
   abrirMercader(): void;
@@ -73,7 +80,12 @@ export interface DatosDescenso {
   readonly y: number;
 }
 
-export type InicioJuego = { readonly tipo: "nueva"; readonly opciones: OpcionesInicio } | { readonly tipo: "continuar"; readonly datos: DatosDescenso };
+export type InicioJuego =
+  | { readonly tipo: "descenso"; readonly partida: Partida; readonly piso: number }
+  | { readonly tipo: "continuar"; readonly datos: DatosDescenso };
+
+/** Segundos que hay que aguantar dentro de la zona de extracción. */
+export const SEGUNDOS_EXTRACCION = 5;
 
 class SalaActiva implements Tiles {
   readonly tiles: Uint8Array;
@@ -146,8 +158,11 @@ export class Juego implements Contexto {
   private causa = "el Pozo";
   terminado = false;
   tiempo = 0;
+  /** Zona de extracción de la sala actual (si tiene) y segundos acumulados dentro. */
+  zonaExtraccion: Rect | null = null;
+  cargaExtraccion = 0;
 
-  constructor(meta: Meta, audio: Audio, entrada: Entrada, eventos: EventosJuego, inicio: InicioJuego = { tipo: "nueva", opciones: {} }) {
+  constructor(meta: Meta, audio: Audio, entrada: Entrada, eventos: EventosJuego, inicio: InicioJuego) {
     this.meta = meta;
     this.audio = audio;
     this.entrada = entrada;
@@ -168,7 +183,8 @@ export class Juego implements Contexto {
       return;
     }
     meta.registro.partidas++;
-    this.partida = new Partida(meta, (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, inicio.opciones);
+    this.partida = inicio.partida;
+    this.partida.prepararDescenso(inicio.piso);
     this.nuevoPiso();
   }
 
@@ -243,7 +259,8 @@ export class Juego implements Contexto {
       if (j.intentarEsquivaPerfecta()) this.esquivaPerfecta();
       return;
     }
-    if (this.partida.pasiva() === "humo" && this.azarCombate.siguiente() < 0.2) {
+    const esquiva = (this.partida.pasiva() === "humo" ? 0.2 : 0) + this.partida.combate().esquiva;
+    if (esquiva > 0 && this.azarCombate.siguiente() < esquiva) {
       j.invuln = 0.35;
       this.fx.texto(j.cx, j.y - 4, "Esquiva", "#b48cff");
       this.fx.chispas(j.cx, j.cy, "#7d6bff", 10, { velocidad: 60, gravedad: 0 });
@@ -253,6 +270,10 @@ export class Juego implements Contexto {
     const golpe = calcularGolpe(this.azarCombate, ataque, 1, s.defensa, 0);
     const danio = Math.max(1, Math.round(golpe.danio * this.partida.multiplicadorRecibido()));
     const r = this.partida.recibirDanio(danio);
+    if (this.cargaExtraccion > 0) {
+      this.cargaExtraccion = 0;
+      this.mensaje("¡Extracción interrumpida!", "#ff6a6a");
+    }
     if (this.combo.golpes >= 5) this.fx.texto(j.cx, j.y - 14, "Combo roto", "#8a84a0");
     this.combo.recibirDanio();
     // Espinas: devuelve parte del daño al enemigo más cercano al golpe.
@@ -318,6 +339,7 @@ export class Juego implements Contexto {
       this.fx.texto(c.cx, c.y - 10, "¡Guardia rota!", "#ffe27a");
     }
     if (a.quema === true) c.quemar(a.potencia * 0.15);
+    this.aplicarElemento(c, g.danio, a);
     if (a.ralentiza === true) c.lento = 2.5;
     if (a.curaPct !== undefined) this.partida.curar(Math.max(1, Math.round(s.hp * a.curaPct)));
     if (a.eter !== undefined) this.partida.recuperarEter(a.eter + mods.eterGolpe + this.combo.bonoEter);
@@ -354,6 +376,82 @@ export class Juego implements Contexto {
     this.fx.congelar(g.critico ? 0.07 : 0.035);
     this.fx.sacudir(g.critico ? 3 : 1.2);
     return true;
+  }
+
+  /** Daño y efecto del elemento del arma: Fuego quema, Hielo congela, Veneno se acumula, Rayo salta. */
+  private aplicarElemento(c: Criatura, danio: number, a: AtaqueJugador): void {
+    const el = this.partida.elementoArma();
+    if (el === null || c.muerto && el.elemento !== "rayo") return;
+    const [resiste, debil] = afinidadPiso(this.partida.piso);
+    const mult = multiplicadorElemental(el.elemento, resiste, debil);
+    const def = ELEMENTOS[el.elemento];
+    // Las técnicas aplican el elemento a medias.
+    const extra = Math.max(1, Math.round(danio * el.potencia * mult * (a.tipo === "tecnica" ? 0.5 : 1)));
+    c.aplicarDanio(extra, this);
+    this.fx.texto(c.cx + 6, c.y - 10, `${extra}`, def.color);
+    if (mult > 1 && this.azarCombate.siguiente() < 0.15) this.fx.texto(c.cx, c.y - 18, "¡Débil!", def.brillo);
+    this.fx.chispas(c.cx, c.cy, def.color, 6, { velocidad: 80, brillo: true, gravedad: el.elemento === "fuego" ? -90 : 40 });
+    switch (el.elemento) {
+      case "fuego":
+        c.quemar(danio * 0.12 * mult);
+        break;
+      case "hielo":
+        if (c.enfriar()) {
+          this.fx.texto(c.cx, c.y - 16, c.pesado ? "Entumecido" : "¡Congelado!", def.color);
+          this.fx.chispas(c.cx, c.cy, "#ffffff", 16, { velocidad: 110, brillo: true });
+          this.audio.reproducir("romper");
+        }
+        break;
+      case "veneno":
+        c.envenenar(danio * 0.08 * mult);
+        break;
+      case "rayo":
+        if (this.azarCombate.siguiente() < 0.3) this.encadenarRayo(c, Math.round(danio * 0.5 * mult));
+        break;
+    }
+  }
+
+  /** Rayo: salta a los 2 enemigos más cercanos (radio 80) y los aturde un instante. */
+  private encadenarRayo(origen: Criatura, danio: number): void {
+    const cerca = this.criaturas
+      .filter((o) => o !== origen && !o.muerto && !(o instanceof Vela) && Math.hypot(o.cx - origen.cx, o.cy - origen.cy) < 80)
+      .sort((p, q) => Math.hypot(p.cx - origen.cx, p.cy - origen.cy) - Math.hypot(q.cx - origen.cx, q.cy - origen.cy))
+      .slice(0, 2);
+    let desde = origen;
+    for (const o of cerca) {
+      for (let k = 1; k < 6; k++) {
+        const f = k / 6;
+        this.fx.chispas(desde.cx + (o.cx - desde.cx) * f, desde.cy + (o.cy - desde.cy) * f, ELEMENTOS.rayo.color, 1, { velocidad: 20, vida: 0.18, gravedad: 0, brillo: true });
+      }
+      o.aplicarDanio(Math.max(1, danio), this);
+      this.fx.texto(o.cx, o.y - 4, `${Math.max(1, danio)}`, ELEMENTOS.rayo.color);
+      if (!o.pesado) o.aturdido = Math.max(o.aturdido, 0.5);
+      desde = o;
+    }
+  }
+
+  /** Marcas de estado elemental sobre la criatura (hielo, veneno). */
+  private dibujarEstado(g: CanvasRenderingContext2D, c: Criatura): void {
+    if (c.muerto) return;
+    if (c.congelado > 0) {
+      g.save();
+      g.globalAlpha = 0.45;
+      g.fillStyle = ELEMENTOS.hielo.color;
+      g.fillRect(Math.round(c.x) - 1, Math.round(c.y) - 1, c.w + 2, c.h + 2);
+      g.globalAlpha = 0.9;
+      g.strokeStyle = "#ffffff";
+      g.strokeRect(Math.round(c.x) - 0.5, Math.round(c.y) - 0.5, c.w + 1, c.h + 1);
+      g.restore();
+    }
+    const marcas: string[] = [];
+    for (let i = 0; i < c.frio; i++) marcas.push(ELEMENTOS.hielo.color);
+    for (let i = 0; i < c.veneno; i++) marcas.push(ELEMENTOS.veneno.color);
+    if (c.quemadura > 0) marcas.push(ELEMENTOS.fuego.color);
+    const x0 = Math.round(c.cx - marcas.length * 2);
+    marcas.forEach((col, i) => {
+      g.fillStyle = col;
+      g.fillRect(x0 + i * 4, Math.round(c.y) - 6, 3, 3);
+    });
   }
 
   golpearArea(r: Rect, a: AtaqueJugador, dirX: number, ya: Set<Criatura>): number {
@@ -490,9 +588,7 @@ export class Juego implements Contexto {
           this.interactuables.push(new Interactuable("altar", x, y));
           break;
         case "faro": {
-          const f = new Interactuable("faro", x, y);
-          f.usado = estado.faroUsado;
-          this.interactuables.push(f);
+          this.interactuables.push(new Interactuable("faro", x, y));
           break;
         }
         case "yunque":
@@ -532,6 +628,9 @@ export class Juego implements Contexto {
       }
     });
 
+    this.zonaExtraccion = (this.mapa.extracciones ?? []).includes(id) ? this.ubicarExtraccion() : null;
+    this.cargaExtraccion = 0;
+
     this.cadena = ap.arr !== undefined || ap.aba !== undefined
       ? { x: ANCHO_SALA / 2, arriba: ap.arr !== undefined ? -60 : 14 * TILE, abajo: ap.aba !== undefined ? ALTO_SALA + 60 : 14 * TILE }
       : null;
@@ -546,6 +645,82 @@ export class Juego implements Contexto {
   }
 
   /** Velas rompibles (Castlevania): sobre el piso o las plataformas, deterministas por sala. */
+  /** Busca un tramo de suelo firme de 3 baldosas (sin pinchos ni pozo), lo más cerca posible del centro. */
+  private ubicarExtraccion(): Rect {
+    const t = this.sala.tiles;
+    const en = (tx: number, ty: number): number => (tx < 0 || ty < 0 || tx >= COLS || ty >= FILAS ? T_ROCA : t[indice(tx, ty)]);
+    const libre = (tx: number, ty: number): boolean => !esSolido(en(tx, ty)) && en(tx, ty) !== T_PINCHOS;
+    let mejor: { tx: number; ty: number; d: number } | null = null;
+    for (let ty = 3; ty < FILAS - 1; ty++) {
+      for (let tx = 3; tx < COLS - 5; tx++) {
+        let ok = true;
+        for (let k = 0; k < 3 && ok; k++) {
+          ok = en(tx + k, ty + 1) === T_ROCA && libre(tx + k, ty) && libre(tx + k, ty - 1) && libre(tx + k, ty - 2);
+        }
+        if (!ok) continue;
+        // Preferir el suelo bajo (fila 13) y el centro.
+        const d = Math.abs(tx + 1.5 - COLS / 2) + Math.abs(ty - 13) * 1.5;
+        if (mejor === null || d < mejor.d) mejor = { tx, ty, d };
+      }
+    }
+    const tx = mejor?.tx ?? 4;
+    const ty = mejor?.ty ?? 13;
+    return { x: tx * TILE, y: (ty - 2) * TILE, w: 3 * TILE, h: 3 * TILE };
+  }
+
+  /** Extracción: quedarse 5 s dentro de la zona. Recibir daño reinicia la cuenta. */
+  private actualizarExtraccion(dt: number): void {
+    const z = this.zonaExtraccion;
+    if (z === null || this.terminado) return;
+    const dentro = !this.jugador.muerto && solapan(this.jugador, z);
+    if (dentro) {
+      if (this.cargaExtraccion === 0) this.mensaje("Extrayendo… no recibas daño", "#7dffb0");
+      this.cargaExtraccion += dt;
+      if (Math.random() < dt * 20) {
+        this.fx.chispas(z.x + Math.random() * z.w, z.y + z.h, "#7dffb0", 1, { velocidad: 40, gravedad: -120, vida: 0.6, brillo: true });
+      }
+      if (this.cargaExtraccion >= SEGUNDOS_EXTRACCION) {
+        this.fx.destellar("#7dffb0", 0.9);
+        this.audio.reproducir("reliquia");
+        this.salirAlPueblo("extraccion");
+      }
+    } else if (this.cargaExtraccion > 0) {
+      this.cargaExtraccion = Math.max(0, this.cargaExtraccion - dt * 2);
+    }
+  }
+
+  private dibujarExtraccion(g: CanvasRenderingContext2D): void {
+    const z = this.zonaExtraccion;
+    if (z === null) return;
+    const pulso = 0.5 + Math.sin(this.tiempo * 3) * 0.2;
+    const prog = Math.min(1, this.cargaExtraccion / SEGUNDOS_EXTRACCION);
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    const grad = g.createLinearGradient(0, z.y - 40, 0, z.y + z.h);
+    grad.addColorStop(0, "rgba(125,255,176,0)");
+    grad.addColorStop(1, `rgba(125,255,176,${0.25 + pulso * 0.2 + prog * 0.3})`);
+    g.fillStyle = grad;
+    g.fillRect(z.x, z.y - 40, z.w, z.h + 40);
+    g.fillStyle = "#7dffb0";
+    g.fillRect(z.x, z.y + z.h - 2, z.w, 2);
+    g.fillRect(z.x, z.y + z.h - 6, 1, 6);
+    g.fillRect(z.x + z.w - 1, z.y + z.h - 6, 1, 6);
+    g.restore();
+    g.font = "bold 8px monospace";
+    g.textAlign = "center";
+    g.fillStyle = "#000000";
+    g.fillText("EXTRACCIÓN", z.x + z.w / 2 + 1, z.y - 7);
+    g.fillStyle = "#7dffb0";
+    g.fillText("EXTRACCIÓN", z.x + z.w / 2, z.y - 8);
+    if (prog > 0) {
+      g.fillStyle = "#000000aa";
+      g.fillRect(z.x, z.y - 4, z.w, 3);
+      g.fillStyle = "#7dffb0";
+      g.fillRect(z.x, z.y - 4, Math.round(z.w * prog), 3);
+    }
+    g.textAlign = "left";
+  }
+
   private colocarVelas(sm: SalaMapa, estado: EstadoSala): void {
     if (sm.tipo === "jefe" || sm.tipo === "eco") return;
     const azar = new AzarSemilla(sm.semilla ^ 0x5eed);
@@ -756,6 +931,7 @@ export class Juego implements Contexto {
     this.peligros = this.peligros.filter((z) => z.aviso > 0 || z.activo > 0);
 
     this.actualizarBotin(dt);
+    this.actualizarExtraccion(dt);
     // Regeneración: cada 5 s cura lo que diga el stat.
     this.relojRegen += dt;
     if (this.relojRegen >= 5) {
@@ -920,6 +1096,7 @@ export class Juego implements Contexto {
       case "cofre": {
         obj.usado = true;
         estado.cofreAbierto = true;
+        this.avisarMision(this.partida.registrarMision("cofre"));
         this.audio.reproducir("cofre");
         this.fx.chispas(obj.cx, obj.y, "#ffd23d", 30, { velocidad: 120, brillo: true });
         this.soltar(botinCofre(this.partida.azar, this.partida.piso, this.partida.modificadoresBotin()), obj.cx, obj.y);
@@ -934,21 +1111,18 @@ export class Juego implements Contexto {
       case "mercader":
         this.eventos.abrirMercader();
         break;
-      case "faro": {
-        const s = this.partida.stats();
-        if (this.partida.hp >= s.hp && this.partida.mp >= s.mp) {
-          this.mensaje("El faro arde en calma. Desde el mapa (M) puedes volver aquí.", "#ffe9a8");
-          break;
-        }
-        this.partida.hp = s.hp;
-        this.partida.mp = s.mp;
-        obj.usado = true;
-        estado.faroUsado = true;
-        this.audio.reproducir("pocion");
-        this.fx.chispas(obj.cx, obj.y + 4, "#ffe9a8", 30, { velocidad: 80, gravedad: -60, brillo: true });
-        this.mensaje("Descansas junto al faro: vida y éter restaurados (una vez por piso)", "#ffe9a8");
+      case "faro":
+        this.eventos.abrirFaro({
+          puedeDescansar: !estado.faroUsado,
+          descansar: () => {
+            this.partida.curarTodo();
+            estado.faroUsado = true;
+            this.audio.reproducir("pocion");
+            this.fx.chispas(obj.cx, obj.y + 4, "#ffe9a8", 30, { velocidad: 80, gravedad: -60, brillo: true });
+            this.mensaje("Descansas junto al faro: vida y éter restaurados (una vez por piso)", "#ffe9a8");
+          },
+        });
         break;
-      }
       case "reliquia":
         if (obj.reliquia === undefined) break;
         obj.usado = true;
@@ -963,9 +1137,23 @@ export class Juego implements Contexto {
         this.guardarProgreso();
         break;
       case "portal":
-        this.descender();
+        this.eventos.abrirPortal({
+          final: this.partida.piso >= PISOS_TOTALES,
+          seguir: () => this.descender(),
+          volver: () => this.salirAlPueblo("portal"),
+        });
         break;
     }
+  }
+
+  /** Vuelve al pueblo conservando todo (el descenso guardado se descarta). */
+  salirAlPueblo(motivo: "extraccion" | "portal"): void {
+    if (this.terminado) return;
+    this.terminado = true;
+    this.meta.registro.mejorPiso = Math.max(this.meta.registro.mejorPiso, this.partida.piso);
+    this.audio.silenciarAmbiente();
+    this.eventos.borrarDescenso();
+    this.eventos.volverAlPueblo(motivo);
   }
 
   private descender(): void {
@@ -988,6 +1176,7 @@ export class Juego implements Contexto {
     const estado = this.estadoDe(this.sala.mapa.id);
     if (c instanceof Vela) {
       estado.velasRotas.add(c.indice);
+      this.avisarMision(this.partida.registrarMision("vela"));
       this.soltar(botinVela(this.partida.azar, this.partida.piso), c.cx, c.y + 4);
       return;
     }
@@ -1006,6 +1195,7 @@ export class Juego implements Contexto {
     this.meta.registro.enemigos++;
 
     if (c instanceof EcoRival) {
+      this.avisarMision(this.partida.registrarMision("eco"));
       estado.jefeVencido = true;
       this.partida.ecosVencidos++;
       this.meta.vencerEco(c.eco.uid);
@@ -1019,6 +1209,10 @@ export class Juego implements Contexto {
       return;
     }
     if (c.categoria === "jefe") {
+      this.avisarMision(this.partida.registrarMision("jefe", this.partida.piso));
+      if (this.partida.desbloquearPiso(this.partida.piso, PISOS_TOTALES)) {
+        this.mensaje(`Desde el pueblo ya puedes empezar a bajar en el piso ${this.partida.pisoDesbloqueado}`, "#ffe27a");
+      }
       estado.jefeVencido = true;
       this.partida.jefes++;
       this.meta.registro.jefes++;
@@ -1037,11 +1231,20 @@ export class Juego implements Contexto {
       this.guardarProgreso();
       return;
     }
+    this.avisarMision(this.partida.registrarMision("matar"));
+    if (c.categoria === "elite") this.avisarMision(this.partida.registrarMision("elite"));
     if (this.partida.registrarMuerteEnemigo()) {
       this.fx.texto(this.jugador.cx, this.jugador.y - 10, "Corazón del Pozo", "#ff4d6d");
     }
     if (c.idSpawn >= 0) {
       this.soltar(botinEnemigo(this.partida.azar, this.partida.piso, c.categoria, this.partida.modificadoresBotin()), c.cx, c.cy);
+    }
+  }
+
+  private avisarMision(completa: boolean): void {
+    if (completa) {
+      this.mensaje("¡Misión completa! Entrégala en el tablón de la taberna", "#ffe27a");
+      this.audio.reproducir("nivel");
     }
   }
 
@@ -1055,14 +1258,19 @@ export class Juego implements Contexto {
     this.jugador.muerto = true;
     this.fx.destellar("#000000", 1);
     this.fx.chispas(this.jugador.cx, this.jugador.cy, "#ffffff", 60, { velocidad: 150, gravedad: -20, vida: 1.2, brillo: true });
+    // Extracción fallida: lo que llevabas encima se queda en el Pozo, con tu Eco.
+    const stats = this.partida.stats();
+    const equipo = RANURAS.map((r) => this.partida.equipo[r]);
+    const botin = this.partida.perderTodo();
     const eco = crearEco({
       piso: this.partida.piso,
       forma: this.partida.forma,
       nivel: this.partida.nivel(),
-      stats: this.partida.stats(),
-      equipo: RANURAS.map((r) => this.partida.equipo[r]),
+      stats,
+      equipo,
       causa,
       numero: this.meta.registro.muertes + 1,
+      botin,
     }, this.partida.azar, Date.now());
     this.meta.registrarMuerte(eco);
     this.cerrarRegistro(false);
@@ -1123,9 +1331,13 @@ export class Juego implements Contexto {
       g.globalAlpha = 1;
     }
 
+    this.dibujarExtraccion(g);
     for (const i of this.interactuables) i.dibujar(g, b.acento);
     for (const bo of this.botines) bo.dibujar(g);
-    for (const c of this.criaturas) c.dibujar(g);
+    for (const c of this.criaturas) {
+      c.dibujar(g);
+      this.dibujarEstado(g, c);
+    }
     if (!j.muerto) j.dibujar(g, this);
     if (!j.muerto && j.carga > 0.12) {
       const f = Math.min(1, j.carga / CARGA_COMPLETA);

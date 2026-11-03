@@ -78,5 +78,6 @@ export function refinarEquipado(p: Partida, ranura: Ranura): Resultado<ObjetoEqu
   if (!tirar(p.azar, EXITO_REFINADO[nivel] ?? 0)) return fallo("fallo-refinado");
   const nuevo = refinar(o);
   p.equipo[ranura] = nuevo;
+  p.registrarMision("refinar");
   return exito(nuevo);
 }

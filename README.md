@@ -41,6 +41,44 @@ Requiere la carpeta hermana `Desktop\minialu` (alias `minialu` en `vite.config.t
 | Santuario | Mejoras permanentes pagadas con esencia | `Billetera` |
 | Ecos | Al morir: Eco con tu legado; uno por piso, máximo 3 | — |
 
+## Partidas y pueblo
+
+- **3 ranuras de partida**. Cada una tiene su personaje persistente (nivel, equipo, mochila, cartas, talentos,
+  misiones), su banco y su mundo (reliquias, esencia, ecos). El guardado viejo se migra solo a la ranura 1.
+- **Último Refugio**, el pueblo sobre el Pozo: una calle de dos pantallas que se recorre con el Portador.
+  | Edificio | Comerciante | Qué hace |
+  |---|---|---|
+  | Taberna «El Último Eco» | Ilse | Tablón de misiones (cadena de 15 + encargos repetibles) y memorial |
+  | Bazar del Pozo | Tobías | Comprar consumibles y materiales; vender objetos, runas y cartas |
+  | Armería Hierro Viejo | Brunhild | 6 piezas al azar que cambian en cada vuelta; kit de recluta gratis si no tienes arma |
+  | Bóveda de los Caídos | Custodio Vael | Banco: 60 casillas y esquirlas a salvo de la muerte |
+  | Altar de las Almas | Hermana Ceniza | Fusión y mejora de cartas |
+  | Fragua del Pueblo | Dorn | Yunque: recetas y refinado |
+  | Santuario | El Ermitaño | Mejoras permanentes con esencia |
+  | El Pozo | — | Bajar desde cualquier piso con guardián vencido; contenedor seguro de 4 casillas |
+- **Extracción (estilo Tarkov)**: no se vuelve gratis. Cada piso tiene 1~2 **zonas de extracción** (rombo verde en
+  el mapa, conocidas desde el principio): hay que aguantar **5 s** dentro y cualquier golpe reinicia la cuenta. El
+  portal del guardián también ofrece «Extraer» o «Seguir bajando (arriesgar)». El Faro solo deja descansar.
+- **Morir = perderlo todo lo que llevas encima**: equipo equipado, mochila, subarma y esquirlas. Se salvan el
+  **contenedor seguro** (4 casillas), las cartas, el nivel, los talentos, las runas y el banco. Tu **Eco** se queda
+  en ese piso con todo el botín: vencerlo te lo devuelve entero; si vuelves a caer en ese piso antes, el Eco nuevo
+  reemplaza al viejo y aquel botín se pierde. El HUD muestra el valor **en riesgo**.
+- **Equipo completo (12 ranuras)**: arma · casco · hombros · pecho · cinturón · pantalones · botas (las 6 de
+  **set**) · **capa** · 2 anillos · aretes · collar (accesorios de **stats únicos**: siempre traen un rasgo propio).
+  | Accesorio | Rasgos únicos |
+  |---|---|
+  | Capa | Esquiva (hasta 30 %), reducción de daño recibido |
+  | Anillos | Robo de vida, daño elemental |
+  | Aretes | Éter por golpe, éter máximo, daño de técnica |
+  | Collar | Robo de vida, éter máximo, reducción de daño recibido |
+- **Armas elementales**: cualquier estilo (espada, mazo, arco, báculo, puños) puede salir de **Fuego** (quema),
+  **Hielo** (ralentiza; 4 golpes congelan), **Veneno** (dosis acumulables) o **Rayo** (salta a 2 enemigos y aturde).
+  Cuanto más rara el arma, más probable y más fuerte el elemento. Cada zona **resiste** uno (×0,5) y es **débil** a
+  otro (×1,5). El arma, su estela y las flechas toman el color del elemento.
+- De minialu: banco (`Inventario` + `transferir`), bazar (`Catalogo` + `comprar`, `precioDeVenta`), misiones
+  (`RegistroMisiones`), billeteras, fusión y mejora de cartas.
+- Desarrollo: `?pueblo=espada&panel=banco` abre un servicio; `?partidas` la pantalla de ranuras (ranura de pruebas oculta).
+
 ## Combate
 
 - **Medidor de estilo** (D → C → B → A → S → SS → SSS "¡Frenético!"): sube pegando seguido y *variado*
@@ -79,15 +117,17 @@ repertorio de 12 patrones anunciados, con segunda fase al 50 %. Agregar un jefe 
 
 - **Runas** (2 ranuras, pasivas equipables): Brasa, Vampiro, Viento, Acero, Avaro, Calma, Eco, Furia, Coleccionista,
   Escarcha. Caen de élites, cofres y siempre de los guardianes.
-- **Conjuntos** (5 sets de 3 piezas con bonos a 2 y 3 piezas): Vigía del Osario, Escarcha Eterna, Marea Abisal,
-  Engranaje Olvidado, Manto Astral. Cada guardián suelta una pieza del conjunto de su zona.
+- **Conjuntos de armadura** (5 sets; solo casco, hombros, pecho, cinturón, pantalones y botas) con bonos a 2, 4 y
+  **6 piezas** (set completo: bono de daño): Vigía del Osario, Escarcha Eterna, Marea Abisal, Engranaje Olvidado,
+  Manto Astral. Cada guardián suelta una pieza del conjunto de su zona.
 - **Refinado hasta +10**: del +6 en adelante puede fallar (75 % → 22 %); se pierden los materiales, nunca la pieza.
 - **Armas nuevas** con rasgos propios: Estoque (rápido), Hoja Bastarda (alcance), Lucero del Alba (crítico),
   Arco Largo (alcance), Garras de Hierro, Cetro del Abismo; Armadura de Placas y Talismán.
 - **Stats nuevos**: Suerte (mejor botín) y Regeneración (vida cada 5 s).
 - **16 talentos**: se suma la Senda del Arsenal (Carcaj Lleno, Corazón Valiente, Armas Gemelas, Lluvia de Acero)
   y un grado 4 en cada senda (Ejecutor, Paso Fantasma, Eco Resonante).
-- Desarrollo: `?auto=espada&piso=7&jefe` lleva directo al guardián de una zona.
+- Desarrollo: `?auto=espada&piso=7&jefe` lleva directo al guardián de una zona; `?auto=arco&piso=3&extraccion&dentro`
+  a una sala de extracción, parado en la zona.
 
 ## Progresión del Portador
 

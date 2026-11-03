@@ -36,7 +36,7 @@ describe("equipo con calidad y rasgos", () => {
       expect(rasgos.length).toBeGreaterThanOrEqual(2);
       for (const [id, v] of rasgos) {
         const def = RASGOS_EQUIPO.find((r) => r.id === id)!;
-        if (def.soloArma) expect(e.ranura).toBe("arma");
+        if (def.en !== undefined) expect(def.en).toContain(e.ranura);
         // Las bases con rasgo propio (Estoque, Armadura de Placas...) lo suman: no aplica el rango del azar.
         if (BASES.find((b) => b.id === e.base)?.rasgos?.[id as keyof NonNullable<(typeof BASES)[number]["rasgos"]>] !== undefined) continue;
         expect(v).toBeGreaterThanOrEqual(def.min);

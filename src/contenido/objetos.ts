@@ -1,6 +1,6 @@
 // Catálogo de objetos. Un único lugar de verdad (lección de la tienda de MiniFighter): ids, pilas, precios.
 
-import type { EfectoUnico, Ranura } from "../dominio/tipos.ts";
+import type { EfectoUnico, TipoPieza } from "../dominio/tipos.ts";
 import type { Stat } from "../dominio/stats.ts";
 
 // ---------------- Consumibles ----------------
@@ -59,7 +59,7 @@ export const OBJ_CARTA = 500;
 export interface DefBase {
   readonly id: number;
   readonly nombre: string;
-  readonly ranura: Ranura;
+  readonly ranura: TipoPieza;
   readonly estilo?: EstiloArma;
   /** Rasgos que trae siempre esta base (además de los que salgan al azar). */
   readonly rasgos?: Readonly<Partial<Record<IdRasgoEquipo, number>>>;
@@ -68,6 +68,7 @@ export interface DefBase {
 }
 
 export const BASES: readonly DefBase[] = [
+  // ---- Armas (ids 100-109, 114-116)
   { id: 100, nombre: "Espada Mellada", ranura: "arma", estilo: "espada", porNivel: { golpe: 3.2 } },
   { id: 101, nombre: "Guanteletes", ranura: "arma", estilo: "punos", porNivel: { golpe: 1.8, patada: 2.2 } },
   { id: 102, nombre: "Bastón de Hueso", ranura: "arma", estilo: "baston", porNivel: { tecnica: 3.4, mp: 1.5 } },
@@ -78,17 +79,47 @@ export const BASES: readonly DefBase[] = [
   { id: 107, nombre: "Estoque", ranura: "arma", estilo: "espada", porNivel: { golpe: 2.6, critico: 0.8 }, rasgos: { velocidad: 0.15 } },
   { id: 108, nombre: "Hoja Bastarda", ranura: "arma", estilo: "espada", porNivel: { golpe: 3.5 }, rasgos: { alcance: 0.25 } },
   { id: 109, nombre: "Lucero del Alba", ranura: "arma", estilo: "pesada", porNivel: { golpe: 4.2, critico: 0.3 }, rasgos: { critDanio: 0.3 } },
-  { id: 110, nombre: "Arco Largo", ranura: "arma", estilo: "arco", porNivel: { golpe: 3 }, rasgos: { alcance: 0.35 } },
-  { id: 111, nombre: "Garras de Hierro", ranura: "arma", estilo: "punos", porNivel: { golpe: 2.2, patada: 1.8, critico: 0.6 }, rasgos: { critDanio: 0.25 } },
-  { id: 112, nombre: "Cetro del Abismo", ranura: "arma", estilo: "baston", porNivel: { tecnica: 3.6, suerte: 0.4 }, rasgos: { eterGolpe: 2 } },
-  { id: 113, nombre: "Armadura de Placas", ranura: "armadura", porNivel: { hp: 11, defensa: 2.2 }, rasgos: { agilidad: -0.05 } },
-  { id: 123, nombre: "Talismán", ranura: "amuleto", porNivel: { suerte: 1.2, regen: 0.2 } },
-  { id: 110, nombre: "Coraza", ranura: "armadura", porNivel: { hp: 9, defensa: 1.6 } },
-  { id: 111, nombre: "Capa del Errante", ranura: "armadura", porNivel: { hp: 5, defensa: 0.8, critico: 0.6 } },
-  { id: 112, nombre: "Túnica de Ceniza", ranura: "armadura", porNivel: { hp: 6, mp: 3, tecnica: 1 } },
-  { id: 120, nombre: "Amuleto", ranura: "amuleto", porNivel: { mp: 3, tecnica: 1.4 } },
-  { id: 121, nombre: "Anillo de Hueso", ranura: "amuleto", porNivel: { critico: 1, golpe: 1 } },
-  { id: 122, nombre: "Colgante", ranura: "amuleto", porNivel: { hp: 7, defensa: 0.6 } },
+  { id: 114, nombre: "Arco Largo", ranura: "arma", estilo: "arco", porNivel: { golpe: 3 }, rasgos: { alcance: 0.35 } },
+  { id: 115, nombre: "Garras de Hierro", ranura: "arma", estilo: "punos", porNivel: { golpe: 2.2, patada: 1.8, critico: 0.6 }, rasgos: { critDanio: 0.25 } },
+  { id: 116, nombre: "Cetro del Abismo", ranura: "arma", estilo: "baston", porNivel: { tecnica: 3.6, suerte: 0.4 }, rasgos: { eterGolpe: 2 } },
+  // ---- Pecho
+  { id: 110, nombre: "Coraza", ranura: "pecho", porNivel: { hp: 5, defensa: 1 } },
+  { id: 112, nombre: "Túnica de Ceniza", ranura: "pecho", porNivel: { hp: 3.5, mp: 2, tecnica: 0.8 } },
+  { id: 113, nombre: "Armadura de Placas", ranura: "pecho", porNivel: { hp: 6.5, defensa: 1.4 }, rasgos: { agilidad: -0.05 } },
+  // ---- Hombros
+  { id: 119, nombre: "Hombreras de Placa", ranura: "hombros", porNivel: { hp: 3, defensa: 0.8 } },
+  // ---- Capas (accesorio con stats únicos: esquiva, resistencia, agilidad)
+  { id: 111, nombre: "Capa del Errante", ranura: "capa", porNivel: { hp: 2, critico: 0.4 } },
+  { id: 140, nombre: "Manto de Ceniza", ranura: "capa", porNivel: { hp: 2.5, defensa: 0.4 } },
+  { id: 141, nombre: "Capa del Cuervo", ranura: "capa", porNivel: { critico: 0.5, suerte: 0.5 } },
+  { id: 117, nombre: "Hombreras de Hueso", ranura: "hombros", porNivel: { hp: 2.5, defensa: 0.6, golpe: 0.5 } },
+  { id: 118, nombre: "Espaldar Rúnico", ranura: "hombros", porNivel: { mp: 1.5, tecnica: 0.8, defensa: 0.3 } },
+  // ---- Casco
+  { id: 130, nombre: "Yelmo de Hierro", ranura: "casco", porNivel: { hp: 3, defensa: 0.6 } },
+  { id: 131, nombre: "Capucha del Errante", ranura: "casco", porNivel: { hp: 2, critico: 0.5, suerte: 0.4 } },
+  { id: 132, nombre: "Corona de Espinas", ranura: "casco", porNivel: { tecnica: 1, mp: 1.5 } },
+  // ---- Cinturón
+  { id: 150, nombre: "Cinturón de Cuero", ranura: "cinturon", porNivel: { hp: 2, patada: 0.8 } },
+  { id: 151, nombre: "Faja del Monje", ranura: "cinturon", porNivel: { mp: 1.5, regen: 0.15 } },
+  { id: 152, nombre: "Cinto del Verdugo", ranura: "cinturon", porNivel: { golpe: 0.8, critico: 0.3 } },
+  // ---- Pantalones
+  { id: 160, nombre: "Grebas de Malla", ranura: "pantalones", porNivel: { hp: 3, defensa: 0.6 } },
+  { id: 161, nombre: "Calzas del Viajero", ranura: "pantalones", porNivel: { hp: 2, patada: 0.6 }, rasgos: { agilidad: 0.04 } },
+  // ---- Botas
+  { id: 170, nombre: "Botas de Cuero", ranura: "botas", porNivel: { hp: 2, patada: 0.6 }, rasgos: { agilidad: 0.03 } },
+  { id: 171, nombre: "Botas Ferradas", ranura: "botas", porNivel: { hp: 2.5, defensa: 0.6, patada: 0.8 } },
+  // ---- Anillos (stats propios de joyería)
+  { id: 121, nombre: "Anillo de Hueso", ranura: "anillo", porNivel: { critico: 0.6, golpe: 0.6 } },
+  { id: 180, nombre: "Anillo de la Fortuna", ranura: "anillo", porNivel: { suerte: 1.2 } },
+  { id: 181, nombre: "Sello del Verdugo", ranura: "anillo", porNivel: { golpe: 1, critico: 0.3 }, rasgos: { critDanio: 0.1 } },
+  { id: 182, nombre: "Anillo de Éter", ranura: "anillo", porNivel: { mp: 2, tecnica: 0.8 } },
+  // ---- Aretes
+  { id: 123, nombre: "Aretes de Talismán", ranura: "aretes", porNivel: { suerte: 0.8, regen: 0.2 } },
+  { id: 190, nombre: "Aretes de Luna", ranura: "aretes", porNivel: { tecnica: 1, critico: 0.4 } },
+  // ---- Collares
+  { id: 120, nombre: "Amuleto", ranura: "collar", porNivel: { mp: 2, tecnica: 1 } },
+  { id: 122, nombre: "Colgante", ranura: "collar", porNivel: { hp: 4, defensa: 0.4 } },
+  { id: 191, nombre: "Collar del Abismo", ranura: "collar", porNivel: { hp: 2, golpe: 0.6, tecnica: 0.6, patada: 0.6 } },
 ];
 
 export interface DefAfijo {
@@ -112,7 +143,9 @@ export const AFIJOS: readonly DefAfijo[] = [
 // ---------------- Rasgos de equipo (RNG extra) ----------------
 
 /** Rasgos al azar que cambian cómo se juega, no solo los números. */
-export type IdRasgoEquipo = "alcance" | "velocidad" | "critDanio" | "eterGolpe" | "agilidad";
+export type IdRasgoEquipo =
+  | "alcance" | "velocidad" | "critDanio" | "eterGolpe" | "agilidad" | "robo" | "eterMax"
+  | "esquiva" | "resistencia" | "tecnicaDanio" | "elemental";
 
 export interface DefRasgoEquipo {
   readonly id: IdRasgoEquipo;
@@ -120,18 +153,27 @@ export interface DefRasgoEquipo {
   /** Rango del valor (fracción, salvo eterGolpe que son puntos). */
   readonly min: number;
   readonly max: number;
-  readonly soloArma: boolean;
+  /** Clases de pieza donde puede salir (sin dato: en cualquiera). */
+  readonly en?: readonly TipoPieza[];
+  /** Rasgo "único" de accesorio: los accesorios siempre traen al menos uno de los suyos. */
+  readonly unicoDe?: readonly TipoPieza[];
   readonly formato: (v: number) => string;
 }
 
 const pct = (v: number): string => `${v >= 0 ? "+" : ""}${Math.round(v * 100)} %`;
 
 export const RASGOS_EQUIPO: readonly DefRasgoEquipo[] = [
-  { id: "alcance", nombre: "Alcance", min: 0.08, max: 0.35, soloArma: true, formato: pct },
-  { id: "velocidad", nombre: "Velocidad de ataque", min: 0.05, max: 0.22, soloArma: false, formato: pct },
-  { id: "critDanio", nombre: "Daño crítico", min: 0.15, max: 0.6, soloArma: false, formato: pct },
-  { id: "eterGolpe", nombre: "Éter por golpe", min: 1, max: 3, soloArma: true, formato: (v) => `+${Math.round(v)}` },
-  { id: "agilidad", nombre: "Velocidad de movimiento", min: 0.04, max: 0.12, soloArma: false, formato: pct },
+  { id: "alcance", nombre: "Alcance", min: 0.08, max: 0.35, en: ["arma"], formato: pct },
+  { id: "velocidad", nombre: "Velocidad de ataque", min: 0.05, max: 0.22, formato: pct },
+  { id: "critDanio", nombre: "Daño crítico", min: 0.15, max: 0.6, formato: pct },
+  { id: "eterGolpe", nombre: "Éter por golpe", min: 1, max: 3, en: ["arma", "aretes"], unicoDe: ["aretes"], formato: (v) => `+${Math.round(v)}` },
+  { id: "elemental", nombre: "Daño elemental", min: 0.1, max: 0.35, en: ["arma", "anillo"], unicoDe: ["anillo"], formato: pct },
+  { id: "agilidad", nombre: "Velocidad de movimiento", min: 0.04, max: 0.12, formato: pct },
+  { id: "robo", nombre: "Robo de vida", min: 0.01, max: 0.04, en: ["anillo", "collar"], unicoDe: ["anillo", "collar"], formato: pct },
+  { id: "eterMax", nombre: "Éter máximo", min: 8, max: 25, en: ["aretes", "collar"], unicoDe: ["aretes", "collar"], formato: (v) => `+${Math.round(v)}` },
+  { id: "esquiva", nombre: "Esquiva", min: 0.03, max: 0.1, en: ["capa"], unicoDe: ["capa"], formato: pct },
+  { id: "resistencia", nombre: "Daño recibido", min: 0.03, max: 0.1, en: ["capa", "collar"], unicoDe: ["capa", "collar"], formato: (v) => `−${Math.round(v * 100)} %` },
+  { id: "tecnicaDanio", nombre: "Daño de técnica", min: 0.06, max: 0.2, en: ["aretes", "anillo"], unicoDe: ["aretes"], formato: pct },
 ];
 
 export const NOMBRES_RAREZA = ["Común", "Raro", "Épico", "Legendario", "Único"] as const;
@@ -142,7 +184,7 @@ export const COLORES_RAREZA = ["#c8c8c8", "#4da6ff", "#b46bff", "#ffb23d", "#ff4
 export interface DefUnico {
   readonly id: number;
   readonly nombre: string;
-  readonly ranura: Ranura;
+  readonly ranura: TipoPieza;
   readonly estilo?: EstiloArma;
   readonly efecto: EfectoUnico;
   readonly porNivel: Readonly<Partial<Record<Stat, number>>>;
@@ -156,23 +198,23 @@ export const UNICOS: readonly DefUnico[] = [
     descripcion: "Cada golpe corta dos veces.", cita: "Dos hermanas, una sola hoja. Ninguna quiso ceder.",
   },
   {
-    id: 201, nombre: "Sangre de Vidrio", ranura: "amuleto", efecto: "vidrio", porNivel: { golpe: 2, patada: 2, tecnica: 2 },
+    id: 201, nombre: "Sangre de Vidrio", ranura: "collar", efecto: "vidrio", porNivel: { golpe: 2, patada: 2, tecnica: 2 },
     descripcion: "Haces +60 % de daño, pero tu vida máxima baja un 35 %.", cita: "Brilla más quien está por romperse.",
   },
   {
-    id: 202, nombre: "Manto del Eco", ranura: "armadura", efecto: "segunda-vida", porNivel: { hp: 6, defensa: 1 },
+    id: 202, nombre: "Manto del Eco", ranura: "capa", efecto: "segunda-vida", porNivel: { hp: 6, defensa: 1 },
     descripcion: "Una vez por piso, un golpe mortal te deja con 1 de vida y te vuelve invulnerable.", cita: "El Pozo todavía no terminó contigo.",
   },
   {
-    id: 203, nombre: "Corazón del Pozo", ranura: "amuleto", efecto: "corazon", porNivel: { hp: 8 },
+    id: 203, nombre: "Corazón del Pozo", ranura: "collar", efecto: "corazon", porNivel: { hp: 8 },
     descripcion: "Cada 8 enemigos derrotados recuperas el 20 % de tu vida.", cita: "Late con cada cosa que muere aquí abajo.",
   },
   {
-    id: 204, nombre: "Grebas de Ceniza", ranura: "armadura", efecto: "estela-ignea", porNivel: { hp: 5, patada: 1.5 },
+    id: 204, nombre: "Grebas de Ceniza", ranura: "botas", efecto: "estela-ignea", porNivel: { hp: 5, patada: 1.5 },
     descripcion: "La Embestida deja una estela de fuego que quema a los enemigos.", cita: "Por donde pasa, el suelo recuerda el calor.",
   },
   {
-    id: 205, nombre: "Ojo de Tantalio", ranura: "amuleto", efecto: "ojo", porNivel: { critico: 1.4, golpe: 1 },
+    id: 205, nombre: "Ojo de Tantalio", ranura: "anillo", efecto: "ojo", porNivel: { critico: 1.4, golpe: 1 },
     descripcion: "+20 % de crítico. Cada crítico te devuelve 4 de éter.", cita: "Ve la grieta antes de que exista.",
   },
   {
@@ -180,7 +222,7 @@ export const UNICOS: readonly DefUnico[] = [
     descripcion: "Tus patadas lanzan una onda de choque.", cita: "Cayó mil metros sin soltarlo.",
   },
   {
-    id: 207, nombre: "Corona Rota", ranura: "amuleto", efecto: "corona", porNivel: { critico: 0.5, mp: 2 },
+    id: 207, nombre: "Corona Rota", ranura: "casco", efecto: "corona", porNivel: { critico: 0.5, mp: 2 },
     descripcion: "+60 % de esquirlas y más botín. Recibes +30 % de daño.", cita: "Un rey sin reino sigue teniendo hambre.",
   },
   {

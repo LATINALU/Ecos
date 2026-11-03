@@ -157,7 +157,7 @@ describe("partida", () => {
 
   it("el Manto del Eco salva una vez por piso", () => {
     const p = new Partida(Meta.nueva(), 2);
-    p.equipo.armadura = { ...crearUnico(p.azar, 1), efecto: "segunda-vida" };
+    p.equipo.hombros = { ...crearUnico(p.azar, 1), efecto: "segunda-vida" };
     expect(p.recibirDanio(99999)).toBe("salvado");
     expect(p.recibirDanio(99999)).toBe("muerto");
   });

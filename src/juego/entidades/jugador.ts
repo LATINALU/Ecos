@@ -2,6 +2,7 @@
 // golpe ascendente (↑ + golpe), patada que rompe guardias, pisotón con rebote, Embestida, Doble Salto,
 // talentos (salto de pared, corte final, golpe de éter...) y la técnica de la Forma equipada.
 
+import { ELEMENTOS } from "../../contenido/elementos.ts";
 import { INFO_TECNICA, alma, type Tecnica } from "../../contenido/almas.ts";
 import type { DefEstilo } from "../../contenido/armas.ts";
 import { TILE } from "../../dominio/mundo/sala.ts";
@@ -643,7 +644,7 @@ export class Jugador implements Cuerpo {
           ctx.agregarProyectil(new Proyectil({
             tipo: "flecha", x: this.cx + this.dir * 8, y: this.y + (this.agachado ? 6 : 8),
             vx: Math.cos(ang) * velocidad * this.dir, vy: Math.sin(ang) * velocidad, w: 8, h: 3,
-            vida: alcance / velocidad, atraviesa: perfora, color: e.color,
+            vida: alcance / velocidad, atraviesa: perfora, color: p.equipo.arma?.elemento !== undefined ? ELEMENTOS[p.equipo.arma.elemento].color : e.color,
             ataqueJugador: { potencia: s.golpe * e.mults[a.combo] * (p.tieneTalento("remate") && ultimo ? 1.4 : 1), tipo: "golpe", empuje: e.empujes[a.combo], quema, eter: e.eter },
           }));
         }
@@ -1215,6 +1216,8 @@ export class Jugador implements Cuerpo {
     const cuerpo = a?.color ?? "#6a6a7a";
     const acento = a?.colorSec ?? "#d0d0e0";
     const estilo = ctx.partida.estilo();
+    const elem = ctx.partida.equipo.arma?.elemento;
+    const colorArma: string = elem !== undefined ? ELEMENTOS[elem].color : estilo.color;
 
     // Fantasmas (paso atrás, barrida, embestida, tajo): siluetas del color de la Forma.
     g.save();
@@ -1230,7 +1233,7 @@ export class Jugador implements Cuerpo {
     const pose = this.pose();
     const enUso = pose === "golpe" || pose === "golpeAlto";
     // Arma en reposo: a la espalda, detrás de la capa y del cuerpo.
-    if (!enUso) this.dibujarArma(g, estilo.id, Math.round(this.cx - this.dir * 4), Math.round(this.y + this.h - (this.agachado ? 8 : 12)), estilo.color, false);
+    if (!enUso) this.dibujarArma(g, estilo.id, Math.round(this.cx - this.dir * 4), Math.round(this.y + this.h - (this.agachado ? 8 : 12)), colorArma, false);
     // Capa (detrás del cuerpo)
     this.capa.dibujar(g, cuerpo === "#6a6a7a" ? "#3a3448" : sombra(cuerpo), acento);
 
@@ -1248,7 +1251,7 @@ export class Jugador implements Cuerpo {
     }
 
     // Arma en la mano (solo al atacar)
-    if (enUso) this.dibujarArmaEnUso(g, estilo.id, mano.manoX, mano.manoY, mano.angulo, estilo.color, estilo.alcance * (1 + ctx.partida.combate().alcance), progreso);
+    if (enUso) this.dibujarArmaEnUso(g, estilo.id, mano.manoX, mano.manoY, mano.angulo, colorArma, estilo.alcance * (1 + ctx.partida.combate().alcance), progreso);
 
     // Arcos de ataque
     if (atk !== null) {
@@ -1269,7 +1272,7 @@ export class Jugador implements Cuerpo {
           const a0 = desdeA + barrido * f;
           const ang = this.dir > 0 ? a0 : Math.PI - a0;
           g.globalAlpha = 0.15 + f * 0.6;
-          g.strokeStyle = ultimo ? "#ffe27a" : estilo.color;
+          g.strokeStyle = ultimo ? "#ffe27a" : colorArma;
           g.lineWidth = (estilo.id === "pesada" ? 3 : 1.5) + f * (ultimo ? 4 : 3);
           g.beginPath();
           g.arc(x, y + 11, radio, ang - 0.13, ang + 0.13);
@@ -1283,7 +1286,7 @@ export class Jugador implements Cuerpo {
         g.ellipse(x, y + 11, estilo.alcance + 4, 9, 0, atk.t * 30, atk.t * 30 + Math.PI * 1.6);
         g.stroke();
       } else if (atk.tipo === "ascendente" && atk.t < 0.2) {
-        g.strokeStyle = estilo.color;
+        g.strokeStyle = colorArma;
         g.lineWidth = 2;
         g.beginPath();
         g.arc(x, y + 4, 16, Math.PI * 1.1, Math.PI * 1.9);

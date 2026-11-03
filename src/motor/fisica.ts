@@ -16,6 +16,8 @@ export interface Cuerpo {
 
 export interface Tiles {
   tile(tx: number, ty: number): number;
+  /** Ancho en tiles si no es una sala estándar (el pueblo es más ancho). */
+  readonly cols?: number;
 }
 
 export interface Contacto {
@@ -33,7 +35,7 @@ export interface OpcionesMovimiento {
 }
 
 export function tileEn(t: Tiles, tx: number, ty: number): number {
-  if (tx < 0 || ty < 0 || tx >= COLS || ty >= FILAS) return 0;
+  if (tx < 0 || ty < 0 || tx >= (t.cols ?? COLS) || ty >= FILAS) return 0;
   return t.tile(tx, ty);
 }
 
