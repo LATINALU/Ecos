@@ -50,8 +50,13 @@ import { CARGA_COMPLETA, Jugador } from "./entidades/jugador.ts";
 import { BotinSuelo, COLOR_COFRE, Interactuable, NOMBRE_COFRE, colorPremio, premioDestacado } from "./entidades/objetos.ts";
 import { Proyectil } from "./entidades/proyectil.ts";
 import { MedidorCombo, type AccionEstilo } from "./medidor-combo.ts";
+import { pintor } from "../motor/pintor.ts";
+import { CapaCicatrices } from "../motor/superficie.ts";
+import { SistemaParticulas } from "../motor/particulas.ts";
+import { colorEstrella } from "../dominio/relicario.ts";
+import { postfx, rgbDe } from "../motor/postfx.ts";
 import {
-  Iluminacion, bordesDeSala, dibujarBarreras, dibujarRelieve, dibujarVineta, fondoBioma, prerenderSala, primerPlano, type Borde, type Luz,
+  Iluminacion, mapaNormalesSala, bordesDeSala, dibujarBarreras, dibujarRelieve, dibujarVineta, fondoBioma, prerenderSala, primerPlano, type Borde, type Luz,
 } from "./render.ts";
 import { Vela } from "./entidades/vela.ts";
 import { AzarSemilla } from "minialu";
@@ -186,6 +191,13 @@ class SalaActiva implements Tiles {
   bordes: Borde[] = [];
   /** Cadenas y estandartes con física. */
   colgantes: Colgante[] = [];
+  /** Mapa de normales de la roca (relieve para el compositor WebGL); se genera la primera vez que se necesita. */
+  private normalesCache: HTMLCanvasElement | null = null;
+
+  get normales(): HTMLCanvasElement {
+    this.normalesCache ??= mapaNormalesSala(this, this.mapa.semilla);
+    return this.normalesCache;
+  }
   oclusores: Borde[] = [];
 
   constructor(mapa: SalaMapa, tiles: Uint8Array, nombre: string, b: Bioma) {
@@ -201,6 +213,7 @@ class SalaActiva implements Tiles {
   }
 
   recalcularBordes(): void {
+    this.normalesCache = null;
     this.bordes = bordesDeSala(this, false);
     this.oclusores = bordesDeSala(this, true);
   }
@@ -315,6 +328,16 @@ export class Juego implements Contexto {
     const id = Math.max(0, Math.min(sala, this.mapa.salas.length - 1));
     this.cargarSala(id, null);
     this.jugador.colocar(4 * TILE, 14 * TILE - this.jugador.h);
+  }
+
+  /** Solo para desarrollo: una "batalla" instantánea para ver las cicatrices (sangre, cráter, flecha clavada). */
+  depurarBatalla(): void {
+    for (const c of this.criaturas) if (c instanceof Enemigo) c.aplicarDanio(c.hp, this);
+    const j = this.jugador;
+    this.crater(j.cx + 30, j.y + j.h + 3, 9, "#ff9a3d");
+    this.clavar(2 * TILE - 1, j.y + 4, Math.PI, "#d8e2ef");
+    this.clavar(2 * TILE - 1, j.y - 6, Math.PI + 0.2, "#d8e2ef");
+    for (let k = 0; k < 6; k++) this.particulas.sangre(j.cx + 40 + k * 25, j.y, "rgb(110, 10, 24)", 25);
   }
 
   /** Solo para desarrollo: el Cazador de Portadores aparece ya. */
@@ -456,6 +479,9 @@ export class Juego implements Contexto {
     const danio = Math.max(1, Math.round(golpe.danio * this.partida.multiplicadorRecibido() * (1 - j.buffEscudo)));
     this.partida.ganarCarga(3);
     const r = this.partida.recibirDanio(danio);
+    const fraccion = danio / Math.max(1, this.partida.stats().hp);
+    postfx.trauma(Math.min(0.7, fraccion * 2.6), fraccion > 0.15 ? 0.25 : 0);
+    this.particulas.sangre(j.cx, j.cy, "#7a0a18", Math.min(16, 4 + Math.round(fraccion * 40)));
     if (this.arena?.activa === true) this.arena.golpes++;
     const agresor = this.criaturas.find((c): c is Enemigo => c instanceof Enemigo && !c.muerto && Math.abs(c.cx - desdeX) < 40);
     if (agresor !== undefined) {
@@ -535,6 +561,7 @@ export class Juego implements Contexto {
       garantizado ? 100 : s.critico + critBasico + (pa?.critBasico ?? 0), 1.75 + mods.critDanio + (pa?.critDanio ?? 0));
     if (lejos >= 1.3) this.fx.texto(c.cx, c.y - 14, "¡Certero!", "#ffe9a8");
     if (g.critico) {
+      this.particulas.chispas(c.cx, c.cy, dirX, "#ffd27a", 18);
       this.fx.estallar(c.cx, c.cy, {
         colores: ["#ffe9a8", "#ffffff", "#ffd27a"], n: 7, velocidad: 170, tam: [1, 2], vida: 0.7, brillan: true,
         chispa: "#ffd27a", angulo: dirX > 0 ? -0.5 : Math.PI + 0.5, apertura: 1.6, luz: { color: "#ffe9a8", r: 40, dur: 0.18 },
@@ -545,6 +572,10 @@ export class Juego implements Contexto {
     c.empujar(dirX, a.empuje * (g.critico ? 1.4 : 1));
     if ((a.rompeGuardia === true || pa?.rompeGuardia === true) && c instanceof Enemigo && c.conGuardia) {
       c.romperGuardia();
+      postfx.onda(c.cx, c.cy, 2.6);
+      this.audio.reproducir("romperEscudo");
+      postfx.trauma(0.25, 0.2);
+      this.particulas.chispas(c.cx, c.cy, dirX, "#e8e8f0", 30);
       this.fx.texto(c.cx, c.y - 10, "¡Guardia rota!", "#ffe27a");
       this.fx.estallar(c.cx - c.dir * 6, c.cy, {
         colores: ["#c8c8d8", "#8a8a9a", "#5a5a6a", "#e8e8f0"], n: 40, velocidad: 190, tam: [1, 4], vida: 2,
@@ -591,6 +622,7 @@ export class Juego implements Contexto {
       velocidad: 130, angulo: dirX > 0 ? 0 : Math.PI, apertura: 1.6, vida: 0.35,
     });
     this.audio.reproducir(g.critico ? "critico" : "impacto");
+    if (a.arma === "pesada" || this.jugador.accionTipo === "cargado") this.audio.reproducir("golpePesado");
     // HITSTOP: el mundo se congela unos cuadros (más en críticos, remates, el mazo y los cargados) y el enemigo
     // tiembla en el sitio; el empujón se aplica al soltar, así sale despedido con peso.
     const cargado = this.jugador.accionTipo === "cargado";
@@ -787,6 +819,7 @@ export class Juego implements Contexto {
       });
     }
     this.estados = new Map();
+    this.cicatricesSala.clear();
     this.prepararCicatriz(piso);
     this.prepararHistoria(piso);
     this.prepararCazador();
@@ -880,6 +913,7 @@ export class Juego implements Contexto {
     this.sellarPendiente = false;
     this.fx.limpiar();
     this.vivos.limpiar();
+    this.particulas.limpiar();
     this.devorador = null;
     this.botines = estado.botin.map((b) => {
       const s = new BotinSuelo(b.premio, b.x, b.y);
@@ -1799,8 +1833,10 @@ export class Juego implements Contexto {
     this.actualizarColgantes(dt);
     this.actualizarLanzados(dt);
     this.vivos.actualizar(dt, this, this.proyectiles);
+    this.particulas.actualizar(dt, this.solidoMotor, this.cicatrices);
     if (this.criaturas.some((c) => !c.muerto && (c instanceof Enemigo || c.esJefe))) this.habitos.combate(dt);
     this.aliado?.actualizar(dt, this);
+    postfx.traumaMinimo(this.partida.hp < this.partida.stats().hp * 0.25 ? 0.35 : 0);
     this.actualizarDevorador(dt);
     this.actualizarCazador(dt);
     this.ayudasDePozo();
@@ -1862,6 +1898,9 @@ export class Juego implements Contexto {
   private esquivaPerfecta(): void {
     const j = this.jugador;
     this.habitos.esquiva();
+    postfx.onda(j.cx, j.cy, 1.8);
+    postfx.trauma(0.3, 0.5);
+    this.audio.reproducir("esquivaPerfecta");
     this.ralentizar(0.3, 0.5);
     this.fx.texto(j.cx, j.y - 16, "¡ESQUIVA PERFECTA!", "#9fe8ff", true);
     this.fx.destellar("#9fe8ff", 0.35);
@@ -2236,6 +2275,8 @@ export class Juego implements Contexto {
     if (c instanceof Enemigo && c.tiene("explosivo") && !c.exploto) c.explotar(this, 1.2, 44, 0.6);
     this.fx.chispas(c.cx, c.cy, "#ffffff", c.esJefe ? 80 : 18, { velocidad: c.esJefe ? 220 : 120, vida: 0.7 });
     this.fx.chispas(c.cx, c.cy, this.bioma.acento, c.esJefe ? 60 : 10, { velocidad: 90, brillo: true, gravedad: -30 });
+    this.particulas.sangre(c.cx, c.cy, this.sangreDe(c), c.esJefe ? 60 : 22);
+    if (c instanceof Enemigo && c.tiene("explosivo")) this.crater(c.cx, c.y + c.h + 2, 12, "#ff9a3d");
     {
       const pal = c instanceof Enemigo ? c.paleta : [this.bioma.acento, "#d9d0bd"] as const;
       const elite = c instanceof Enemigo && c.categoria === "elite";
@@ -2341,6 +2382,8 @@ export class Juego implements Contexto {
       this.fx.destellar("#ffffff", 1);
       this.fx.sacudir(10);
       this.fx.congelar(0.25);
+      postfx.onda(c.cx, c.cy, 1.2);
+      postfx.trauma(0.6, 0.8);
       this.criaturas.forEach((o) => { if (!o.esJefe) o.muerto = true; });
       this.sellarPuertas(false);
       this.interactuables.push(new Interactuable("portal", ANCHO_SALA / 2, 14 * TILE));
@@ -2441,6 +2484,39 @@ export class Juego implements Contexto {
 
   /** Zonas, ecos y acciones diferidas de las habilidades mutadas y las resonancias. */
   readonly vivos = new EfectosVivos();
+  /** Partículas del motor (SOA): sangre que mancha, chispas que rebotan. */
+  readonly particulas = new SistemaParticulas(2000);
+  /** Cicatrices de cada sala del piso (sangre, hollín, flechas clavadas): persisten mientras dure el piso. */
+  private readonly cicatricesSala = new Map<number, CapaCicatrices>();
+
+  private get cicatrices(): CapaCicatrices {
+    const id = this.sala.mapa.id;
+    let c = this.cicatricesSala.get(id);
+    if (c === undefined) {
+      c = new CapaCicatrices(ANCHO_SALA, ALTO_SALA);
+      this.cicatricesSala.set(id, c);
+    }
+    return c;
+  }
+
+  private readonly solidoMotor = (x: number, y: number): boolean => this.sueloFx(x, y) === "solido";
+
+  crater(x: number, y: number, radio: number, brasa?: string): void {
+    this.cicatrices.crater(x, y, radio, brasa, this.solidoMotor);
+  }
+
+  clavar(x: number, y: number, angulo: number, color: string): void {
+    // La punta queda un par de píxeles dentro de la roca.
+    this.cicatrices.clavar(x + Math.cos(angulo) * 2, y + Math.sin(angulo) * 2, angulo, "#9c6b3b", color);
+  }
+
+  /** Color de la sangre de una criatura: el de su cuerpo, oscurecido. */
+  private sangreDe(c: Criatura): string {
+    const base = c instanceof Enemigo ? c.paleta[0] : "#8a1020";
+    const [r, g, b] = rgbDe(base);
+    const f = 0.55;
+    return `rgb(${Math.round(r * 255 * f)}, ${Math.round(g * 255 * f * 0.7)}, ${Math.round(b * 255 * f * 0.7)})`;
+  }
   /** Cómo está peleando el Portador en este descenso (lo hereda su Eco si muere). */
   readonly habitos = new RegistroHabitos();
   /** El último monstruo que te golpeó (para la Cicatriz si mueres). */
@@ -2575,6 +2651,14 @@ export class Juego implements Contexto {
     }
   }
 
+  /** Color del trazo del arma: el aura de tu Forma (5★+; 12★ prismático) o el color de tu estilo de arma. */
+  private colorTrazo(): string {
+    const f = this.partida.forma;
+    if (f !== null && f.nivel >= 11) return `hsl(${Math.floor(this.tiempo * 220) % 360}, 95%, 65%)`;
+    if (f !== null && f.nivel >= 4) return colorEstrella(f.nivel);
+    return this.partida.estilo().color;
+  }
+
   /** Todas las luces de la escena, en coordenadas de MUNDO, con su color y si proyectan sombra. */
   private lucesEscena(): Luz[] {
     const j = this.jugador;
@@ -2630,9 +2714,25 @@ export class Juego implements Contexto {
     g.save();
     g.translate(sx, Math.round(-camY) + sy);
     g.drawImage(this.sala.lienzo, 0, 0);
-    // Relieve: los cantos de la roca brillan del lado de cada luz (con su color).
-    dibujarRelieve(g, this.sala.bordes, lucesMundo);
+    // Relieve: los cantos de la roca brillan del lado de cada luz. Con WebGL lo hace el compositor (mapa de normales).
+    if (pintor.activo) pintor.normales.drawImage(this.sala.normales, sx, Math.round(-camY) + sy);
+    else dibujarRelieve(g, this.sala.bordes, lucesMundo);
+    // Cicatrices de la sala: lo que las peleas dejaron (sangre, hollín, flechas clavadas).
+    const cic = this.cicatricesSala.get(this.sala.mapa.id);
+    if (cic !== undefined && cic.marcas > 0) {
+      g.drawImage(cic.albedo.canvas, 0, 0);
+      if (pintor.activo) {
+        pintor.normales.drawImage(cic.normales.canvas, sx, Math.round(-camY) + sy);
+        pintor.emisivo.drawImage(cic.emisivo.canvas, sx, Math.round(-camY) + sy);
+      }
+    }
     for (const c of this.sala.colgantes) c.dibujar(g, "#8a8498", "#221c2c", "#5a1830", b.acento);
+    if (pintor.activo) {
+      pintor.normales.save();
+      pintor.normales.translate(sx, Math.round(-camY) + sy);
+      for (const c of this.sala.colgantes) c.dibujarNormales(pintor.normales);
+      pintor.normales.restore();
+    }
     dibujarBarreras(g, this.sala, this.tiempo);
     if (this.cadena !== null) this.dibujarCadena(g, this.cadena);
     if (this.puertasSelladas) this.dibujarSellos(g);
@@ -2696,30 +2796,52 @@ export class Juego implements Contexto {
     for (const p of this.proyectiles) p.dibujar(g);
     this.fx.dibujarFragmentos(g);
     this.fx.dibujarParticulas(g);
+    // Partículas del motor y trazo del arma (con WebGL, su brillo va a la capa emisiva).
+    if (pintor.activo) {
+      const e = pintor.emisivo;
+      e.save();
+      e.translate(sx, Math.round(-camY) + sy);
+      this.particulas.dibujar(g, e);
+      if (!j.muerto) j.trazo.dibujar(e, this.colorTrazo(), this.combo.indiceRango);
+      e.restore();
+    } else {
+      this.particulas.dibujar(g, null);
+      if (!j.muerto) {
+        g.save();
+        g.globalCompositeOperation = "lighter";
+        j.trazo.dibujar(g, this.colorTrazo(), this.combo.indiceRango);
+        g.restore();
+      }
+    }
     g.restore();
 
     // Iluminación dinámica: luces de color y sombras duras contra la roca.
     const luces: Luz[] = lucesMundo.map((l) => ({ ...l, y: l.y - camY }));
+    postfx.camara(0, camY);
+    if (pintor.activo) postfx.luces(luces.map((l) => ({ x: l.x, y: l.y, radio: l.r * 1.3, color: rgbDe(l.color), fuerza: l.fuerza ?? 1 })));
     this.luz.dibujar(g, b.oscuridad, luces, "rgba(0,0,0,0)", { bordes: this.sala.oclusores, dx: 0, dy: -camY });
 
     // Bloom: lo emisivo se dibuja aparte, se difumina y se suma encima de la iluminación.
-    const e = this.gEmisiva;
-    e.clearRect(0, 0, ANCHO_SALA, 270);
+    // Con WebGL va a la capa emisiva del G-Buffer y el compositor le aplica el bloom.
+    const e = pintor.activo ? pintor.emisivo : this.gEmisiva;
+    if (!pintor.activo) e.clearRect(0, 0, ANCHO_SALA, 270);
     e.save();
     e.translate(sx, Math.round(-camY) + sy);
     for (const p of this.proyectiles) p.dibujar(e);
     for (const c of this.criaturas) if (c instanceof Vela) e.fillStyle = "#ff9a3d", e.fillRect(Math.round(c.llama.x) - 2, Math.round(c.llama.y) - 3, 4, 4);
     this.fx.dibujarBrillos(e);
     e.restore();
-    g.save();
-    g.globalCompositeOperation = "lighter";
-    g.filter = "blur(4px)";
-    g.globalAlpha = 0.85;
-    g.drawImage(this.emisiva, 0, 0);
-    g.filter = "none";
-    g.globalAlpha = 0.5;
-    g.drawImage(this.emisiva, 0, 0);
-    g.restore();
+    if (!pintor.activo) {
+      g.save();
+      g.globalCompositeOperation = "lighter";
+      g.filter = "blur(4px)";
+      g.globalAlpha = 0.85;
+      g.drawImage(this.emisiva, 0, 0);
+      g.filter = "none";
+      g.globalAlpha = 0.5;
+      g.drawImage(this.emisiva, 0, 0);
+      g.restore();
+    }
 
     // Primer plano con paralaje rápido, gradación de color del bioma y viñeta.
     g.drawImage(primerPlano(b), Math.round(-80 - (j.cx - ANCHO_SALA / 2) * 0.25), 0);

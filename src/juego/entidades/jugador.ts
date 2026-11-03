@@ -5,6 +5,8 @@
 import type { HabilidadEquipada } from "../../dominio/partida.ts";
 import { esSolido } from "../../dominio/mundo/sala.ts";
 import { auraDeNivel } from "../../dominio/relicario.ts";
+import { postfx } from "../../motor/postfx.ts";
+import { TrazoArma } from "../../motor/trazos.ts";
 import { tierMutacion } from "../../contenido/mutaciones.ts";
 import { VENTANA_RESONANCIA, buscarResonancia, esenciaDe, type Esencia } from "../../contenido/resonancias.ts";
 import { ejecutarHabilidad } from "../habilidades.ts";
@@ -140,6 +142,8 @@ export class Jugador implements Cuerpo {
   private tFantasma = 0;
   /** Estiramiento visual (salto) / aplastamiento (aterrizaje); vuelve a 1. */
   private estir = 1;
+  /** Cinta de energía que deja la punta del arma al golpear (motor/trazos.ts). */
+  readonly trazo = new TrazoArma(10, 0.14);
   /**
    * Smear frame: arco de corte que queda 2-3 cuadros DESPUÉS de cada espadazo (blanco por dentro y del color del
    * aura de tu Forma por fuera). Es lo que hace que un golpe rápido "se lea" con peso.
@@ -222,6 +226,7 @@ export class Jugador implements Cuerpo {
     const ligereza = p.tieneTalento("ligereza");
     this.t += dt;
     this.cdPasoEco = Math.max(0, this.cdPasoEco - dt);
+    this.trazo.actualizar(dt, ctx.combo?.indiceRango ?? 0);
     this.zonaActiva = null;
     this.tEsquiva += dt;
     if (this.buffer !== null) {
@@ -465,6 +470,9 @@ export class Jugador implements Cuerpo {
     }
     if (c.suelo && this.accion?.tipo === "pisoton") {
       ctx.fx.sacudir(2);
+      postfx.onda(this.cx, this.y + this.h, 2.8);
+      postfx.trauma(0.15);
+      ctx.crater?.(this.cx, this.y + this.h + 3, 7);
       ctx.fx.chispas(this.cx, this.y + this.h, "#ffffff", 8, { velocidad: 70, vida: 0.3 });
       this.accion = null;
     }
@@ -495,7 +503,7 @@ export class Jugador implements Cuerpo {
     } else {
       this.iniciar("golpe", e.duracion, combo);
     }
-    ctx.audio.reproducir(combo >= e.mults.length ? "patada" : "golpe");
+    ctx.audio.reproducir(combo >= e.mults.length ? "patada" : e.id === "punos" || e.id === "arco" ? "golpe" : "espadazo");
   }
 
   private leerAcciones(ctx: Contexto, e: Entrada): void {
@@ -604,6 +612,10 @@ export class Jugador implements Cuerpo {
     p.registrarMision(r === 4 ? "definitiva" : "habilidad");
     ctx.audio.reproducir(r === 4 ? "unico" : "tecnica");
     ejecutarHabilidad(this, ctx, h, r === 4);
+    if (r === 4) {
+      postfx.onda(this.cx, this.cy, 1.4);
+      postfx.trauma(0.35, 0.6);
+    }
     // 9★ Doble Paso: la primera embestida deja encadenar otra de inmediato.
     if (r !== 4 && h.def.forma === "embestida" && tierMutacion(h.carta.nivel) >= 2) {
       if (!this.pasoDoble[r - 1]) {
@@ -1396,6 +1408,11 @@ export class Jugador implements Cuerpo {
 
     // Arma en la mano (solo al atacar)
     if (enUso) this.dibujarArmaEnUso(g, estilo.id, mano.manoX, mano.manoY, mano.angulo, colorArma, estilo.alcance * (1 + ctx.partida.combate().alcance), progreso);
+    // Trazo: se registra la punta del arma mientras el golpe corta.
+    if (enUso && estilo.id !== "arco" && atk !== null && (atk.tipo === "golpe" || atk.tipo === "cargado" || atk.tipo === "estocada" || atk.tipo === "giro" || atk.tipo === "ascendente")) {
+      const largo = estilo.alcance * (1 + ctx.partida.combate().alcance) * 0.9;
+      this.trazo.muestra(mano.manoX, mano.manoY, mano.manoX + Math.cos(mano.angulo) * largo, mano.manoY + Math.sin(mano.angulo) * largo);
+    }
 
     // Arcos de ataque
     if (atk !== null) {

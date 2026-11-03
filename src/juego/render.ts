@@ -759,3 +759,60 @@ export class Iluminacion {
     ga.globalCompositeOperation = "source-over";
   }
 }
+
+/**
+ * MAPA DE NORMALES de la sala (para el compositor WebGL): cada bloque de roca tiene juntas de ladrillo hundidas y
+ * biseles en los cantos que dan al aire, así las luces del juego la iluminan con volumen (y el metal/agua destella).
+ */
+export function mapaNormalesSala(t: Tiles, semilla: number): HTMLCanvasElement {
+  const [c, g] = lienzo(ANCHO_SALA, ALTO_SALA);
+  g.fillStyle = "#8080ff";
+  g.fillRect(0, 0, ANCHO_SALA, ALTO_SALA);
+  const sol = (tx: number, ty: number): boolean => tx < 0 || ty < 0 || tx >= COLS || ty >= FILAS || esSolido(t.tile(tx, ty)) || t.tile(tx, ty) === T_PLATAFORMA;
+  for (let ty = 0; ty < FILAS; ty++) {
+    for (let tx = 0; tx < COLS; tx++) {
+      const tl = t.tile(tx, ty);
+      const plataforma = tl === T_PLATAFORMA;
+      if (!esSolido(tl) && !plataforma) continue;
+      const px = tx * TILE;
+      const py = ty * TILE;
+      if (!plataforma) {
+        // Juntas de ladrillo: hileras de 8 px, ladrillos de 16 desplazados por hilera.
+        for (let fila = 0; fila < 2; fila++) {
+          const y = py + fila * 8;
+          g.fillStyle = "rgb(128, 60, 210)"; // la junta mira hacia abajo (hundida)
+          g.fillRect(px, y + 7, TILE, 1);
+          g.fillStyle = "rgb(128, 170, 235)"; // la cara del ladrillo, apenas hacia arriba
+          g.fillRect(px, y, TILE, 1);
+          const corte = (fila + ty) % 2 === 0 ? 0 : 8;
+          g.fillStyle = "rgb(70, 128, 220)";
+          g.fillRect(px + corte, y, 1, 7);
+        }
+        // Piedras irregulares: alguna con relieve propio.
+        if (hash(tx, ty, semilla) < 0.25) {
+          g.fillStyle = "rgb(150, 150, 245)";
+          g.fillRect(px + 3, py + 2, 4, 3);
+        }
+      }
+      // Biseles de los cantos al aire.
+      const b = plataforma ? 2 : 3;
+      if (!sol(tx, ty - 1)) {
+        g.fillStyle = "rgb(128, 225, 190)";
+        g.fillRect(px, py, TILE, b);
+      }
+      if (!plataforma && !sol(tx, ty + 1)) {
+        g.fillStyle = "rgb(128, 35, 190)";
+        g.fillRect(px, py + TILE - b, TILE, b);
+      }
+      if (!sol(tx - 1, ty)) {
+        g.fillStyle = "rgb(30, 128, 190)";
+        g.fillRect(px, py, b, TILE);
+      }
+      if (!sol(tx + 1, ty)) {
+        g.fillStyle = "rgb(225, 128, 190)";
+        g.fillRect(px + TILE - b, py, b, TILE);
+      }
+    }
+  }
+  return c;
+}

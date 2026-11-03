@@ -6,7 +6,8 @@ import { Musica } from "./musica.ts";
 export type Sonido =
   | "salto" | "golpe" | "patada" | "impacto" | "critico" | "muerte" | "recoger" | "raro" | "unico"
   | "herido" | "tecnica" | "explosion" | "embestida" | "romper" | "nivel" | "puerta" | "jefe" | "cofre"
-  | "reliquia" | "fusion" | "fallo" | "bloqueo" | "pocion";
+  | "reliquia" | "fusion" | "fallo" | "bloqueo" | "pocion"
+  | "espadazo" | "golpePesado" | "romperEscudo" | "esquivaPerfecta";
 
 export class Audio {
   private ctx: AudioContext | null = null;
@@ -69,6 +70,29 @@ export class Audio {
     src.start(t);
   }
 
+  /** Ruido por un filtro de banda que barre de una frecuencia a otra (el silbido de un corte). */
+  private barrido(dur: number, desde: number, hasta: number, vol: number): void {
+    if (this.ctx === null || this.maestro === null) return;
+    const t = this.ctx.currentTime;
+    const n = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = "bandpass";
+    f.Q.value = 3.5;
+    f.frequency.setValueAtTime(desde, t);
+    f.frequency.exponentialRampToValueAtTime(hasta, t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f).connect(g).connect(this.maestro);
+    src.start(t);
+    src.stop(t + dur);
+  }
+
   reproducir(s: Sonido): void {
     switch (s) {
       case "salto": this.tono(280, 0.12, "square", 0.06, 520); break;
@@ -94,6 +118,14 @@ export class Audio {
       case "fallo": this.tono(200, 0.15, "square", 0.06, 150); this.tono(150, 0.2, "square", 0.06, 100, 0.12); break;
       case "bloqueo": this.tono(1400, 0.06, "square", 0.06, 900); this.ruido(0.05, 0.1, 5000); break;
       case "pocion": this.tono(400, 0.3, "sine", 0.08, 900); break;
+      // Motor de audio: el aire que corta la espada (ruido con barrido de banda).
+      case "espadazo": this.barrido(0.12, 1800, 300, 0.22); break;
+      // Golpe pesado (mazo, cargados): subgrave que cae.
+      case "golpePesado": this.tono(140, 0.22, "triangle", 0.3, 30); this.ruido(0.12, 0.2, 600); break;
+      // Escudo roto: tres tonos metálicos disonantes.
+      case "romperEscudo": [880, 1174, 1560].forEach((f, i) => this.tono(f, 0.35, i === 0 ? "sawtooth" : "square", 0.09 / (i + 1))); this.ruido(0.2, 0.15, 5000); break;
+      // Esquiva perfecta: una octava que sube, etérea.
+      case "esquivaPerfecta": this.tono(523.25, 0.25, "sine", 0.12, 1046.5); this.tono(784, 0.3, "sine", 0.05, 1568, 0.05); break;
     }
   }
 

@@ -98,4 +98,8 @@ export interface Contexto {
   resonar?(r: DefResonancia, potencia: number): void;
   /** 12★ Coro de Ecos: cada eco imita la Definitiva. */
   imitarDefinitiva?(h: HabilidadEquipada): void;
+  /** Cicatriz persistente en la sala: cráter con hollín (y brasas). */
+  crater?(x: number, y: number, radio: number, brasa?: string): void;
+  /** Proyectil clavado en la pared. */
+  clavar?(x: number, y: number, angulo: number, color: string): void;
 }

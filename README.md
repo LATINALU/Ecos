@@ -21,6 +21,13 @@ principal:
 - **Animación procedural:** cadenas y estandartes cuelgan con física (se mecen y se apartan al pasar), y los
   guardianes que caminan apoyan sus patas en el suelo con cinemática inversa.
 - **Interfaz pixel art:** fuentes de píxel y marcos de hierro forjado, madera y vidrio dibujados por código.
+- **Motor híbrido 2D + WebGL2:** el juego se dibuja con Canvas 2D en un G-Buffer (color, normales y brillo) y un
+  compositor WebGL2 le suma relieve iluminado (la roca y las cadenas brillan del lado de cada luz), bloom, **ondas de
+  choque** (esquiva perfecta, pisotón, guardia rota, Definitiva) y **aberración cromática** al recibir golpes o con
+  poca vida. Sin WebGL2 se ve como antes.
+- **Las salas recuerdan la pelea:** la sangre salpica y mancha suelos y paredes, las explosiones y los pisotones
+  dejan cráteres de hollín y las flechas quedan clavadas en la roca mientras dure el piso.
+- **Estela del arma** del color del aura de tu Forma (prismática en 12★), más ancha cuanto más alto tu estilo.
 
 ---
 
@@ -512,13 +519,15 @@ npm run build    # comprobación de tipos + compilación
 | `src/contenido/` | Datos: almas, biomas y jefes, armas, objetos, misiones, talentos, plantillas de salas |
 | `src/juego/` | El juego en tiempo real: escena, jugador, enemigos, jefes, pueblo, edificios, efectos |
 | `src/ui/` | Menús, tiendas, inventario, HUD y estilos |
-| `src/motor/` | Física, teclado, audio, sprites y texto |
+| `src/motor/` | Física, teclado, audio y música por capas, sprites, texto, y el motor gráfico: `pintor.ts` (G-Buffer), `compositor.ts` (WebGL2), `postfx.ts`, `verlet.ts`, `trazos.ts`, `superficie.ts` (cicatrices de sala), `particulas.ts` (SOA) |
 | `test/` | Pruebas del dominio |
 
 ### Atajos de desarrollo (solo en `npm run dev`)
 
 | URL | Qué hace |
 |---|---|
+| `&sinwebgl` · `&capa=normales` | Desactivar el compositor WebGL2 · ver una capa del G-Buffer |
+| `&batalla` | Simula una pelea en la sala para ver sangre, cráter y flechas clavadas |
 | `?auto=espada&piso=7` | Empieza directo en el piso 7 con una espada (`espada`, `pesada`, `baston`, `arco`) |
 | `&jefe` · `&tiposala=arena` | Ir a la sala del guardián o a la primera arena del piso |
 | `&abismo` | Empezar en el Abismo |

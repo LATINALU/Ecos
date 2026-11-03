@@ -7,6 +7,8 @@
 //     queda plantado mientras el cuerpo avanza y, cuando se aleja demasiado de su punto de descanso, da un paso
 //     en arco. Las usan los guardianes que caminan (gólem y bestia).
 
+import { CuerdaVerlet } from "../motor/verlet.ts";
+
 export type TipoColgante = "cadena" | "estandarte";
 
 export interface DefColgante {
@@ -17,98 +19,60 @@ export interface DefColgante {
   readonly largo: number;
 }
 
-interface Nodo {
-  x: number;
-  y: number;
-  px: number;
-  py: number;
-}
-
-/** Cuerda de Verlet anclada por arriba. */
+/** Cadena o estandarte colgado del techo: una CuerdaVerlet del motor anclada arriba. */
 export class Colgante {
   readonly tipo: TipoColgante;
-  private readonly nodos: Nodo[] = [];
-  private readonly tramo: number;
+  private readonly cuerda: CuerdaVerlet;
   private readonly fase = Math.random() * 10;
 
   constructor(def: DefColgante) {
     this.tipo = def.tipo;
     const n = def.tipo === "cadena" ? Math.max(4, Math.round(def.largo / 4)) : 6;
-    this.tramo = def.largo / (n - 1);
-    for (let i = 0; i < n; i++) this.nodos.push({ x: def.x, y: def.y + i * this.tramo, px: def.x, py: def.y + i * this.tramo });
+    this.cuerda = new CuerdaVerlet({
+      x: def.x, y: def.y, segmentos: n - 1, largoSegmento: def.largo / (n - 1),
+      gravedad: 600, friccion: def.tipo === "cadena" ? 0.985 : 0.96, iteraciones: 4,
+    });
+  }
+
+  /** Posición de los nodos (copia, para pruebas y dibujo). */
+  get nodos(): { x: number; y: number }[] {
+    const c = this.cuerda;
+    return Array.from({ length: c.n }, (_, i) => ({ x: c.x[i], y: c.y[i] }));
   }
 
   get ancla(): { x: number; y: number } {
-    return this.nodos[0];
+    return { x: this.cuerda.x[0], y: this.cuerda.y[0] };
   }
 
   /** Empuja los nodos que estén dentro del rectángulo (el Portador al pasar, un golpe). */
   empujar(x: number, y: number, w: number, h: number, vx: number, vy: number): void {
-    for (let i = 1; i < this.nodos.length; i++) {
-      const q = this.nodos[i];
-      if (q.x >= x && q.x <= x + w && q.y >= y && q.y <= y + h) {
-        q.px -= vx * 0.016;
-        q.py -= vy * 0.016;
-      }
-    }
+    this.cuerda.empujarRect(x, y, w, h, vx, vy);
   }
 
   /** Sacudida radial (explosiones, fogonazos). */
   sacudir(cx: number, cy: number, radio: number, fuerza: number): void {
-    for (let i = 1; i < this.nodos.length; i++) {
-      const q = this.nodos[i];
-      const dx = q.x - cx;
-      const dy = q.y - cy;
-      const d = Math.hypot(dx, dy);
-      if (d > radio || d < 0.001) continue;
-      const k = (1 - d / radio) * fuerza * 0.016;
-      q.px -= (dx / d) * k;
-      q.py -= (dy / d) * k;
-    }
+    this.cuerda.impulso(cx, cy, radio, fuerza);
   }
 
   actualizar(dt: number, t: number): void {
     const brisa = Math.sin(t * 0.9 + this.fase) * 14 + Math.sin(t * 2.3 + this.fase * 2) * 5;
-    const g = 600 * dt * dt;
-    const amort = this.tipo === "cadena" ? 0.985 : 0.96;
-    for (let i = 1; i < this.nodos.length; i++) {
-      const q = this.nodos[i];
-      const vx = (q.x - q.px) * amort;
-      const vy = (q.y - q.py) * amort;
-      q.px = q.x;
-      q.py = q.y;
-      q.x += vx + brisa * (i / this.nodos.length) * dt * dt * (this.tipo === "estandarte" ? 3 : 1);
-      q.y += vy + g;
-    }
-    for (let it = 0; it < 4; it++) {
-      for (let i = 1; i < this.nodos.length; i++) {
-        const a = this.nodos[i - 1];
-        const b = this.nodos[i];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d = Math.hypot(dx, dy) || 0.001;
-        const f = (d - this.tramo) / d;
-        if (i === 1) {
-          b.x -= dx * f;
-          b.y -= dy * f;
-        } else {
-          a.x += dx * f * 0.5;
-          a.y += dy * f * 0.5;
-          b.x -= dx * f * 0.5;
-          b.y -= dy * f * 0.5;
-        }
-      }
-    }
+    this.cuerda.actualizar(dt, brisa * (this.tipo === "estandarte" ? 3 : 1));
+  }
+
+  /** Relieve metálico de los eslabones (para el compositor WebGL). */
+  dibujarNormales(n: CanvasRenderingContext2D): void {
+    if (this.tipo === "cadena") this.cuerda.dibujarNormalesCadena(n);
   }
 
   dibujar(g: CanvasRenderingContext2D, metal: string, oscuro: string, tela: string, emblema: string): void {
     const n = this.nodos;
+    const tramo = this.cuerda.largo;
     if (this.tipo === "cadena") {
       // Eslabones alternados (de frente y de canto) a lo largo de la cuerda.
       for (let i = 1; i < n.length; i++) {
         const a = n[i - 1];
         const b = n[i];
-        const pasos = Math.max(1, Math.round(this.tramo / 3));
+        const pasos = Math.max(1, Math.round(tramo / 3));
         for (let k = 0; k < pasos; k++) {
           const t = k / pasos;
           const x = Math.round(a.x + (b.x - a.x) * t);
@@ -128,21 +92,20 @@ export class Colgante {
           }
         }
       }
-      // Gancho al final
       const ult = n[n.length - 1];
       g.fillStyle = metal;
       g.fillRect(Math.round(ult.x) - 1, Math.round(ult.y), 2, 3);
       g.fillRect(Math.round(ult.x), Math.round(ult.y) + 2, 2, 1);
       return;
     }
-    // Estandarte: tira de tela que sigue la cuerda (más ancha arriba), con borde y emblema, punta en V.
+    // Estandarte: tira de tela que sigue la cuerda, con borde y emblema, punta en V.
     const ancho = 12;
     g.fillStyle = oscuro;
     g.fillRect(Math.round(n[0].x - ancho / 2 - 2), Math.round(n[0].y) - 1, ancho + 4, 2);
     for (let i = 1; i < n.length; i++) {
       const a = n[i - 1];
       const b = n[i];
-      const pasos = Math.max(1, Math.round(this.tramo));
+      const pasos = Math.max(1, Math.round(tramo));
       for (let k = 0; k < pasos; k++) {
         const t = k / pasos;
         const x = a.x + (b.x - a.x) * t;
@@ -156,7 +119,6 @@ export class Colgante {
         g.fillRect(Math.round(x + w / 2) - 1, Math.round(y), 1, 1);
       }
     }
-    // Emblema a un tercio
     const m = n[Math.floor(n.length / 3)];
     g.fillStyle = emblema;
     g.fillRect(Math.round(m.x) - 2, Math.round(m.y) - 2, 4, 4);

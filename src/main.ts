@@ -9,6 +9,9 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/jacquard-12/400.css";
 import "./ui/pixel.css";
 import { instalarMarcos } from "./ui/marcos.ts";
+import { CompositorWebGL } from "./motor/compositor.ts";
+import { pintor } from "./motor/pintor.ts";
+import { postfx } from "./motor/postfx.ts";
 import { crearServicioEcos } from "./infra/ecos-compartidos.ts";
 import { MAT_FRAGMENTO, OBJ_CAJA_ALMAS, OBJ_POCION, OBJ_RELICARIO } from "./contenido/objetos.ts";
 import { generarEquipo } from "./dominio/equipo.ts";
@@ -47,7 +50,23 @@ const RANURA_PRUEBAS = 9;
 const lienzo = document.getElementById("lienzo") as HTMLCanvasElement;
 const capaUi = document.getElementById("capa-ui") as HTMLDivElement;
 const marco = document.getElementById("marco") as HTMLDivElement;
-const g = lienzo.getContext("2d")!;
+// MOTOR: si hay WebGL2, el juego dibuja en un lienzo oculto (albedo) y el compositor lo ilumina y le aplica
+// relieve, bloom, ondas de choque y aberración cromática. Sin WebGL2 (o con ?sinwebgl) se dibuja directo como antes.
+let compositor: CompositorWebGL | null = null;
+const albedo = document.createElement("canvas");
+albedo.width = ANCHO;
+albedo.height = ALTO;
+if (!new URLSearchParams(location.search).has("sinwebgl")) {
+  try {
+    compositor = new CompositorWebGL(lienzo, ANCHO, ALTO);
+  } catch {
+    compositor = null;
+  }
+}
+pintor.activo = compositor !== null;
+const capaDepuracion = new URLSearchParams(location.search).get("capa");
+postfx.conectar(compositor);
+const g = (compositor !== null ? albedo : lienzo).getContext("2d")!;
 g.imageSmoothingEnabled = false;
 // Capa de texto nítido (alta resolución) encima del juego pixelado.
 const lienzoTexto = document.createElement("canvas");
@@ -353,6 +372,10 @@ function cuadro(ahora: number): void {
   reloj += dt;
 
   teclasDeMenu();
+  if (compositor !== null) {
+    pintor.limpiar();
+    compositor.iniciarCuadro();
+  }
   const escena = juego ?? pueblo;
   const pausado = escena === null || ui.abierto !== null;
   entrada.bloqueada = pausado;
@@ -379,6 +402,12 @@ function cuadro(ahora: number): void {
     dibujarHudPueblo(g, pueblo, meta, nombreRanura);
   } else {
     dibujarTitulo(reloj, dt);
+  }
+  if (compositor !== null) {
+    // Solo desarrollo: ?capa=normales|emisivo muestra esa capa del G-Buffer en lugar del color.
+    const ver = import.meta.env.DEV ? capaDepuracion : null;
+    const fuente = ver === "normales" ? pintor.normales.canvas : ver === "emisivo" ? pintor.emisivo.canvas : albedo;
+    compositor.renderizar(dt, fuente, pintor.normales.canvas, pintor.emisivoConBloom());
   }
   hd.pintar();
   requestAnimationFrame(cuadro);
@@ -461,6 +490,7 @@ void sprites.cargar().then(() => {
   // &peso=N → Peso del Eco; &cazador → el Cazador de Portadores llega ya.
   if (q.has("peso") && partida !== null) partida.pesoEco = Number(q.get("peso"));
   if (q.has("cazador") && juego !== null) juego.depurarCazador();
+  if (q.has("batalla") && juego !== null) juego.depurarBatalla();
   if (q.has("decision") && juego !== null) juego.depurarDecisionEco();
   if (q.has("cargada") && partida !== null) partida.cargaDefinitiva = 100;
   if (q.has("botin") && juego !== null) juego.depurarBotin();

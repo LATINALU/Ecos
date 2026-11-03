@@ -35,12 +35,18 @@ export class Musica {
   private tension = false;
   private ruidoBuf: AudioBuffer | null = null;
   private readonly distorsion: WaveShaperNode;
+  /** Reverberación del bioma (impulso generado por código) en paralelo con la señal seca. */
+  private readonly reverb: ConvolverNode;
 
   constructor(ctx: AudioContext, destino: AudioNode) {
     this.ctx = ctx;
     this.salida = ctx.createGain();
     this.salida.gain.value = 0.55;
     this.salida.connect(destino);
+    this.reverb = ctx.createConvolver();
+    const humedo = ctx.createGain();
+    humedo.gain.value = 0.35;
+    this.salida.connect(this.reverb).connect(humedo).connect(destino);
     const capa = (v: number): GainNode => {
       const g = ctx.createGain();
       g.gain.value = v;
@@ -63,6 +69,7 @@ export class Musica {
 
   iniciar(bioma: number): void {
     this.bioma = Math.max(0, bioma) % TONICAS.length;
+    this.acustica(bioma);
     this.detener();
     this.paso = 0;
     this.siguiente = this.ctx.currentTime + 0.1;
@@ -87,7 +94,30 @@ export class Musica {
     this.nivel = -1;
   }
 
+  /**
+   * Acústica del bioma: una respuesta al impulso hecha con ruido que decae (criptas de piedra largas, bosques
+   * secos, cavernas de hielo enormes, el Abismo casi infinito).
+   */
+  acustica(bioma: number): void {
+    const tipos: readonly [number, number][] = [[2.2, 2.0], [0.8, 6.0], [1.8, 3.0], [3.0, 1.5], [2.5, 4.0], [2.0, 2.5]];
+    const [dur, decae] = bioma >= 24 ? [4.5, 1.2] : tipos[bioma % tipos.length];
+    const sr = this.ctx.sampleRate;
+    const n = Math.floor(sr * dur);
+    const ir = this.ctx.createBuffer(2, n, sr);
+    const l = ir.getChannelData(0);
+    const r = ir.getChannelData(1);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const v = Math.exp(-t * decae) * (Math.random() * 2 - 1);
+      l[i] = v;
+      r[i] = v * (Math.sin(t * 10) * 0.5 + 0.5);
+    }
+    this.reverb.buffer = ir;
+  }
+
   intensidad(rango: number, inmediato = false): boolean {
+    // El tempo sigue al estilo: D 102 BPM … SSS 144 BPM (la extracción lo lleva a 148).
+    if (!this.tension) this.tempo = 102 + Math.max(0, Math.min(6, rango)) * 7;
     const nivel = this.tension ? 3 : rango >= 5 ? 3 : rango >= 4 ? 2 : rango >= 3 ? 1 : 0;
     if (nivel === this.nivel && !inmediato) return false;
     this.nivel = nivel;

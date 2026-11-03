@@ -104,6 +104,11 @@ export class Proyectil implements Rect {
       this.x += this.vx * dt;
       this.y += this.vy * dt;
       if (this.op.atraviesaParedes !== true && solidoEnPunto(ctx.tiles, this.x + this.w / 2, this.y + this.h / 2)) {
+        // Flechas, dagas y lanzas del Portador quedan clavadas en la roca.
+        const t = this.op.tipo;
+        if (this.op.ataqueJugador !== undefined && (t === "flecha" || t === "daga" || t === "lanza")) {
+          ctx.clavar?.(this.x + this.w / 2, this.y + this.h / 2, Math.atan2(this.vy, this.vx), this.op.color);
+        }
         this.morir(ctx);
         return;
       }
@@ -128,6 +133,7 @@ export class Proyectil implements Rect {
     this.op.alMorir?.(ctx, cx, cy);
     const r = this.op.explota ?? 0;
     ctx.fx.chispas(cx, cy, this.op.color, r > 0 ? 26 : 6, { velocidad: r > 0 ? 140 : 60, vida: 0.4, brillo: true });
+    if (r >= 20) ctx.crater?.(cx, cy, Math.min(14, Math.round(r * 0.45)), this.op.color);
     if (r > 0) {
       ctx.audio.reproducir("explosion");
       ctx.fx.sacudir(3);

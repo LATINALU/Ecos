@@ -45,8 +45,9 @@ describe("colgantes con física", () => {
   test("la cadena queda anclada, cuelga hacia abajo y conserva su largo", () => {
     const c = new Colgante({ tipo: "cadena", x: 50, y: 32, largo: 30 });
     for (let i = 0; i < 300; i++) c.actualizar(1 / 60, i / 60);
-    const nodos = (c as unknown as { nodos: { x: number; y: number }[] }).nodos;
-    expect(nodos[0]).toMatchObject({ x: 50, y: 32 });
+    const nodos = c.nodos;
+    expect(nodos[0].x).toBeCloseTo(50);
+    expect(nodos[0].y).toBeCloseTo(32);
     const fin = nodos[nodos.length - 1];
     expect(fin.y).toBeGreaterThan(32 + 25);
     let largo = 0;
@@ -58,11 +59,11 @@ describe("colgantes con física", () => {
   test("empujarla la mueve y después vuelve a colgar", () => {
     const c = new Colgante({ tipo: "estandarte", x: 50, y: 32, largo: 40 });
     for (let i = 0; i < 120; i++) c.actualizar(1 / 60, 0);
-    const nodos = (c as unknown as { nodos: { x: number; y: number }[] }).nodos;
+    const fin = (): { x: number; y: number } => c.nodos[c.nodos.length - 1];
     c.empujar(0, 0, 200, 200, 400, 0);
     for (let i = 0; i < 5; i++) c.actualizar(1 / 60, 0);
-    expect(nodos[nodos.length - 1].x).toBeGreaterThan(52);
+    expect(fin().x).toBeGreaterThan(52);
     for (let i = 0; i < 600; i++) c.actualizar(1 / 60, 0);
-    expect(Math.abs(nodos[nodos.length - 1].x - 50)).toBeLessThan(8);
+    expect(Math.abs(fin().x - 50)).toBeLessThan(8);
   });
 });
