@@ -5,6 +5,8 @@
 //   3. RELIEVE DE LUCES: hasta 32 luces iluminan los píxeles INCLINADOS del mapa de normales (difusa + especular).
 //      Lo plano no cambia: la oscuridad, las sombras duras y el color ya los resolvió el juego en 2D; aquí se suma
 //      el volumen (cantos de roca, eslabones de cadena, metal que destella).
+//      Los PERSONAJES (máscara de siluetas) reciben un borde de luz, volumen (domo sacado de la silueta) y
+//      proyectan SOMBRAS cortas sobre el fondo, alejándose de cada luz.
 //   4. BLOOM de la capa emisiva (9 muestras en cruz a dos distancias).
 //   5. DESTELLO de impacto y viñeta que se cierra con el trauma.
 //
@@ -36,6 +38,7 @@ out vec4 color;
 uniform sampler2D u_albedo;
 uniform sampler2D u_normales;
 uniform sampler2D u_emisivo;
+uniform sampler2D u_mascara;
 uniform vec2 u_res;
 
 #define MAX_LUCES 32
@@ -47,6 +50,7 @@ uniform vec3 u_onda;     // x, y (uv), progreso 0..1
 uniform float u_trauma;  // 0..1
 uniform float u_destello;
 uniform float u_relieve; // intensidad global del relieve
+uniform float u_sombras; // 0 apaga las sombras de los personajes
 
 void main() {
   vec2 uv = v_uv;
@@ -78,7 +82,26 @@ void main() {
   float inclinacion = clamp(length(n.xy) * 1.4, 0.0, 1.0);
   vec3 relieve = vec3(0.0);
   vec2 p = uv * u_res;
-  if (inclinacion > 0.05) {
+  // Personajes: normal sacada del borde de su silueta (gradiente de la máscara) -> luz de contorno.
+  vec2 t1 = 1.0 / u_res;
+  float m0 = texture(u_mascara, uv).a;
+  vec2 nm = vec2(0.0);
+  if (m0 > 0.5) {
+    nm.x = texture(u_mascara, uv - vec2(t1.x * 2.0, 0.0)).a - texture(u_mascara, uv + vec2(t1.x * 2.0, 0.0)).a;
+    nm.y = texture(u_mascara, uv - vec2(0.0, t1.y * 2.0)).a - texture(u_mascara, uv + vec2(0.0, t1.y * 2.0)).a;
+  }
+  float borde = clamp(length(nm), 0.0, 1.0);
+  // Volumen: el mismo gradiente pero más ancho da una normal de "domo" que cruza todo el cuerpo.
+  vec2 nv = vec2(0.0);
+  if (m0 > 0.5) {
+    nv.x = texture(u_mascara, uv - vec2(t1.x * 4.0, 0.0)).a - texture(u_mascara, uv + vec2(t1.x * 4.0, 0.0)).a;
+    nv.y = texture(u_mascara, uv - vec2(0.0, t1.y * 4.0)).a - texture(u_mascara, uv + vec2(0.0, t1.y * 4.0)).a;
+    nv *= 0.7;
+  }
+  vec3 contorno = vec3(0.0);
+  float sombra = 0.0;    // sombra que un personaje proyecta sobre este píxel
+  float penumbra = 0.0;  // lado del cuerpo que no mira a la luz
+  if (inclinacion > 0.05 || m0 > 0.5 || u_sombras > 0.0) {
     vec3 nn = normalize(n);
     for (int i = 0; i < MAX_LUCES; i++) {
       if (i >= u_numLuces) break;
@@ -86,14 +109,40 @@ void main() {
       float dist = length(d);
       float radio = u_lucesPos[i].z;
       if (dist >= radio) continue;
-      vec3 L = normalize(vec3(d, radio * 0.25));
-      float difusa = max(dot(nn.xy, normalize(d + 0.0001)), 0.0) * inclinacion;
-      float especular = pow(max(dot(nn, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 24.0) * 0.5 * inclinacion;
+      vec2 dn = normalize(d + 0.0001);
       float aten = pow(1.0 - dist / radio, 2.0);
-      relieve += u_lucesColor[i].rgb * (difusa * 0.9 + especular) * aten * u_lucesColor[i].a;
+      vec3 luz = u_lucesColor[i].rgb * aten * u_lucesColor[i].a;
+      if (inclinacion > 0.05) {
+        vec3 L = normalize(vec3(d, radio * 0.25));
+        float difusa = max(dot(nn.xy, dn), 0.0) * inclinacion;
+        float especular = pow(max(dot(nn, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 24.0) * 0.5 * inclinacion;
+        relieve += luz * (difusa * 0.9 + especular);
+      }
+      if (m0 > 0.5) {
+        // Contorno del lado que mira a la luz + un relleno suave (el personaje "entra" en la luz).
+        float lado = borde > 0.01 ? max(dot(normalize(nm), dn), 0.0) * borde : 0.0;
+        float volumen = dot(nv, dn);
+        contorno += luz * (lado * 1.1 + 0.12 + max(volumen, 0.0) * 0.4);
+        penumbra += aten * u_lucesColor[i].a * max(-volumen, 0.0);
+      } else if (u_sombras > 0.0 && dist > 5.0 && texture(u_mascara, u_lucesPos[i].xy / u_res).a < 0.5) {
+        // Sombra: se marcha hacia la luz; si una silueta tapa el camino, este píxel queda a oscuras
+        // (más fuerte cerca del personaje, se desvanece a lo largo).
+        float largo = min(dist - 3.0, 22.0);
+        float tapado = 0.0;
+        for (int k = 1; k <= 12; k++) {
+          float f = float(k) / 12.0;
+          // Muestras cada ~2 px, abiertas en abanico (penumbra suave en vez de rayas).
+          vec2 q = p + dn * largo * f + vec2(-dn.y, dn.x) * (float(k % 3) - 1.0) * f * 2.0;
+          tapado = max(tapado, texture(u_mascara, q / u_res).a * (1.0 - f * 0.8));
+        }
+        sombra = max(sombra, tapado * min(1.0, aten * 2.5 * u_lucesColor[i].a));
+      }
     }
     relieve *= u_relieve;
   }
+  relieve += contorno;
+  alb *= 1.0 - clamp(sombra, 0.0, 1.0) * 0.45 * u_sombras;
+  alb *= 1.0 - clamp(penumbra, 0.0, 1.0) * 0.3;
 
   // 4. Bloom del emisivo
   // El emisivo llega ya difuminado (bloom) desde el Pintor: aquí solo se suaviza un píxel.
@@ -128,6 +177,8 @@ export class CompositorWebGL {
   private destello = 0;
   /** Intensidad global del relieve (0 lo apaga). */
   relieve = 1;
+  /** Sombras de los personajes (0 las apaga; ?sinsombras). */
+  sombras = 1;
 
   constructor(lienzo: HTMLCanvasElement, private readonly ancho = 480, private readonly alto = 270) {
     const gl = lienzo.getContext("webgl2", { alpha: false, antialias: false, depth: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
@@ -135,7 +186,7 @@ export class CompositorWebGL {
     this.gl = gl;
     this.programa = this.crearPrograma(VS, FS);
     this.vao = this.crearQuad();
-    this.texturas = [0, 1, 2].map((u) => this.crearTextura(u));
+    this.texturas = [0, 1, 2, 3].map((u) => this.crearTextura(u));
     // El color de los lienzos 2D llega premultiplicado por su alfa: así el halo del bloom se desvanece en vez de
     // verse como un disco sólido (sin esto el navegador "des-premultiplica" y los bordes tenues salen a pleno brillo).
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -143,7 +194,8 @@ export class CompositorWebGL {
     gl.uniform1i(gl.getUniformLocation(this.programa, "u_albedo"), 0);
     gl.uniform1i(gl.getUniformLocation(this.programa, "u_normales"), 1);
     gl.uniform1i(gl.getUniformLocation(this.programa, "u_emisivo"), 2);
-    this.loc = Object.fromEntries(["u_res", "u_numLuces", "u_lucesPos", "u_lucesColor", "u_onda", "u_trauma", "u_destello", "u_relieve"]
+    gl.uniform1i(gl.getUniformLocation(this.programa, "u_mascara"), 3);
+    this.loc = Object.fromEntries(["u_res", "u_numLuces", "u_lucesPos", "u_lucesColor", "u_onda", "u_trauma", "u_destello", "u_relieve", "u_sombras"]
       .map((n) => [n, gl.getUniformLocation(this.programa, n)]));
     gl.uniform2f(this.loc.u_res, ancho, alto);
   }
@@ -175,7 +227,7 @@ export class CompositorWebGL {
     this.destello = Math.min(1, Math.max(this.destello, destello));
   }
 
-  renderizar(dt: number, albedo: TexImageSource, normales: TexImageSource, emisivo: TexImageSource): void {
+  renderizar(dt: number, albedo: TexImageSource, normales: TexImageSource, emisivo: TexImageSource, mascara: TexImageSource): void {
     if (this.onda[2] > 0) {
       this.onda[2] += dt * this.velocidadOnda;
       if (this.onda[2] >= 1) this.onda[2] = 0;
@@ -185,7 +237,7 @@ export class CompositorWebGL {
     const gl = this.gl;
     gl.viewport(0, 0, this.ancho, this.alto);
     gl.useProgram(this.programa);
-    [albedo, normales, emisivo].forEach((fuente, u) => {
+    [albedo, normales, emisivo, mascara].forEach((fuente, u) => {
       gl.activeTexture(gl.TEXTURE0 + u);
       gl.bindTexture(gl.TEXTURE_2D, this.texturas[u]);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, fuente);
@@ -199,6 +251,7 @@ export class CompositorWebGL {
     gl.uniform1f(this.loc.u_trauma, this.trauma * this.trauma);
     gl.uniform1f(this.loc.u_destello, this.destello);
     gl.uniform1f(this.loc.u_relieve, this.relieve);
+    gl.uniform1f(this.loc.u_sombras, this.sombras);
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }

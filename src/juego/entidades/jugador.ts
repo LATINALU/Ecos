@@ -1365,8 +1365,22 @@ export class Jugador implements Cuerpo {
     g.restore();
   }
 
-  dibujar(g: CanvasRenderingContext2D, ctx: Contexto): void {
-    this.dibujarSmear(g);
+  /** Brillo propio del Portador (capa emisiva): el borde de la capa y un halo con el aura de su Forma (5★+). */
+  dibujarEmisivo(e: CanvasRenderingContext2D, color: string | null): void {
+    if (color === null) return;
+    this.capa.dibujarAura(e, color);
+    const grad = e.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, 16);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    e.globalAlpha = 0.18 + Math.sin(this.t * 3) * 0.05;
+    e.fillStyle = grad;
+    e.fillRect(this.cx - 16, this.cy - 16, 32, 32);
+    e.globalAlpha = 1;
+  }
+
+  /** `silueta`: solo el cuerpo, la capa y el arma (para la máscara de luz de contorno), sin efectos ni registros. */
+  dibujar(g: CanvasRenderingContext2D, ctx: Contexto, silueta = false): void {
+    if (!silueta) this.dibujarSmear(g);
     const forma = ctx.partida.forma;
     const a = forma !== null ? alma(forma.personaje) : null;
     const cuerpo = a?.color ?? "#6a6a7a";
@@ -1376,6 +1390,7 @@ export class Jugador implements Cuerpo {
     const colorArma: string = elem !== undefined ? ELEMENTOS[elem].color : estilo.color;
 
     // Fantasmas (paso atrás, barrida, embestida, tajo): siluetas del color de la Forma.
+    if (!silueta) {
     g.save();
     g.globalCompositeOperation = "lighter";
     for (const f of this.fantasmas) {
@@ -1383,6 +1398,7 @@ export class Jugador implements Cuerpo {
       dibujarPortador(g, f.x, f.pies, f.dir, f.pose, { cuerpo: acento, acento }, this.t);
     }
     g.restore();
+    }
 
     if (this.invuln > 0 && this.atras <= 0 && Math.floor(this.t * 20) % 2 === 0) return;
 
@@ -1409,6 +1425,7 @@ export class Jugador implements Cuerpo {
     // Arma en la mano (solo al atacar)
     if (enUso) this.dibujarArmaEnUso(g, estilo.id, mano.manoX, mano.manoY, mano.angulo, colorArma, estilo.alcance * (1 + ctx.partida.combate().alcance), progreso);
     // Trazo: se registra la punta del arma mientras el golpe corta.
+    if (silueta) return;
     if (enUso && estilo.id !== "arco" && atk !== null && (atk.tipo === "golpe" || atk.tipo === "cargado" || atk.tipo === "estocada" || atk.tipo === "giro" || atk.tipo === "ascendente")) {
       const largo = estilo.alcance * (1 + ctx.partida.combate().alcance) * 0.9;
       this.trazo.muestra(mano.manoX, mano.manoY, mano.manoX + Math.cos(mano.angulo) * largo, mano.manoY + Math.sin(mano.angulo) * largo);

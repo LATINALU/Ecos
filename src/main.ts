@@ -59,6 +59,7 @@ albedo.height = ALTO;
 if (!new URLSearchParams(location.search).has("sinwebgl")) {
   try {
     compositor = new CompositorWebGL(lienzo, ANCHO, ALTO);
+    if (new URLSearchParams(location.search).has("sinsombras")) compositor.sombras = 0;
   } catch {
     compositor = null;
   }
@@ -407,7 +408,7 @@ function cuadro(ahora: number): void {
     // Solo desarrollo: ?capa=normales|emisivo muestra esa capa del G-Buffer en lugar del color.
     const ver = import.meta.env.DEV ? capaDepuracion : null;
     const fuente = ver === "normales" ? pintor.normales.canvas : ver === "emisivo" ? pintor.emisivo.canvas : albedo;
-    compositor.renderizar(dt, fuente, pintor.normales.canvas, pintor.emisivoConBloom());
+    compositor.renderizar(dt, ver === "mascara" ? pintor.cerrarMascara() : fuente, pintor.normales.canvas, pintor.emisivoConBloom(), pintor.cerrarMascara());
   }
   hd.pintar();
   requestAnimationFrame(cuadro);

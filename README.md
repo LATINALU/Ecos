@@ -25,6 +25,11 @@ principal:
   compositor WebGL2 le suma relieve iluminado (la roca y las cadenas brillan del lado de cada luz), bloom, **ondas de
   choque** (esquiva perfecta, pisotón, guardia rota, Definitiva) y **aberración cromática** al recibir golpes o con
   poca vida. Sin WebGL2 se ve como antes.
+- **Personajes iluminados:** el Portador, los enemigos y la gente del pueblo reciben un borde de luz del lado de
+  cada farol o vela (máscara de siluetas en el compositor); los ojos de los enemigos y el aura de la Forma (5★+)
+  brillan con bloom, y la capa del Portador es una tela Verlet que ondea con el movimiento y el viento.
+- **Sombras y volumen de personajes:** cada personaje proyecta una sombra suave sobre el fondo, alejándose de cada
+  luz, y su cuerpo se ilumina del lado de la luz y se oscurece del otro (`?sinsombras` las apaga).
 - **Las salas recuerdan la pelea:** la sangre salpica y mancha suelos y paredes, las explosiones y los pisotones
   dejan cráteres de hollín y las flechas quedan clavadas en la roca mientras dure el piso.
 - **Estela del arma** del color del aura de tu Forma (prismática en 12★), más ancha cuanto más alto tu estilo.

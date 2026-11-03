@@ -16,6 +16,8 @@ export const NORMAL_IZQUIERDA = "rgb(40, 128, 200)";
 export const NORMAL_DERECHA = "rgb(215, 128, 200)";
 
 function lienzo(w: number, h: number): CanvasRenderingContext2D {
+  // Fuera del navegador (pruebas en Node) no hay lienzos: el pintor queda inactivo y nadie lo usa.
+  if (typeof document === "undefined") return null as unknown as CanvasRenderingContext2D;
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -27,6 +29,11 @@ function lienzo(w: number, h: number): CanvasRenderingContext2D {
 export class PintorDiferido {
   readonly normales: CanvasRenderingContext2D;
   readonly emisivo: CanvasRenderingContext2D;
+  /**
+   * MÁSCARA de siluetas (Portador, enemigos, jefes, Ecos, habitantes): el compositor saca de su borde una normal
+   * y les da LUZ DE CONTORNO del color de cada luz cercana, sin tener que redibujar cada personaje con volumen.
+   */
+  readonly mascara: CanvasRenderingContext2D;
   /** El emisivo con su halo (bloom): nítido + difuminado a dos radios. Es lo que recibe el compositor. */
   private readonly bloom: CanvasRenderingContext2D;
   /** true solo si el compositor WebGL2 está funcionando. */
@@ -36,6 +43,20 @@ export class PintorDiferido {
     this.normales = lienzo(ancho, alto);
     this.emisivo = lienzo(ancho, alto);
     this.bloom = lienzo(ancho, alto);
+    this.mascara = lienzo(ancho, alto);
+  }
+
+  /** Convierte todo lo dibujado en la máscara en silueta blanca (alfa intacto). */
+  cerrarMascara(): HTMLCanvasElement {
+    const m = this.mascara;
+    m.save();
+    m.setTransform(1, 0, 0, 1, 0, 0);
+    m.globalAlpha = 1;
+    m.globalCompositeOperation = "source-in";
+    m.fillStyle = "#ffffff";
+    m.fillRect(0, 0, this.ancho, this.alto);
+    m.restore();
+    return m.canvas;
   }
 
   /** Emisivo con bloom listo para subir a la GPU. */
@@ -64,6 +85,9 @@ export class PintorDiferido {
     this.normales.fillStyle = NORMAL_NEUTRA;
     this.normales.fillRect(0, 0, this.ancho, this.alto);
     this.emisivo.clearRect(0, 0, this.ancho, this.alto);
+    this.mascara.setTransform(1, 0, 0, 1, 0, 0);
+    this.mascara.globalCompositeOperation = "source-over";
+    this.mascara.clearRect(0, 0, this.ancho, this.alto);
   }
 
   /** Rectángulo con bisel: el centro mira de frente y los bordes hacia los lados (para columnas, bloques…). */

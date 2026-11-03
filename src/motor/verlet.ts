@@ -52,6 +52,14 @@ export class CuerdaVerlet {
     this.y[i] = this.oy[i] = y;
   }
 
+  /** Pone toda la cuerda en un punto (teletransportes, cambios de sala). */
+  reiniciar(x: number, y: number): void {
+    for (let i = 0; i < this.n; i++) {
+      this.x[i] = this.ox[i] = x;
+      this.y[i] = this.oy[i] = y + i * this.largo;
+    }
+  }
+
   soltar(i: number): void {
     this.fijo[i] = 0;
   }

@@ -7,6 +7,8 @@
 import { hd } from "../motor/texto-hd.ts";
 import { BIOMAS, bioma, type Bioma } from "../contenido/biomas.ts";
 import { HISTORIAS } from "../contenido/historias.ts";
+import { pintor } from "../motor/pintor.ts";
+import { postfx, rgbDe } from "../motor/postfx.ts";
 import { MEJORAS_SANTUARIO } from "../dominio/meta.ts";
 import { ROCA } from "../contenido/atlas.ts";
 import { ALTO_SALA, ANCHO_SALA, FILAS, TILE } from "../dominio/mundo/sala.ts";
@@ -368,6 +370,20 @@ export class Pueblo implements Contexto {
       luces.push({ x: x - cam, y: SUELO - 52, r: 52 + Math.sin(this.t * 7 + i) * 3, fuerza: 0.9, color: this.etapa >= 3 ? "#9fe8ff" : undefined });
     }
     this.luz.dibujar(g, 0.52 - this.avance * 0.28, luces, "rgba(0,0,0,0)");
+    if (pintor.activo) {
+      postfx.luces(luces.map((l) => ({ x: l.x, y: l.y, radio: l.r * 1.3, color: rgbDe(l.color), fuerza: l.fuerza ?? 1 })));
+      // Siluetas de los habitantes y del Portador: los faroles les dibujan el contorno.
+      const m = pintor.mascara;
+      m.save();
+      m.translate(-cam, -2);
+      for (const n of NPCS) {
+        if (n.servicio === "pozo") continue;
+        dibujarPortador(m, n.x - 24, SUELO, this.jugador.cx < n.x ? -1 : 1, n.servicio === "herrero" ? "agachado" : "quieto", { cuerpo: "#fff", acento: "#fff" }, this.t + n.x, { variante: n.variante });
+      }
+      for (const a of this.aventureros) dibujarPortador(m, a.x, SUELO, a.vel > 0 ? 1 : -1, "correr", { cuerpo: "#fff", acento: "#fff" }, this.t * 0.6 + a.x, { variante: a.variante });
+      this.jugador.dibujar(m, this, true);
+      m.restore();
+    }
     dibujarVineta(g);
 
     // Etiqueta del comerciante cercano

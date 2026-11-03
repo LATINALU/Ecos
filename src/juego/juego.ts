@@ -2775,6 +2775,16 @@ export class Juego implements Contexto {
     }
     this.aliado?.dibujar(g);
     if (!j.muerto) j.dibujar(g, this);
+    // Siluetas para la luz de contorno del compositor.
+    if (pintor.activo) {
+      const m = pintor.mascara;
+      m.save();
+      m.translate(sx, Math.round(-camY) + sy);
+      for (const c of this.criaturas) if (!(c instanceof Vela) && !c.muerto) c.dibujar(m);
+      this.aliado?.dibujar(m);
+      if (!j.muerto) j.dibujar(m, this, true);
+      m.restore();
+    }
     if (!j.muerto && j.carga > 0.12) {
       const f = Math.min(1, j.carga / CARGA_COMPLETA);
       g.save();
@@ -2803,6 +2813,14 @@ export class Juego implements Contexto {
       e.translate(sx, Math.round(-camY) + sy);
       this.particulas.dibujar(g, e);
       if (!j.muerto) j.trazo.dibujar(e, this.colorTrazo(), this.combo.indiceRango);
+      // Ojos que brillan en la oscuridad y el aura de la Forma del Portador.
+      for (const c of this.criaturas) {
+        if (!(c instanceof Enemigo) || c.muerto) continue;
+        e.fillStyle = c.paleta[1];
+        e.fillRect(Math.round(c.cx + c.dir * c.w * 0.25) - 1, Math.round(c.y + c.h * 0.3), c.categoria === "elite" ? 3 : 2, 1);
+      }
+      const f = this.partida.forma;
+      if (!j.muerto) j.dibujarEmisivo(e, f !== null && f.nivel >= 4 ? this.colorTrazo() : null);
       e.restore();
     } else {
       this.particulas.dibujar(g, null);

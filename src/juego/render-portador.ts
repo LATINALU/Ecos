@@ -1,3 +1,4 @@
+import { CuerdaVerlet } from "../motor/verlet.ts";
 // Dibujo procedural del Portador (y de los Ecos): poses animadas + capa con física (verlet).
 // Todo se dibuja en coordenadas locales: origen en los PIES, mirando a la derecha; el espejo lo hace la
 // transformación. Así cada pose es una lista corta de rectángulos y queda legible a 12×22 px.
@@ -17,77 +18,59 @@ const OSCURO = "#0d0b12";
 const BOTAS = "#1a1622";
 
 /** Capa con física: una cadena de puntos que cuelga de los hombros y sigue el movimiento. */
+/** Capa del Portador: una CuerdaVerlet del motor anclada a los hombros. */
 export class Capa {
-  private readonly p: { x: number; y: number; px: number; py: number }[] = [];
-  private readonly largo: number;
+  private readonly cuerda: CuerdaVerlet;
 
   constructor(segmentos = 7, largo = 2.6) {
-    this.largo = largo;
-    for (let i = 0; i < segmentos; i++) this.p.push({ x: 0, y: 0, px: 0, py: 0 });
+    this.cuerda = new CuerdaVerlet({ x: 0, y: 0, segmentos: segmentos - 1, largoSegmento: largo, gravedad: 520, friccion: 0.9, iteraciones: 3 });
   }
 
   reiniciar(x: number, y: number): void {
-    for (const q of this.p) {
-      q.x = q.px = x;
-      q.y = q.py = y;
-    }
+    this.cuerda.reiniciar(x, y);
   }
 
   /** `ax, ay` = hombros (mundo). `dir` empuja la capa hacia atrás aunque esté quieto. */
   actualizar(ax: number, ay: number, dir: number, dt: number, viento = 0): void {
-    const p = this.p;
-    if (Math.abs(p[0].x - ax) > 40 || Math.abs(p[0].y - ay) > 40) this.reiniciar(ax, ay);
-    p[0].x = p[0].px = ax;
-    p[0].y = p[0].py = ay;
-    const g = 520 * dt * dt;
-    for (let i = 1; i < p.length; i++) {
-      const q = p[i];
-      const vx = (q.x - q.px) * 0.9;
-      const vy = (q.y - q.py) * 0.9;
-      q.px = q.x;
-      q.py = q.y;
-      // Empuje constante hacia atrás: la capa se ve aunque el Portador esté quieto.
-      q.x += vx + (-dir * 220 + viento) * dt * dt;
-      q.y += vy + g;
-    }
-    for (let it = 0; it < 3; it++) {
-      for (let i = 1; i < p.length; i++) {
-        const a = p[i - 1];
-        const b = p[i];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d = Math.hypot(dx, dy) || 0.001;
-        const f = (d - this.largo) / d;
-        if (i - 1 === 0) {
-          b.x -= dx * f;
-          b.y -= dy * f;
-        } else {
-          a.x += dx * f * 0.5;
-          a.y += dy * f * 0.5;
-          b.x -= dx * f * 0.5;
-          b.y -= dy * f * 0.5;
-        }
-      }
-    }
+    const c = this.cuerda;
+    if (Math.abs(c.x[0] - ax) > 40 || Math.abs(c.y[0] - ay) > 40) c.reiniciar(ax, ay);
+    c.anclar(ax, ay);
+    // El empuje crece hacia la punta (más tela al viento): la capa se ve aunque el Portador esté quieto.
+    c.actualizar(dt, (-dir * 220 + viento) * 2);
   }
 
   dibujar(g: CanvasRenderingContext2D, exterior: string, interior: string): void {
-    const p = this.p;
-    for (let i = 1; i < p.length; i++) {
-      const a = p[i - 1];
-      const b = p[i];
+    const c = this.cuerda;
+    for (let i = 1; i < c.n; i++) {
       const ancho = Math.max(2, 6 - i * 0.5);
-      const pasos = 3;
-      for (let k = 0; k < pasos; k++) {
-        const t = k / pasos;
-        const x = a.x + (b.x - a.x) * t;
-        const y = a.y + (b.y - a.y) * t;
+      for (let k = 0; k < 3; k++) {
+        const t = k / 3;
+        const x = c.x[i - 1] + (c.x[i] - c.x[i - 1]) * t;
+        const y = c.y[i - 1] + (c.y[i] - c.y[i - 1]) * t;
         g.fillStyle = exterior;
         g.fillRect(Math.round(x - ancho / 2), Math.round(y), Math.ceil(ancho), 2);
         g.fillStyle = interior;
         g.fillRect(Math.round(x - ancho / 2), Math.round(y), 1, 2);
       }
     }
+  }
+
+  /** Borde de la capa en la capa emisiva: brilla con el aura de la Forma (5★+). */
+  dibujarAura(e: CanvasRenderingContext2D, color: string): void {
+    const c = this.cuerda;
+    e.strokeStyle = color;
+    e.lineWidth = 1;
+    e.globalAlpha = 0.8;
+    e.beginPath();
+    for (let i = 1; i < c.n; i++) {
+      const ancho = Math.max(2, 6 - i * 0.5);
+      const x = Math.round(c.x[i] + ancho / 2);
+      const y = Math.round(c.y[i]);
+      if (i === 1) e.moveTo(x, y);
+      else e.lineTo(x, y);
+    }
+    e.stroke();
+    e.globalAlpha = 1;
   }
 }
 
