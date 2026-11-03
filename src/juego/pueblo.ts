@@ -20,6 +20,7 @@ import type { Criatura } from "./entidades/criatura.ts";
 import { Jugador } from "./entidades/jugador.ts";
 import type { Proyectil } from "./entidades/proyectil.ts";
 import { dibujarPortador } from "./render-portador.ts";
+import { animarEdificio, chimeneas, dibujarEdificio, dibujarRotulos, lucesEdificio, type Rotulo } from "./edificios.ts";
 import { Iluminacion, dibujarVineta, type Luz } from "./render.ts";
 
 export type Servicio = "taberna" | "mercader" | "armero" | "banco" | "altar" | "herrero" | "santuario" | "pozo";
@@ -36,41 +37,41 @@ export interface Npc {
   readonly techo: string;
 }
 
-export const COLS_PUEBLO = 60;
+export const COLS_PUEBLO = 72;
 export const ANCHO_PUEBLO = COLS_PUEBLO * TILE;
 const SUELO = 14 * TILE;
 
 export const NPCS: readonly Npc[] = [
   {
-    servicio: "taberna", nombre: "Ilse", edificio: "Taberna «El Último Eco»", x: 74, paleta: ["#7a3a2a", "#ffd27a"], variante: 1,
+    servicio: "taberna", nombre: "Ilse", edificio: "Taberna «El Último Eco»", x: 80, paleta: ["#7a3a2a", "#ffd27a"], variante: 1,
     frases: ["¿Otra vez de vuelta? El tablón tiene trabajo.", "Los que no vuelven dejan cuentas sin pagar."], muro: "#5a3a28", techo: "#7a2a20",
   },
   {
-    servicio: "mercader", nombre: "Tobías", edificio: "Bazar del Pozo", x: 188, paleta: ["#3a5a3a", "#ffb23d"], variante: 3,
+    servicio: "mercader", nombre: "Tobías", edificio: "Bazar del Pozo", x: 216, paleta: ["#3a5a3a", "#ffb23d"], variante: 3,
     frases: ["Todo se compra, todo se vende.", "¿Pociones? ¿Huesos? Tengo de todo."], muro: "#4a4030", techo: "#2a5a3a",
   },
   {
-    servicio: "armero", nombre: "Brunhild", edificio: "Armería Hierro Viejo", x: 302, paleta: ["#6a6a7a", "#ff7a3d"], variante: 0,
+    servicio: "armero", nombre: "Brunhild", edificio: "Armería Hierro Viejo", x: 352, paleta: ["#6a6a7a", "#ff7a3d"], variante: 0,
     frases: ["Acero nuevo cada vez que volvés.", "Cuanto más bajes, mejor lo que traigo."], muro: "#4a4a58", techo: "#3a3a48",
   },
   {
-    servicio: "banco", nombre: "Custodio Vael", edificio: "Bóveda de los Caídos", x: 416, paleta: ["#2a2a40", "#c9a7ff"], variante: 2,
+    servicio: "banco", nombre: "Custodio Vael", edificio: "Bóveda de los Caídos", x: 488, paleta: ["#2a2a40", "#c9a7ff"], variante: 2,
     frases: ["Lo que dejes aquí no lo reclama el Pozo.", "Guardo hasta lo que los muertos olvidaron."], muro: "#3a3448", techo: "#2a2440",
   },
   {
-    servicio: "altar", nombre: "Hermana Ceniza", edificio: "Altar de las Almas", x: 530, paleta: ["#e8e0cc", "#a07cff"], variante: 1,
+    servicio: "altar", nombre: "Hermana Ceniza", edificio: "Altar de las Almas", x: 624, paleta: ["#e8e0cc", "#a07cff"], variante: 1,
     frases: ["Tres almas, una sola voz.", "Las almas se reconocen entre ellas."], muro: "#5a5068", techo: "#6a4a8a",
   },
   {
-    servicio: "herrero", nombre: "Dorn", edificio: "Fragua del Pueblo", x: 644, paleta: ["#5a3a2a", "#ff7a3d"], variante: 0,
+    servicio: "herrero", nombre: "Dorn", edificio: "Fragua del Pueblo", x: 760, paleta: ["#5a3a2a", "#ff7a3d"], variante: 0,
     frases: ["Del +6 en adelante, reza.", "Traeme fragmentos y te hago magia."], muro: "#4a3028", techo: "#3a2018",
   },
   {
-    servicio: "santuario", nombre: "El Ermitaño", edificio: "Santuario", x: 758, paleta: ["#2a3a4a", "#9fe8ff"], variante: 2,
+    servicio: "santuario", nombre: "El Ermitaño", edificio: "Santuario", x: 896, paleta: ["#2a3a4a", "#9fe8ff"], variante: 2,
     frases: ["La esencia de los que caen fortalece al que sigue.", "Tus ecos también me visitan."], muro: "#3a4a5a", techo: "#2a3a5a",
   },
   {
-    servicio: "pozo", nombre: "El Pozo", edificio: "El Pozo", x: 884, paleta: ["#1a1428", "#c9a7ff"], variante: 1,
+    servicio: "pozo", nombre: "El Pozo", edificio: "El Pozo", x: 1036, paleta: ["#1a1428", "#c9a7ff"], variante: 1,
     frases: ["Abajo, todo recuerda."], muro: "#2a2438", techo: "#1a1428",
   },
 ];
@@ -102,6 +103,7 @@ export class Pueblo implements Contexto {
   private readonly eventos: EventosPueblo;
   private readonly luz = new Iluminacion(ANCHO_SALA, 270);
   private fondo: HTMLCanvasElement | null = null;
+  private rotulos: Rotulo[] = [];
   private t = 0;
   private camX = 0;
   private frase = new Map<Servicio, number>();
@@ -146,6 +148,11 @@ export class Pueblo implements Contexto {
       // luciérnagas y brasas de los faroles
       this.fx.ambiente(Math.random() * ANCHO_PUEBLO, 120 + Math.random() * 100, Math.random() < 0.6 ? "#ffe27a" : "#c9a7ff", -6, true);
     }
+    for (const e of NPCS) {
+      for (const [hx, hy] of chimeneas(e.servicio, e.x, SUELO)) {
+        if (Math.random() < dt * (e.servicio === "herrero" ? 9 : 4)) this.fx.ambiente(hx + Math.random() * 6, hy, e.servicio === "herrero" && Math.random() < 0.3 ? "#ff9a3d" : "#6a6478", -14, e.servicio === "herrero");
+      }
+    }
     const n = this.cercano();
     if (n !== undefined && this.entrada.recien("interactuar")) {
       const i = (this.frase.get(n.servicio) ?? -1) + 1;
@@ -164,57 +171,20 @@ export class Pueblo implements Contexto {
     c.height = ALTO_SALA;
     const g = c.getContext("2d")!;
     g.imageSmoothingEnabled = false;
-    // Edificios
-    for (const n of NPCS) {
-      if (n.servicio === "pozo") {
-        this.dibujarPozo(g, n);
-        continue;
-      }
-      const w = 92;
-      const h = 96;
-      const x = n.x - w / 2;
-      const y = SUELO - h;
-      g.fillStyle = n.muro;
-      g.fillRect(x, y, w, h);
-      // entramado de madera
-      g.fillStyle = "#00000044";
-      for (let k = 0; k < 4; k++) g.fillRect(x + k * (w / 3), y, 3, h);
-      g.fillRect(x, y + h * 0.45, w, 3);
-      // techo
-      g.fillStyle = n.techo;
+    // Murallas y casitas del fondo (siluetas), luego cada edificio según su oficio.
+    g.fillStyle = "#1c1626";
+    for (let x = 0; x < ANCHO_PUEBLO; x += 46) {
+      const h = 40 + ((x * 7) % 23);
+      g.fillRect(x + 4, SUELO - h, 34, h);
       g.beginPath();
-      g.moveTo(x - 8, y + 2);
-      g.lineTo(n.x, y - 34);
-      g.lineTo(x + w + 8, y + 2);
+      g.moveTo(x, SUELO - h);
+      g.lineTo(x + 21, SUELO - h - 18);
+      g.lineTo(x + 42, SUELO - h);
       g.fill();
-      g.fillStyle = "#00000033";
-      for (let k = 0; k < 6; k++) g.fillRect(x - 6 + k * 18, y - 8 - (k < 3 ? k * 8 : (5 - k) * 8), 14, 2);
-      // chimenea
-      g.fillStyle = n.muro;
-      g.fillRect(x + w - 24, y - 30, 10, 22);
-      // puerta y ventanas encendidas
-      g.fillStyle = "#2a1a10";
-      g.fillRect(n.x - 9, SUELO - 30, 18, 30);
-      g.fillStyle = "#4a2a18";
-      g.fillRect(n.x - 7, SUELO - 28, 14, 28);
-      g.fillStyle = "#ffd27a";
-      g.fillRect(n.x + 3, SUELO - 16, 2, 2);
-      for (const dx of [-30, 22]) {
-        g.fillStyle = "#1a1008";
-        g.fillRect(n.x + dx - 1, y + 22, 18, 16);
-        g.fillStyle = "#ffcf6a";
-        g.fillRect(n.x + dx, y + 23, 16, 14);
-        g.fillStyle = "#1a1008";
-        g.fillRect(n.x + dx + 7, y + 23, 2, 14);
-        g.fillRect(n.x + dx, y + 29, 16, 2);
-      }
-      // cartel
-      g.fillStyle = "#2a1a10";
-      g.fillRect(n.x - 46, y + 4, 92, 13);
-      g.fillStyle = "#c9a76a";
-      g.fillRect(n.x - 45, y + 5, 90, 11);
-      hd.texto(g, n.edificio.replace(/«|»/g, "").slice(0, 24), n.x, y + 13, { color: "#ffe9c0", alinear: "center", tam: 7 });
     }
+    g.fillStyle = "#ffcf6a55";
+    for (let x = 0; x < ANCHO_PUEBLO; x += 46) if ((x / 46) % 3 !== 1) g.fillRect(x + 16, SUELO - 30 - ((x * 7) % 11), 3, 4);
+    this.rotulos = NPCS.flatMap((n) => dibujarEdificio(g, n.servicio, n.x, SUELO, n.edificio));
     // Faroles entre edificios
     for (let i = 0; i < NPCS.length - 1; i++) {
       const x = (NPCS[i].x + NPCS[i + 1].x) / 2;
@@ -237,30 +207,6 @@ export class Pueblo implements Contexto {
       }
     }
     return c;
-  }
-
-  private dibujarPozo(g: CanvasRenderingContext2D, n: Npc): void {
-    const x = n.x;
-    // brocal de piedra
-    g.fillStyle = "#4a4458";
-    g.fillRect(x - 30, SUELO - 22, 60, 22);
-    g.fillStyle = "#6e6684";
-    for (let k = 0; k < 6; k++) g.fillRect(x - 30 + k * 10, SUELO - 22 + (k % 2) * 6, 9, 5);
-    g.fillStyle = "#0a0614";
-    g.fillRect(x - 24, SUELO - 24, 48, 4);
-    // estructura y polea
-    g.fillStyle = "#3a2a1a";
-    g.fillRect(x - 28, SUELO - 70, 4, 50);
-    g.fillRect(x + 24, SUELO - 70, 4, 50);
-    g.fillRect(x - 30, SUELO - 72, 60, 5);
-    g.fillStyle = "#8a6a3a";
-    g.fillRect(x - 4, SUELO - 66, 8, 8);
-    g.fillStyle = "#9a90b0";
-    g.fillRect(x, SUELO - 58, 1, 34);
-    // cartel
-    g.fillStyle = "#c9a76a";
-    g.fillRect(x - 22, SUELO - 90, 44, 11);
-    hd.texto(g, "EL POZO", x, SUELO - 82, { color: "#ffe9c0", alinear: "center", tam: 7 });
   }
 
   dibujar(g: CanvasRenderingContext2D): void {
@@ -292,6 +238,24 @@ export class Pueblo implements Contexto {
       g.lineTo(mx + 90, 200);
       g.fill();
     }
+    // Castillo en la colina (parallax lento)
+    const cx0 = 300 - cam * 0.12;
+    g.fillStyle = "#170f22";
+    g.beginPath();
+    g.ellipse(cx0, 205, 150, 50, 0, Math.PI, 0);
+    g.fill();
+    for (const [dx, w, h] of [[-50, 16, 70], [-26, 40, 50], [18, 14, 84], [40, 30, 44], [70, 12, 60]] as const) {
+      g.fillRect(cx0 + dx, 165 - h, w, h + 10);
+      for (let k = 0; k < w; k += 5) g.fillRect(cx0 + dx + k, 161 - h, 3, 4);
+    }
+    g.fillStyle = "#ffcf6a88";
+    g.fillRect(cx0 + 22, 100, 2, 3);
+    g.fillRect(cx0 - 45, 118, 2, 3);
+    g.fillRect(cx0 + 50, 140, 2, 3);
+    g.fillStyle = "#c83a3a";
+    g.fillRect(cx0 + 25, 66, 1, 12);
+    g.fillRect(cx0 + 26, 66 + Math.round(Math.sin(this.t * 3)), 7, 4);
+
     g.save();
     g.globalCompositeOperation = "lighter";
     g.globalAlpha = 0.25 + Math.sin(this.t) * 0.05;
@@ -304,11 +268,13 @@ export class Pueblo implements Contexto {
     g.save();
     g.translate(-cam, -2);
     g.drawImage(this.fondo, 0, 0);
+    for (const n of NPCS) if (Math.abs(n.x - cam - ANCHO_SALA / 2) < ANCHO_SALA) animarEdificio(g, n.servicio, n.x, SUELO, this.t);
+    dibujarRotulos(g, this.rotulos.filter((r) => Math.abs(r.x - cam - ANCHO_SALA / 2) < ANCHO_SALA / 2 + 60));
     // Comerciantes
     for (const n of NPCS) {
       if (n.servicio === "pozo") continue;
       const dir = this.jugador.cx < n.x ? -1 : 1;
-      dibujarPortador(g, n.x + 22, SUELO, dir, "quieto", { cuerpo: n.paleta[0], acento: n.paleta[1] }, this.t + n.x, { variante: n.variante });
+      dibujarPortador(g, n.x - 24, SUELO, dir, "quieto", { cuerpo: n.paleta[0], acento: n.paleta[1] }, this.t + n.x, { variante: n.variante });
     }
     this.jugador.dibujar(g, this);
     this.fx.dibujarParticulas(g);
@@ -317,11 +283,7 @@ export class Pueblo implements Contexto {
     // Luces: ventanas, faroles, el Portador
     const luces: Luz[] = [{ x: this.jugador.cx - cam, y: this.jugador.cy, r: 80 }];
     for (const n of NPCS) {
-      if (n.servicio === "pozo") {
-        luces.push({ x: n.x - cam, y: SUELO - 20, r: 60, fuerza: 0.6 });
-        continue;
-      }
-      luces.push({ x: n.x - 22 - cam, y: SUELO - 66, r: 34, fuerza: 0.8 }, { x: n.x + 30 - cam, y: SUELO - 66, r: 34, fuerza: 0.8 });
+      for (const l of lucesEdificio(n.servicio, n.x, SUELO - 2, this.t)) luces.push({ ...l, x: l.x - cam });
     }
     for (let i = 0; i < NPCS.length - 1; i++) {
       const x = (NPCS[i].x + NPCS[i + 1].x) / 2;
@@ -337,7 +299,7 @@ export class Pueblo implements Contexto {
     if (cerca !== undefined) {
       const frases = cerca.frases;
       const linea = frases[(this.frase.get(cerca.servicio) ?? 0) % frases.length];
-      const texto = cerca.servicio === "pozo" ? "E · Bajar al Pozo" : `E · ${cerca.nombre} — ${cerca.edificio}`;
+      const texto = cerca.servicio === "pozo" ? "E · Bajar al Pozo o al Abismo" : `E · ${cerca.nombre} — ${cerca.edificio}`;
       g.font = "bold 8px monospace";
       const w = Math.max(g.measureText(texto).width, g.measureText(linea).width) + 10;
       const x = Math.round(Math.max(cam + 4, Math.min(cam + ANCHO_SALA - w - 4, cerca.x - w / 2)));

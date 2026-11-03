@@ -9,8 +9,8 @@ import { ORDEN_SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
 import { conjuntoDelPiso } from "../contenido/conjuntos.ts";
 import { ACCESORIOS, ARMADURAS, type TipoPieza } from "./tipos.ts";
 import { objetoRuna } from "../contenido/objetos.ts";
-import { MAT_FRAGMENTO, OBJ_DADO_BASE, PRECIO_DADO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
-import { RAREZA_CARTA_JEFE, RAREZA_CARTA_PISO, cartaAleatoria, type Carta } from "./cartas.ts";
+import { MAT_FRAGMENTO, OBJ_CAJA_ALMAS, OBJ_DADO_BASE, OBJ_RELICARIO, PRECIO_DADO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
+import type { Carta } from "./cartas.ts";
 import { crearUnico, generarEquipo, type ObjetoEquipo, type Rareza } from "./equipo.ts";
 
 export const FICHA_EQUIPO = 900;
@@ -76,10 +76,9 @@ function resolverFicha(azar: Azar, piso: number, ficha: number, minima: Rareza =
     case FICHA_ARMADURA:
       return { tipo: "equipo", equipo: generarEquipo(azar, piso, minima, CLASES_ARMADURA, undefined, fortuna) };
     case FICHA_CARTA:
-      // En el Pozo Profundo las cartas salen mejores (cada piso más hondo cuenta como 12 de suerte).
-      fortuna += Math.max(0, piso - 10) * 12;
-      // Élites y cofres: tabla de cartas de un piso más hondo; guardianes, la de jefes.
-      return { tipo: "carta", carta: cartaAleatoria(azar, minima >= 2 ? RAREZA_CARTA_JEFE[indicePiso(piso)] : RAREZA_CARTA_PISO[indicePiso(piso + (minima > 0 ? 2 : 0))], fortuna) };
+      // Las cartas ya no caen sueltas: los guardianes (y cofres de oro) dan un Relicario (5★~12★) y el resto,
+      // una Caja de Almas (1★~6★). Se abren desde el inventario.
+      return { tipo: "objeto", objeto: minima >= 2 ? OBJ_RELICARIO : OBJ_CAJA_ALMAS, cantidad: 1 };
     case FICHA_UNICO:
       return { tipo: "equipo", equipo: crearUnico(azar, piso) };
     case FICHA_RUNA:
@@ -102,10 +101,6 @@ export function tirarRarezaRuna(azar: Azar, piso: number, minima = 0): number {
     if (r <= 0) return k;
   }
   return 0;
-}
-
-function indicePiso(piso: number): number {
-  return Math.max(0, Math.min(piso - 1, RAREZA_CARTA_PISO.length - 1));
 }
 
 function esquirlas(azar: Azar, piso: number, categoria: Categoria, mod: ModificadoresBotin): Premio {
@@ -135,7 +130,7 @@ export function botinEnemigo(azar: Azar, piso: number, categoria: Categoria, mod
     const f = mod.fortuna ?? 0;
     premios.push(azar.siguiente() < 0.35 ? resolverFicha(azar, piso, FICHA_UNICO) : { tipo: "equipo", equipo: generarEquipo(azar, piso, 4, CLASES_EQUIPO, undefined, f) });
     premios.push({ tipo: "equipo", equipo: generarEquipo(azar, piso, 3, CLASES_ARMADURA, undefined, f) });
-    premios.push(resolverFicha(azar, piso, FICHA_CARTA, MINIMA.jefe, f));
+    // Un Relicario de Almas (5★~12★) seguro en cada guardián.
     premios.push(resolverFicha(azar, piso, FICHA_CARTA, MINIMA.jefe, f));
     premios.push({ tipo: "objeto", objeto: OBJ_POCION, cantidad: 2 });
     premios.push({ tipo: "objeto", objeto: OBJ_POLVO, cantidad: 2 + entero(azar, 3) });
@@ -189,4 +184,9 @@ export function botinVela(azar: Azar, piso: number): Premio[] {
 /** Probabilidades reales por muerte (para el Bestiario). */
 export function chancesVisibles(categoria: "comun" | "elite"): Map<number, number> {
   return probabilidadReal(categoria === "comun" ? TABLA_COMUN : TABLA_ELITE, "cada-uno");
+}
+
+/** Premio de carta de los guardianes: un Relicario de Almas (premio del Duelo del Campeón). */
+export function cartaDeJefe(azar: Azar, piso: number, fortuna = 0): Premio {
+  return resolverFicha(azar, piso, FICHA_CARTA, MINIMA.jefe, fortuna);
 }

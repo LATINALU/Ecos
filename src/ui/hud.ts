@@ -200,7 +200,7 @@ export function dibujarMinimapa(g: CanvasRenderingContext2D, mapa: MapaPiso, jue
         jefe: "#ff3d3d", altar: "#a07cff", tesoro: "#ffd23d", reliquia: "#7fe3ff", mercader: "#ffb23d", eco: "#ff8aff", inicio: "#ffffff",
         arena: "#ff6a3d", boveda: "#ffe9a8",
       };
-      const c = icono[s.tipo];
+      const c = juego.abismo && s.tipo === "jefe" ? "#b04dff" : icono[s.tipo];
       if (c !== undefined) {
         g.fillStyle = c;
         g.fillRect(x + celda / 2 - 1, y + celda / 2 - 1, 2, 2);
@@ -223,6 +223,8 @@ export function dibujarMinimapa(g: CanvasRenderingContext2D, mapa: MapaPiso, jue
   for (const id of mapa.extracciones ?? []) {
     const s = mapa.salas[id];
     if (s === undefined) continue;
+    // Abismo: las salidas están ocultas hasta encontrarlas (o con el Ojo del Abismo).
+    if (juego.abismo && !todo && !juego.salaVisitada(id)) continue;
     const x = ox + s.x * celda + celda / 2;
     const y = oy + s.y * celda + celda / 2;
     g.fillStyle = brillo ? "#7dffb0" : "#3d9a6a";

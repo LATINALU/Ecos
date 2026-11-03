@@ -109,10 +109,10 @@ describe("comercio", () => {
 });
 
 describe("misiones del tablón", () => {
-  it("hay 120 misiones: 10 por zona y 2 encargos repetibles por zona", () => {
-    expect(MISIONES).toHaveLength(120);
-    expect(MISIONES.filter((m) => m.repetible === true)).toHaveLength(20);
-    expect(new Set(MISIONES.map((m) => m.id)).size).toBe(120);
+  it("hay 138 misiones: 10 por zona, 3 encargos repetibles por zona y «Sin un rasguño» desde la zona 3", () => {
+    expect(MISIONES).toHaveLength(138);
+    expect(MISIONES.filter((m) => m.repetible === true)).toHaveLength(30);
+    expect(new Set(MISIONES.map((m) => m.id)).size).toBe(138);
     for (const m of MISIONES) {
       expect(INFO_MISIONES[m.id]?.objetivos.length).toBe(m.objetivos.length);
       if (m.requiere !== undefined) expect(MISIONES.some((x) => x.id === m.requiere)).toBe(true);

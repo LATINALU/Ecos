@@ -1,304 +1,447 @@
 # ECOS — El Pozo que Recuerda
 
-Metroidvania roguelike de plataformas en pixel art (todo dibujado por código), construido sobre las mecánicas de
-[`minialu`](../minialu) (la librería sacada de MiniFighter).
+**ECOS** es un juego de acción y plataformas en 2D, con dibujos en *pixel art*, que se juega en el navegador.
+Mezcla dos géneros:
 
-> Cada guerrero que cae en el Pozo deja un eco. Cuando mueras, tu **Eco** te esperará en el piso donde caíste,
-> con tu Forma, tus stats y tu mejor pieza de equipo. Véncelo para recuperarla. El jefe final, **El Que Recuerda**,
-> pelea con las técnicas de todos tus Ecos.
+- **Metroidvania**: exploras un mapa de salas conectadas y consigues poderes (las *reliquias*) que abren caminos nuevos.
+- **Roguelike**: cada vez que bajas, el mapa se genera de nuevo al azar, y si mueres pierdes lo que llevabas encima.
 
-## Jugar
+Eres un **Portador**: alguien que baja a un pozo sin fondo armado con las **almas** de guerreros caídos.
+Cada vez que mueres, el Pozo guarda un **Eco** tuyo, una copia de ti que te espera en el piso donde caíste.
 
-ECOS usa la librería [minialu](https://github.com/LATINALU/minialu) directamente desde el código fuente, así que
-las dos carpetas tienen que estar una al lado de la otra:
+> *Cada guerrero que cae en el Pozo deja un eco. El Pozo recuerda a todos.*
+
+Todo lo que se ve —personajes, enemigos, edificios, efectos— está dibujado por código, sin imágenes externas para lo
+principal.
+
+---
+
+## Índice
+
+1. [Cómo empezar a jugar](#cómo-empezar-a-jugar)
+2. [Controles](#controles)
+3. [La idea del juego en un minuto](#la-idea-del-juego-en-un-minuto)
+4. [El pueblo](#el-pueblo-último-refugio)
+5. [El Pozo: bajar, pelear y volver](#el-pozo-bajar-pelear-y-volver)
+6. [El Abismo: el pozo sin fin](#el-abismo-el-pozo-sin-fin)
+7. [Combate](#combate)
+8. [Armas](#armas)
+9. [Cartas de Alma](#cartas-de-alma)
+10. [Cajas de Almas y Relicarios](#cajas-de-almas-y-relicarios)
+11. [Equipo, rarezas y el inventario](#equipo-rarezas-y-el-inventario)
+12. [Reliquias: los poderes permanentes](#reliquias-los-poderes-permanentes)
+13. [Salas de desafío (arenas)](#salas-de-desafío-arenas)
+14. [El Juicio: desafíos de lategame](#el-juicio-desafíos-de-lategame)
+15. [Progresión del Portador](#progresión-del-portador)
+16. [Ecos: lo que dejas al morir](#ecos-lo-que-dejas-al-morir)
+17. [Misiones](#misiones)
+18. [Consejos para empezar](#consejos-para-empezar)
+19. [Para desarrolladores](#para-desarrolladores)
+
+---
+
+## Cómo empezar a jugar
+
+Necesitas [Node.js](https://nodejs.org) (versión 18 o superior) y `git`.
+
+ECOS usa la librería [minialu](https://github.com/LATINALU/minialu) directamente desde su código, así que las dos
+carpetas tienen que estar **una al lado de la otra**:
 
 ```bash
 git clone https://github.com/LATINALU/minialu.git
 git clone https://github.com/LATINALU/Ecos.git
 cd Ecos
 npm install
-npm run dev        # http://localhost:5173
-npm test           # 26 pruebas (dominio, progresión, crafteo, guardado y física)
-npm run build      # tsc + vite build
+npm run dev
 ```
 
-Requiere la carpeta hermana `Desktop\minialu` (alias `minialu` en `vite.config.ts` y `tsconfig.json`).
+Abre en el navegador la dirección que aparece (normalmente `http://localhost:5173`).
 
-## Sistemas
+La partida se guarda sola en el navegador. Hay **3 ranuras de partida**, así que pueden jugar varias personas en la
+misma computadora.
 
-| Sistema | Qué hace | De minialu |
-|---|---|---|
-| Cartas de Alma | 12 almas en 4 familias, 1★–7★. **Mazo de 5 ranuras** (ver abajo) | `generarStats`, `tirarRareza`, `fusionar`, `mejorar` |
-| Altar | Fusión 3→1 con probabilidad por estrella, Lágrima de Eco = éxito seguro; mejora con Polvo de Eco | cartas |
-| Stats por capas | Base + nivel + Santuario + Forma + mazo de almas + equipo, con desglose en el menú | `componerStats` |
-| Botín | Monstruos "cada-uno", cofres "ponderado", jefes con único garantizado; haz de luz por rareza | `tirarDrop`, `probabilidadReal` |
-| Equipo | 5 rarezas con afijos al azar + **8 únicos** con efectos (Filo Gemelo, Sangre de Vidrio, Manto del Eco…) | — |
-| Inventario | Mochila y mazo de 24 casillas, todo o nada | `Inventario` |
-| Mercader | Catálogo único + compra; desguace de equipo por esquirlas | `Catalogo`, `comprar`, `Billetera` |
-| Niveles | Curva de EXP por partida; subir cura | `curvaPolinomica` |
-| Mundo | Pisos generados con **llave y cerradura**: barreras de cristal/raíces y pozos verticales, validados con un punto fijo para que el jefe siempre se pueda alcanzar | `AzarSemilla` |
-| Reliquias (permanentes) | Embestida (rompe cristales), Alas de Ceniza (doble salto, sube pozos), Garra Ígnea (quema raíces y enemigos) | — |
-| Santuario | Mejoras permanentes pagadas con esencia | `Billetera` |
-| Ecos | Al morir: Eco con tu legado; uno por piso, máximo 3 | — |
-
-## Reliquias y runas
-
-- **8 reliquias** permanentes que aparecen a lo largo de la partida (pisos 1, 2, 3, 5, 8, 12, 16 y 20): Embestida del
-  Errante, Alas de Ceniza, Garra Ígnea y las nuevas **Botas del Céfiro** (+12 % de movimiento, paso atrás más rápido),
-  **Corazón del Eco** (pociones +25 % y una extra por descenso), **Ojo del Abismo** (mapa del piso revelado),
-  **Mano del Avaro** (+25 % de esquirlas y sin cofres de madera) y **Lágrima del Pozo** (Definitiva al 40 % en cada
-  piso y +20 % de carga).
-- **16 runas** (6 nuevas: Tormenta, Ponzoñosa, Fortaleza, Presteza, Sabio y Verdugo) en **4 rarezas** — Común, Rara,
-  Épica y Legendaria — que multiplican el efecto (×1 · ×1,5 · ×2,2 · ×3,2). Caen más raras cuanto más hondo; tres
-  iguales se funden en el Yunque en una de la rareza siguiente (150 / 600 / 2.400 esquirlas).
-
-## El Pozo Profundo: 24 pisos
-
-- **24 zonas**: las 10 originales y 14 nuevas (Pantano de los Ahogados, Cascadas del Olvido, Colmena Carmesí,
-  Desierto Sepultado, Fragua de Obsidiana, Bosque Otoñal Hueco, Templo Sumergido, Mina de Cristal Negro, Osario de
-  Gigantes, Jardín de Esporas Gris, Torre del Reloj Caído, Tormenta Eterna, Abismo de Cristal Vivo y Umbral del
-  Recuerdo), cada una con paleta, fondo, partículas, nombres de criaturas y guardián propios. El **Corazón del Pozo**
-  pasa a ser el piso 24. Fondos nuevos: cascadas, colmena, obsidiana y raíces gigantes; partículas: lluvia,
-  luciérnagas, hojas y arena.
-- **Enemigos nuevos** que reemplazan a parte de los originales al bajar: **Embestidor** (avisa y carga; se aturde si
-  choca contra una pared), **Kamikaze** (corre, prende la mecha y explota), **Lanzador** (tiros en parábola que pasan
-  por encima de las coberturas) y **Espectro** (atraviesa paredes y se teletransporta a tu espalda).
-- **Élites con afijos** (1 a 3 según la profundidad): Veloz, Blindado, Vampiro, Regenerador, Explosivo y Furioso.
-- **Salas**: de 9 por piso al principio a 20 en lo hondo, mapas más grandes desde el piso 11, más monstruos por sala.
-  **Arenas** (la sala se sella y llegan 2 a 5 oleadas; premio: cofre) y **Bóvedas** (cofre de oro o mítico custodiado
-  por élites).
-- **Cofres por rareza**: madera, plata, oro y mítico, con más premios y rareza mínima creciente (el mítico puede traer
-  un Mítico con nombre y un Dado del Destino). Cofres extra al azar en las salas.
-- Desarrollo: `?auto=espada&piso=14&tiposala=arena` (o `boveda`, `tesoro`).
-
-## Rarezas, drops y fusión
-
-| Rareza | Color | Qué trae |
-|---|---|---|
-| Común | gris | Solo stats |
-| Poco común | verde | 1 modificador |
-| Raro | azul | 2 modificadores |
-| Épico | violeta | 3 modificadores |
-| Legendario | naranja | 4 modificadores |
-| Mítico | rojo | 4 modificadores + **pasiva mítica** (16: Furia del Volcán, Verdugo, Eco Infinito, Muralla Viva…) |
-
-- Modificadores nuevos de armadura: vida %, defensa %, daño devuelto y regeneración. Los rasgos fijos de una base no
-  ocupan un modificador. Los únicos con nombre son Míticos. Los guardados viejos se migran (Único → Mítico).
-- **Drops**: las armaduras y accesorios caen aparte de las armas; élites y cofres sueltan Poco común o mejor y cartas
-  de pisos más hondos; los guardianes, una pieza Legendaria o un Mítico, otra Épica y dos cartas de jefe.
-- **Cartas hasta 12★**. La fusión acepta tres cartas con la **misma cantidad de estrellas** de cualquier alma o
-  familia (sale una de las tres). **Dados del Destino** en el Bazar aseguran la fusión: 4★ 20 · 5★ 50 · 6★ 100 ·
-  7★ 300 · 8★ 800 · 9★ 2.000 · 10★ 5.000 · 11★ 12.000 · 12★ 30.000 esquirlas (la Lágrima de Eco sirve para cualquiera).
-- **Modificadores por pieza** (25): el arma ofende (alcance, golpe doble, elemento, crítico, daño); la armadura
-  defiende (vida, defensa, daño recibido, espinas, regeneración); los accesorios traen lo único (robo de vida,
-  enfriamiento, carga de Definitiva, ahorro de éter, suerte, esquiva). El cinturón administra (curación de pociones,
-  esquirlas). Toda pieza con modificadores trae uno de **firma** de su ranura (◆ dorado en el cartel).
-- **Stats al azar en las 12 piezas**: cada stat varía ±15 % y suma afijos acordes a la ranura.
-- **Suerte**: multiplica la chance de botín, inclina la rareza (+35 % por escalón cada 100), puede subir una estrella a
-  las cartas (hasta 40 %) y suma esquirlas. Sale como modificador en anillos, collares, cinturones y capas.
-
-## Mazo de almas (rework de las cartas)
-
-Cada Carta de Alma hace algo **distinto según la ranura** donde la pongas. 12 almas × (5 pasivas + 4 habilidades) =
-**108 efectos**, y todo escala con las estrellas, las mejoras y el brillo de la carta (×1 a 1★ hasta ×2,3 a 7★ +5).
-
-| Ranura | Tecla | Qué da |
-|---|---|---|
-| **Forma** | — | Tu aspecto, el 100 % de los stats y una **pasiva de ataques básicos** (quemar, congelar, envenenar, rayo en cadena, aturdir, curar, golpe doble, crítico) |
-| **Habilidad I** | L (V) | Habilidad activa (éter + enfriamiento) y una pasiva |
-| **Habilidad II** | U (B) | Otra habilidad activa y otra pasiva |
-| **Habilidad III** | O (N) | Otra habilidad activa y otra pasiva |
-| **Definitiva** | P (F) | Ataque devastador que se **carga peleando** (golpes y daño recibido) y otra pasiva |
-
-- Las habilidades se arman con 11 formas: proyectil/abanico, bumerán, embestida, garras, ondas, salto, rayos, órbita,
-  nova, lluvia y auras (daño, escudo, robo de vida, velocidad). A 4★ y 6★ suman proyectiles, rayos u hojas.
-- Las ranuras que no son la Forma aportan un 30~40 % de los stats de la carta (+15 % si es de la familia de tu Forma).
-- El HUD muestra la barra de habilidades (L U O P) con enfriamiento, costo de éter y la carga de la Definitiva.
-- Los guardados viejos pasan Forma + Resonancia I + II a Forma + Habilidad I + II. Un personaje nuevo empieza con su
-  alma como Forma y como Habilidad I.
-- Desarrollo: `?auto=espada&mazo=4,8,5,9,7&cargada` (mazo completo a 4★ y Definitiva llena);
-  `?pueblo=espada&inventario&tab=cartas&mazo` abre el grimorio.
-
-## Interfaz
-
-- **Texto nítido**: el juego se dibuja a 480×270 en pixel art, pero todo el texto (HUD, números de daño, carteles)
-  se pinta en una capa aparte a la resolución real de la pantalla, con contorno.
-- **Banco**: 4 pestañas × 40 = 160 casillas.
-- **Tiendas con estética de RPG** (`ui/tienda.ts`, `ui/tiendas.css`): cada local tiene cabecera con el retrato
-  pixel-art del comerciante, cartel, globo de diálogo y bolsa de monedas; marco de madera y metal con color temático,
-  casillas biseladas, fichas de artículo y botones de placa. La Bóveda muestra dos cofres (bolsa y bóveda).
-
-## Partidas y pueblo
-
-- **3 ranuras de partida**. Cada una tiene su personaje persistente (nivel, equipo, mochila, cartas, talentos,
-  misiones), su banco y su mundo (reliquias, esencia, ecos). El guardado viejo se migra solo a la ranura 1.
-- **Último Refugio**, el pueblo sobre el Pozo: una calle de dos pantallas que se recorre con el Portador.
-  | Edificio | Comerciante | Qué hace |
-  |---|---|---|
-  | Taberna «El Último Eco» | Ilse | Tablón de **120 misiones** (10 por zona en 3 líneas + guardián, y 20 encargos repetibles) y memorial |
-  | Bazar del Pozo | Tobías | Comprar consumibles y materiales; vender objetos, runas y cartas |
-  | Armería Hierro Viejo | Brunhild | 6 piezas al azar que cambian en cada vuelta; kit de recluta gratis si no tienes arma |
-  | Bóveda de los Caídos | Custodio Vael | Banco: 4 pestañas × 40 = 160 casillas y esquirlas a salvo de la muerte |
-  | Altar de las Almas | Hermana Ceniza | Fusión y mejora de cartas |
-  | Fragua del Pueblo | Dorn | Yunque: recetas y refinado |
-  | Santuario | El Ermitaño | Mejoras permanentes con esencia |
-  | El Pozo | — | Bajar desde cualquier piso con guardián vencido; contenedor seguro de 4 casillas |
-- **Extracción (estilo Tarkov)**: no se vuelve gratis. Cada piso tiene 1~2 **zonas de extracción** (rombo verde en
-  el mapa, conocidas desde el principio): hay que aguantar **5 s** dentro y cualquier golpe reinicia la cuenta. El
-  portal del guardián también ofrece «Extraer» o «Seguir bajando (arriesgar)». El Faro solo deja descansar.
-- **Morir = perderlo todo lo que llevas encima**: equipo equipado, mochila, subarma y esquirlas. Se salvan el
-  **contenedor seguro** (4 casillas), las cartas, el nivel, los talentos, las runas y el banco. Tu **Eco** se queda
-  en ese piso con todo el botín: vencerlo te lo devuelve entero; si vuelves a caer en ese piso antes, el Eco nuevo
-  reemplaza al viejo y aquel botín se pierde. El HUD muestra el valor **en riesgo**.
-- **Equipo completo (12 ranuras)**: arma · casco · hombros · pecho · cinturón · pantalones · botas (las 6 de
-  **set**) · **capa** · 2 anillos · aretes · collar (accesorios de **stats únicos**: siempre traen un rasgo propio).
-  | Accesorio | Rasgos únicos |
-  |---|---|
-  | Capa | Esquiva (hasta 30 %), reducción de daño recibido |
-  | Anillos | Robo de vida, daño elemental |
-  | Aretes | Éter por golpe, éter máximo, daño de técnica |
-  | Collar | Robo de vida, éter máximo, reducción de daño recibido |
-- **Armas elementales**: cualquier estilo (espada, mazo, arco, báculo, puños) puede salir de **Fuego** (quema),
-  **Hielo** (ralentiza; 4 golpes congelan), **Veneno** (dosis acumulables) o **Rayo** (salta a 2 enemigos y aturde).
-  Cuanto más rara el arma, más probable y más fuerte el elemento. Cada zona **resiste** uno (×0,5) y es **débil** a
-  otro (×1,5). El arma, su estela y las flechas toman el color del elemento.
-- De minialu: banco (`Inventario` + `transferir`), bazar (`Catalogo` + `comprar`, `precioDeVenta`), misiones
-  (`RegistroMisiones`), billeteras, fusión y mejora de cartas.
-- Desarrollo: `?pueblo=espada&panel=banco` abre un servicio; `?partidas` la pantalla de ranuras (ranura de pruebas oculta).
-
-## Combate
-
-- **Medidor de estilo** (D → C → B → A → S → SS → SSS "¡Frenético!"): sube pegando seguido y *variado*
-  (repetir lo mismo rinde la mitad). Da +4 % de daño por rango, éter extra y, desde S, velocidad de ataque.
-  Se corta a los 2,4 s sin pegar o si te golpean. Subir a S o más pone cámara lenta un instante.
-- **Cancelaciones y búfer**: golpe → patada → técnica en cualquier orden; lo apretado antes de tiempo se guarda 0,2 s
-  y sale apenas termina la parte activa. Saltar cancela golpes.
-- **Aturdimiento al golpear**: cada golpe frena al enemigo un instante (los jefes no se dejan).
-- **Combos aéreos**: acertar en el aire te sostiene y recarga el salto aéreo y la embestida.
-- **Estocada**: golpe durante el paso atrás o la embestida.
-- **Ataque cargado** (mantener J y soltar): Tajo Lunar (espada), Sismo (mazo), Nova (báculo), Flecha Perforante (arco),
-  Ráfaga (puños).
-- **Esquiva perfecta**: esquivar justo cuando algo te iba a pegar → cámara lenta, +15 de éter y crítico seguro.
-- **Desvío**: el golpe cuerpo a cuerpo devuelve los proyectiles enemigos más fuertes.
-
-## Las 10 zonas
-
-| Piso | Zona | Guardián | Forma / ataques |
-|---|---|---|---|
-| 1 | Osario Hundido | Guardián del Osario | caballero: carga, salto, barrido, lluvia de huesos |
-| 2 | Bosque Micelio | Madre Micelio | esporas, raíces, invoca polillas |
-| 3 | Forja Ahogada | Fragua Viviente | gólem: carga, salto, lluvia, ráfaga · minas, anillo |
-| 4 | Catacumbas de Escarcha | Reina del Invierno Callado | reina: rayos, lluvia, láser, teletransporte |
-| 5 | Ciudad Sumergida | Leviatán de Cripta | bestia: carga, salto, anillo, ráfaga · invoca |
-| 6 | Biblioteca de Ceniza | Archivista Quemado | máscara: anillo, teletransporte, técnicas de alma |
-| 7 | Jardín de Espinas | Rosa Carnívora | flor: raíces, anillo, invoca, ráfaga · minas |
-| 8 | Engranaje Olvidado | Autómata Coloso | gólem: láser, carga, minas, salto |
-| 9 | Necrópolis Estelar | Astrónomo Muerto | espectro: lluvia de estrellas, rayos, teletransporte |
-| 10 | Corazón del Pozo | El Que Recuerda | usa las técnicas de tus Ecos |
-
-Cada zona tiene paleta, tinte, fondo con paralaje, partículas, primer plano, nombres y sprites de criaturas propios.
-Los jefes 3–9 usan el **motor de jefes configurable** (`juego/entidades/jefe-configurable.ts`): forma visual +
-repertorio de 12 patrones anunciados, con segunda fase al 50 %. Agregar un jefe nuevo es agregar datos en `biomas.ts`.
-
-## Builds: runas, conjuntos y mejoras
-
-- **Runas** (2 ranuras, pasivas equipables): Brasa, Vampiro, Viento, Acero, Avaro, Calma, Eco, Furia, Coleccionista,
-  Escarcha. Caen de élites, cofres y siempre de los guardianes.
-- **Conjuntos de armadura** (5 sets; solo casco, hombros, pecho, cinturón, pantalones y botas) con bonos a 2, 4 y
-  **6 piezas** (set completo: bono de daño): Vigía del Osario, Escarcha Eterna, Marea Abisal, Engranaje Olvidado,
-  Manto Astral. Cada guardián suelta una pieza del conjunto de su zona.
-- **Refinado hasta +10**: del +6 en adelante puede fallar (75 % → 22 %); se pierden los materiales, nunca la pieza.
-- **Armas nuevas** con rasgos propios: Estoque (rápido), Hoja Bastarda (alcance), Lucero del Alba (crítico),
-  Arco Largo (alcance), Garras de Hierro, Cetro del Abismo; Armadura de Placas y Talismán.
-- **Stats nuevos**: Suerte (mejor botín) y Regeneración (vida cada 5 s).
-- **16 talentos**: se suma la Senda del Arsenal (Carcaj Lleno, Corazón Valiente, Armas Gemelas, Lluvia de Acero)
-  y un grado 4 en cada senda (Ejecutor, Paso Fantasma, Eco Resonante).
-- Desarrollo: `?auto=espada&piso=7&jefe` lleva directo al guardián de una zona; `?auto=arco&piso=3&extraccion&dentro`
-  a una sala de extracción, parado en la zona.
-
-## Progresión del Portador
-
-- **Arma inicial y estilo:** Espada (combo de 3), Puños (4 golpes rápidos), Martillo (2 golpes que aturden) o Bastón
-  (técnicas +25 % y −20 % de costo). Cualquier arma que equipes cambia tu estilo.
-- **Alma inicial:** se elige entre las almas que ya conociste. Cada alma tiene técnica y **pasiva** propia.
-- **Habilidades:** 3 puntos de stats por nivel (minialu `PuntosHabilidad`) + 1 punto de talento por nivel.
-  Talentos en 3 sendas: Filo (Remate, Corte Final, Sed de Sangre), Vendaval (Salto de Pared, Ligereza, Doble Embestida)
-  y Eco (Eco de Técnica, Resonancia Profunda, Golpe de Éter).
-- **Golpe ascendente:** ↑ + golpe lanza a los enemigos al aire.
-- **Yunque** (sala del Faro de cada piso): recetas con materiales de cada bioma + Fragmentos de Eco; forja equipo y
-  refina lo equipado (+12 % por nivel, hasta +5). Todo o nada, como en minialu.
-- **Guardado:** el descenso en curso se guarda al cambiar de sala, al entrar a un piso y al cerrar la pestaña.
-  "Continuar descenso" en el título. Morir o ganar borra el guardado.
-
-## Armas, azar y almas
-
-- **5 estilos**: Espada, Puños, Mazo, Báculo y **Arco** (dispara flechas; el tercer golpe suelta tres en abanico).
-  El arma rota con el brazo durante el golpe y su largo depende del alcance.
-- **Equipo con más azar**: calidad de forja 75–130 % ("Endeble" / "Magistral") y **rasgos** según rareza:
-  alcance, velocidad de ataque, daño crítico, éter por golpe y velocidad de movimiento. Único nuevo: *Susurro del Pozo*
-  (flechas perforantes).
-- **Cartas con más azar**: rasgos (Afilada, Veloz, Eterna, Furiosa, Vampírica, Colosal; más probables con más ★) y
-  la variante **Resplandeciente** (3 %, +20 % de stats, borde dorado).
-- **12 almas**: Iskra, Morrigan, Bruno y Fenra se suman con técnicas nuevas (**Rayo del Abismo**, **Remolino de Hojas**)
-  y pasivas nuevas (Chispa Letal, Vendaval, Espinas).
-- El Portador cambia de **tocado según la familia** de su Forma (yelmo con penacho, capucha, sombrero, orejas).
-- Animación: brazo y arma con preparación → golpe → seguimiento, estela en media luna, estiramiento al saltar,
-  aplastamiento al aterrizar y polvo al girar. Desarrollo: `?galeria` muestra todas las poses.
-
-## Salas y pasajes
-
-- **Cadenas** en todos los pasajes verticales: ↑/↓ para trepar en ambos sentidos, Salto para soltarse.
-  Subir ya no depende del Doble Salto: siempre se puede volver por donde se bajó.
-- **Interiores procedurales** (`src/dominio/mundo/interiores.ts`): 3 de cada 4 salas normales se generan a partir de 5
-  motivos (escalonada, pilares, techo bajo, foso de púas, puentes) con piezas al azar y enemigos ubicados con sentido.
-  Cada sala pasa un **validador de alcanzabilidad** (BFS con el alcance real del salto); si no se puede recorrer,
-  se regenera. La misma semilla da la misma sala, así que el guardado la reconstruye igual.
-- Las plantillas hechas a mano se cruzan siempre de puerta a puerta; algunas plataformas altas quedan como premio
-  para el Doble Salto.
-
-## Movimiento y subarmas (estilo Castlevania moderno)
-
-- **Paso atrás** (Shift sin dirección): retroceso con invulnerabilidad; se cancela con golpe o salto.
-- **Agacharse** (↓): los proyectiles altos pasan por encima; el golpe sale bajo.
-- **Barrida** (↓ + Salto): patada baja que lanza a los enemigos.
-- **Saltar cancela** golpes, patadas y lanzamientos.
-- **Subarmas** (↑ + Patada): Daga (1♥), Hacha en arco (2♥), Agua Bendita con llamas (2♥), Cruz bumerán (3♥).
-  Los **corazones** salen de **velas y candelabros** rompibles en cada sala (que también pueden soltar una subarma).
-
-## Motor gráfico
-
-- Portador procedural con **poses animadas** (ciclo de carrera de 6 cuadros, salto, caída, agachado, barrida, golpe…),
-  **capa con física verlet** y **estelas fantasma** en movimientos rápidos.
-- **Bloom**: proyectiles, chispas y llamas se dibujan en una capa emisiva que se difumina y se suma.
-- **Luces dinámicas** con parpadeo: faroles y ventanas del decorado, velas, proyectiles, botín y jefes.
-- **Primer plano** con paralaje rápido, **gradación de color** por bioma y **viñeta**.
-
-## Gráficos
-
-- **Escenario:** tileset del *Generic Dungeon Pack* (Anokolisa / Vaca Roxa, CC0), teñido por bioma (violeta, verde, brasa):
-  muros con bordes, losas con soporte de madera, pinchos, cadenas, faroles, estandartes, ventanas góticas y cofres animados.
-- **Monstruos:** personajes animados de *microFantasy* (0x72, CC0): lagarto (caminante), rinoceronte (saltador),
-  troll (escudero) y mago (torreta). Los voladores, los jefes, los Ecos y **el Portador siguen siendo procedurales**
-  (el Portador cambia de colores según su Forma).
-- **Íconos** de armas, armaduras, pociones y fragmentos en el botín y en la mochila.
-- **Respaldo:** si una imagen no carga, se dibuja el arte procedural. En pausa se puede alternar "sprites / clásicos".
-- Origen y licencias: `recursos/CREDITOS.md`. Para regenerar `public/sprites/` y `src/contenido/sprites.generado.ts`:
-  `python -I herramientas/preparar_sprites.py` (solo biblioteca estándar).
-- Desarrollo: `?auto=espada&piso=2&sala=3` empieza una partida y salta a esa sala (solo en `npm run dev`).
-
-## Arquitectura
-
-```
-src/
-  dominio/     puro y testeado: cartas, equipo, botín, eco, meta, partida, stats, mundo/ (generador, salas)
-  contenido/   datos: almas, objetos y únicos, biomas y jefes, plantillas de salas
-  motor/       entrada, física por tiles, audio sintetizado (WebAudio)
-  juego/       escena (Juego implementa Contexto), entidades (jugador, enemigos, jefes, Eco), render y efectos
-  ui/          HUD en canvas y menús en DOM
-  infra/       guardado de la progresión en localStorage
-```
+---
 
 ## Controles
 
-A/D moverse · ↓ agacharse · ↓+Salto barrida (en plataformas: bajar) · Shift quieto = paso atrás · Shift + dirección = embestida · ↑+K subarma (gasta ♥ de las velas) · Espacio saltar · J golpe (combo ×3) · K patada (rompe guardias; ↓ en el
-aire = pisotón con rebote) · L/U/O habilidades · P definitiva · Shift embestida · E interactuar · Q/R pociones · I inventario/habilidades · M mapa · Esc pausa (guardar y salir). ↑ + J: golpe ascendente.
+| Tecla | Qué hace |
+|---|---|
+| **A / D** o **← →** | Moverse |
+| **Espacio** o **Z** | Saltar |
+| **J** o **X** | Golpe (encadena un combo). Mantener y soltar: **ataque cargado** |
+| **K** o **C** | Patada: rompe la guardia de los enemigos con escudo. En el aire con **↓**: pisotón |
+| **L / U / O** (o **V / B / N**) | Habilidades I, II y III de tus cartas de alma (gastan éter) |
+| **P** o **F** | Habilidad **Definitiva** (se carga peleando) |
+| **Shift** (quieto) | Paso atrás invulnerable. Justo antes de que te peguen: **esquiva perfecta** |
+| **Shift + dirección** | Embestida (cuando tienes esa reliquia) |
+| **↓** | Agacharse. **↓ + Salto**: deslizarse (sobre una plataforma: bajar de ella) |
+| **↑ + J** | Golpe ascendente (lanza a los enemigos al aire) |
+| **↑ + K** | Subarma (cuchillos, hachas…; gasta corazones ♥ que dan las velas) |
+| **E** | Interactuar: hablar, abrir cofres, tocar campanas, usar portales |
+| **Q** | Poción de vida |
+| **R** | Frasco de éter |
+| **I** o **Tab** | Inventario |
+| **M** | Mapa del piso |
+| **Esc** | Pausa (desde ahí se guarda y se sale) |
+
+---
+
+## La idea del juego en un minuto
+
+1. Empiezas en el **pueblo**: compras, mejoras tu equipo y aceptas misiones.
+2. Bajas al **Pozo**: cada piso es un mapa nuevo lleno de monstruos, cofres y secretos.
+3. Todo lo que encuentras va a tu mochila, pero **está en riesgo**: si mueres, lo pierdes.
+4. Para quedártelo tienes que **extraer**: encontrar una zona de extracción (verde en el mapa) o vencer al guardián
+   del piso y tomar su portal hacia el pueblo.
+5. Vuelves más fuerte, mejoras tu equipo y bajas otra vez, cada vez más hondo.
+
+Es una decisión constante: **¿sigo bajando para conseguir algo mejor, o vuelvo ahora con lo que tengo?**
+
+---
+
+## El pueblo (Último Refugio)
+
+El pueblo es un lugar seguro. Cada edificio tiene un servicio:
+
+| Edificio | Qué ofrece |
+|---|---|
+| **Taberna «El Último Eco»** | Tablón de **misiones**, el **registro de desafíos** y el memorial de tus Ecos |
+| **Bazar del Pozo** | Comprar pociones, éter, Polvo de Eco, Dados del Destino y materiales; vender lo que no uses |
+| **Armería Hierro Viejo** | Comprar equipo (el surtido cambia tras cada descenso); si no tienes arma, te regalan una para empezar |
+| **Bóveda** | Un **banco** para guardar objetos a salvo (lo que está ahí no se pierde nunca) |
+| **Capilla (Altar de las Almas)** | **Fusionar** y **mejorar** cartas de alma |
+| **Fragua** | Forjar equipo con materiales y **refinar** lo que llevas puesto |
+| **Santuario** | Mejoras permanentes que se pagan con **esencia** |
+| **El Pozo** | Bajar al Pozo (eligiendo el piso inicial) o al **Abismo** |
+
+Dentro del Pozo **no hay tiendas**: para comprar, fusionar o forjar hay que volver a la superficie. La única excepción
+es el Abismo (ver más abajo).
+
+---
+
+## El Pozo: bajar, pelear y volver
+
+El Pozo tiene **24 pisos**, cada uno con su zona (Osario Hundido, Bosque Micelio, Forja Ahogada, Catacumbas de
+Escarcha, Ciudad Sumergida, Biblioteca de Ceniza… y más). Cada zona tiene su paisaje, sus monstruos y su
+**guardián** (el jefe del piso).
+
+### El mapa de cada piso
+
+- Cada piso es una red de salas que se genera al azar al llegar. Nunca hay dos iguales.
+- Las salas se conectan por puertas laterales y por pasajes verticales con **cadenas** para trepar.
+- Algunas puertas están bloqueadas por **cristales** o **muros de raíces**: se rompen con ciertas reliquias.
+- **Regla de oro:** el juego nunca te pone un obstáculo que no puedas superar. Si una puerta pide una reliquia, o ya la
+  tienes o está en ese mismo piso. Si un jefe vuela y no tienes doble salto, la sala tiene escalones para alcanzarlo.
+
+### Tipos de sala
+
+| Sala | Qué hay |
+|---|---|
+| **Inicio** | El **Faro**: descansas una vez por piso (recuperas vida y éter) |
+| **Normal** | Monstruos, velas para romper y, a veces, un cofre |
+| **Tesoro** | Un cofre de buena calidad |
+| **Reliquia** | Una reliquia nueva (en algunos pisos) |
+| **Bóveda** | Un cofre de oro o mítico custodiado por élites |
+| **Arena** | Un desafío opcional con oleadas (ver [Salas de desafío](#salas-de-desafío-arenas)) |
+| **Eco** | Tu Eco de una partida anterior, esperando para pelear |
+| **Extracción** | Zona verde: quédate 5 segundos dentro y vuelves al pueblo con todo |
+| **Guardián** | El jefe del piso. Al vencerlo se abre un portal: extraer o seguir bajando |
+
+### Riesgo y extracción
+
+- Lo que recoges en el Pozo está **"en riesgo"** (se muestra abajo a la derecha).
+- Si **extraes** (zona verde o portal del guardián), todo pasa a ser tuyo de verdad.
+- Si **mueres**, pierdes lo que llevabas en ese descenso.
+- Al vencer al guardián de un piso, desde el pueblo podrás empezar a bajar **desde el piso siguiente**.
+
+### Cofres
+
+Los cofres tienen 4 calidades: **madera**, **plata**, **oro** y **mítico**. Cuanto más hondo, mejores cofres.
+
+---
+
+## El Abismo: el pozo sin fin
+
+El Abismo es un modo alternativo, **infinito**:
+
+- Las zonas se repiten en **ciclos** (I, II, III…) y cada ciclo es más difícil.
+- Cada piso tiene una **Grieta** que solo baja: no se puede volver por ahí.
+- La única forma de volver al pueblo es encontrar una **SALIDA**. Son escasas, están escondidas y no salen en el mapa
+  hasta que las encuentras. Al llegar a un piso, el juego te avisa si este tiene una ("sientes una corriente de aire…").
+- Si pasan 3 pisos seguidos sin salida, el siguiente seguro tiene una.
+- Cada 5 pisos un guardián custodia la Grieta. Vencerlo te deja empezar el Abismo desde más abajo la próxima vez.
+- Como de aquí no se sube, el Abismo **sí tiene servicios**: altar de almas, yunque y, en algunos pisos, un
+  **mercader errante** que vende piezas raras (Épicas o Legendarias) a precio alto.
+- Se guarda tu récord de profundidad.
+
+---
+
+## Combate
+
+- **Combos:** golpe, patada y habilidades se encadenan en cualquier orden. Saltar cancela un golpe.
+- **Medidor de estilo** (D → C → B → A → S → SS → SSS): sube si pegas seguido **y variado**. Cada rango da más daño,
+  más éter y, desde S, más velocidad. Se corta si dejas de pegar o si te golpean.
+- **Esquiva perfecta:** esquivar justo cuando algo te iba a pegar → cámara lenta, éter extra y crítico seguro.
+- **Ataque cargado:** mantener **J** y soltar. Cada arma tiene el suyo.
+- **Golpes aéreos:** acertar en el aire te mantiene arriba y recarga el salto y la embestida.
+- **Enemigos élite:** más grandes, con borde dorado y **afijos** (Veloz, Blindado, Vampiro, Regenerador, Explosivo,
+  Furioso). Sueltan mejor botín.
+- **Guardianes:** cada uno tiene sus propios ataques anunciados y una **segunda fase** al bajar a la mitad de vida.
+
+---
+
+## Armas
+
+Hay **cuatro familias de armas**, cada una con distinto alcance y sus propias **pasivas de ataque**:
+
+| Arma | Alcance | Pasivas |
+|---|---|---|
+| **Espada** | Medio | *Sangría*: el corte final del combo te cura un poco · *Filo preciso*: más probabilidad de crítico |
+| **Mazo** | Largo | *Quebrantahuesos*: ignora parte de la defensa · *Rompeguardias*: atraviesa escudos |
+| **Báculo** | Medio | *Canalizador*: potencia las habilidades · el último golpe del combo lanza un **orbe de éter** |
+| **Arco** | A distancia | *Ojo de halcón*: más daño cuanto más lejos está el enemigo · *Punta barbada*: críticos más fuertes |
+
+Sin arma peleas a puño limpio. Cualquier arma que equipes cambia tu forma de pelear.
+
+---
+
+## Cartas de Alma
+
+Las cartas son el corazón de tu personaje. Cada una contiene el alma de un guerrero caído, con sus **stats**, sus
+**habilidades** y su **pasiva**. Hay **12 almas** en 4 familias.
+
+### El mazo de 5 ranuras
+
+| Ranura | Tecla | Qué da |
+|---|---|---|
+| **Forma** | — | Tu apariencia, tus ataques básicos y el 100 % de los stats de la carta |
+| **Habilidad I** | L | Una habilidad activa y una pasiva |
+| **Habilidad II** | U | Otra habilidad activa y otra pasiva |
+| **Habilidad III** | O | Otra más |
+| **Definitiva** | P | La habilidad más poderosa (se carga peleando) |
+
+### Estrellas, rasgos y aura
+
+- Cada carta tiene de **1★ a 12★**. Más estrellas = stats mucho más altos.
+- Algunas cartas traen un **rasgo** extra (Afilada, Veloz, Eterna, Furiosa, Vampírica, Colosal).
+- Muy pocas salen **Resplandecientes**: +20 % a todo.
+- Las cartas de **5★ en adelante** tienen un **aura** que brilla detrás del retrato y dice su rareza de un vistazo:
+
+| 5★ | 6★ | 7★ | 8★ | 9★ | 10★ | 11★ | 12★ |
+|---|---|---|---|---|---|---|---|
+| Gris | Morada | Verde | Azul | Roja | Dorada | Plateada | **Prismática** (arcoíris) |
+
+### Fusión y mejora (en el Altar)
+
+- **Fusión:** pones 3 cartas con la misma cantidad de estrellas y sale una de las tres con una estrella más. La
+  probabilidad de éxito baja a medida que subes. Si falla, la carta se "reforja" con stats nuevos (nunca pierdes todo).
+- **Sello 100 %:** si pones un **Dado del Destino** de esa estrella o una **Lágrima de Eco** en la 4.ª ranura, la
+  fusión sale segura.
+- **Mejora:** el **Polvo de Eco** sube los stats de una carta (hasta 5 veces).
+
+---
+
+## Cajas de Almas y Relicarios
+
+Las cartas **no caen sueltas**: salen de cajas que se abren desde el inventario, con una animación en la que la luz
+sube estrella por estrella hasta la que te tocó.
+
+### Caja de Almas (1★ a 6★)
+
+La sueltan los monstruos comunes, las élites y los cofres comunes.
+
+| 1★ | 2★ | 3★ | 4★ | 5★ | 6★ |
+|---|---|---|---|---|---|
+| 34 % | 27 % | 19 % | 11 % | 6,5 % | 2,5 % |
+
+### Relicario de Almas (5★ a 12★)
+
+Todo **guardián** suelta uno seguro; también los cofres de oro y míticos.
+
+| 5★ | 6★ | 7★ | 8★ | 9★ | 10★ | 11★ | 12★ |
+|---|---|---|---|---|---|---|---|
+| 45 % | 25 % | 14 % | 8 % | 4,5 % | 2,2 % | 1 % | 0,3 % |
+
+**Garantía:** cada **100 relicarios** abiertos te aseguran al menos **1 de 12★, 3 de 11★, 5 de 10★ y 8 de 9★**,
+aunque tengas la peor suerte del mundo. El inventario muestra cuántos llevas del bloque y qué falta.
+
+Si tienes varias cajas, **"Abrir todas"** las abre de una vez y muestra el resultado ordenado de la mejor a la peor.
+
+---
+
+## Equipo, rarezas y el inventario
+
+### Rarezas
+
+| Común | Poco común | Raro | Épico | Legendario | Mítico |
+|---|---|---|---|---|---|
+| gris | verde | azul | morado | naranja | rojo |
+
+- Cada pieza sale con **stats al azar** dentro de su rango, más **modificadores** que dependen de la rareza: casi
+  nunca hay dos piezas iguales.
+- Las piezas **Míticas con nombre** tienen efectos únicos.
+- **Conjuntos de armadura:** llevar 2, 4 o 6 piezas del mismo set da bonos extra.
+- **Runas:** 2 ranuras de pasivas equipables, en 4 rarezas. Tres iguales se funden en una mejor.
+- **Refinado:** en la Fragua puedes subir una pieza hasta **+10**. Desde +6 puede fallar (pierdes los materiales,
+  nunca la pieza).
+
+### 12 ranuras de equipo
+
+Arma · Casco · Hombros · Pecho · Cinturón · Pantalones · Botas · Capa · Collar · Aretes · Anillo I · Anillo II.
+
+### El inventario (tecla I)
+
+Tiene tres columnas:
+
+- **Personaje:** tu figura en el centro con las 12 ranuras alrededor. Detrás de la figura brilla el aura de tu Forma.
+  Muestra tu **Poder** (una cifra que resume tu equipo), tus runas y tus stats principales.
+- **Mochila (60 casillas):** barra de capacidad, **filtros** (Equipo, Cajas, Consumibles, Runas, Materiales) y botón
+  **Ordenar**. Cada casilla tiene el color de su rareza, el nivel de la pieza y una flecha **▲ verde** si es mejor que
+  lo que llevas puesto (o **▼ roja** si es peor).
+- **Detalle:** la ficha del objeto elegido, comparada con lo que llevas, y sus acciones: Equipar, Desguazar (por
+  esquirlas), Engarzar runa, Abrir caja.
+
+Las otras pestañas del inventario son **Cartas de Alma** (tu mazo), **Habilidades** (puntos de stats y talentos) y
+**Stats y daño** (el desglose completo de tus números).
+
+---
+
+## Reliquias: los poderes permanentes
+
+Las reliquias **no se pierden nunca**, ni siquiera al morir. Aparecen en pisos concretos y abren caminos nuevos:
+
+| Reliquia | Qué hace |
+|---|---|
+| **Embestida del Errante** | Shift + dirección: te lanzas invulnerable. Rompe los **cristales** |
+| **Alas de Ceniza** | Doble salto: alcanzas cornisas altas |
+| **Garra Ígnea** | Tus golpes queman. Reduce a cenizas los **muros de raíces** |
+| **Botas del Céfiro** | Te mueves más rápido y el paso atrás se recarga antes |
+| **Corazón del Eco** | Las pociones curan más y empiezas cada descenso con una extra |
+| **Ojo del Abismo** | El mapa de cada piso se revela entero al llegar |
+| **Mano del Avaro** | Más esquirlas y ningún cofre de madera |
+| **Lágrima del Pozo** | La Definitiva empieza cada piso cargada al 40 % |
+
+---
+
+## Salas de desafío (arenas)
+
+En el Pozo, en lugar de tiendas, hay **arenas**: salas donde se consigue buen equipo peleando. Son **opcionales**: en
+el centro hay una **Campana del Desafío** y nada empieza hasta que la tocas. Al tocarla se sellan las puertas y llegan
+las oleadas.
+
+| Arena | Regla | Premio especial |
+|---|---|---|
+| **Arena de Sangre** | Oleadas que crecen; un campeón élite cierra la última | Cofre según la profundidad |
+| **Reloj de Arena** | 3 oleadas contra el reloj | A tiempo: mejor cofre. Tarde: peor |
+| **Foso de Campeones** | Pocos rivales, todos élites | Una pieza Rara o mejor |
+| **La Marea** | 4 oleadas con muchísimos enemigos | Una montaña de esquirlas |
+| **Duelo del Campeón** | Un solo rival enorme con 3 afijos | Una carta de jefe (Relicario) |
+
+Además:
+
+- **Botín con destino:** cada arena anuncia de antemano qué tipo de pieza da (un anillo, unas botas, un arma…), para
+  que puedas buscar exactamente lo que te falta.
+- **Sellos de mérito:** terminar **sin recibir golpes** (*Intocable*) mejora el cofre y la pieza; con pocos golpes,
+  ganas más esquirlas.
+- **Racha:** encadenar arenas en un mismo descenso (sin volver al pueblo) mejora el premio de la siguiente.
+
+---
+
+## El Juicio: desafíos de lategame
+
+Al desbloquear el piso 12 recibes la **Piedra del Juicio**. A partir de ahí, cada campana de arena te deja elegir entre
+la arena normal o **invocar el Juicio** (inspirado en las *Míticas+* de World of Warcraft):
+
+- La piedra tiene un **nivel** (empieza en +2). Cuanto más alto, más fuertes los enemigos (+9 % de vida y daño por
+  nivel).
+- **Siempre hay contrarreloj.** Si terminas a tiempo, la piedra **sube** +1, +2 o +3 según cuánto tiempo sobró. Si
+  llegas tarde, **baja** un nivel.
+- **Afijos** que se suman con el nivel y **cambian cada semana**:
+
+| Nivel | Afijo (uno por semana) |
+|---|---|
+| +2 | **Fortificado** (comunes más fuertes) o **Tiránico** (élites más fuertes) |
+| +4 | **Reforzado** (al morir uno, los demás se fortalecen), **Enfurecido** (pegan más fuerte con poca vida) o **Sanguino** (dejan charcos de sangre) |
+| +7 | **Volcánico** (erupciones bajo tus pies), **Explosivo** (estallan al morir) o **Espectral** (sombras voladoras entre oleadas) |
+| +10 | **Abisal**, afijo de temporada: muchos enemigos son élites |
+
+- El premio crece con el nivel: desde una pieza Rara en +2 hasta **Míticas** desde +9.
+- En la Taberna se ven tu nivel de piedra, tu mejor Juicio y los afijos de esta semana.
+
+---
+
+## Progresión del Portador
+
+- **Niveles:** ganas experiencia peleando. Cada nivel da **3 puntos de stats** y **1 punto de talento**.
+- **Talentos:** 18 talentos en varias *sendas* (Filo, Vendaval, Eco, Arsenal…) que cambian cómo juegas.
+- **Stats:** Vida, Éter, Golpe, Patada, Técnica, Defensa, Crítico, Suerte (mejor botín) y Regeneración.
+- **Santuario:** mejoras permanentes pagadas con **esencia**, que se gana al terminar cada descenso y con algunas misiones.
+- **Monedas:** las **esquirlas** (◆) se usan para casi todo; la **esencia** es para el Santuario.
+
+---
+
+## Ecos: lo que dejas al morir
+
+Cuando mueres, el Pozo crea tu **Eco**: una copia de ti, con tu Forma, tus stats y tu mejor pieza de equipo, que te
+espera en el piso donde caíste. Si lo vences, **recuperas esa pieza**. Puede haber hasta 3 Ecos a la vez.
+
+El jefe final, **El Que Recuerda**, pelea con las técnicas de todos tus Ecos.
+
+---
+
+## Misiones
+
+La Taberna tiene un tablón con **138 misiones** repartidas por zona, en varias líneas (exploración, combate, alma y el
+guardián) más **encargos repetibles** (cazar criaturas, traer botín, superar arenas). Puedes tener hasta **3 activas**
+y dan experiencia, esquirlas, objetos y esencia.
+
+---
+
+## Consejos para empezar
+
+- **Extrae seguido al principio.** Volver con poco es mejor que perderlo todo.
+- **Guarda en la Bóveda** lo que no quieras arriesgar nunca.
+- **Mira las flechas ▲** en la mochila: te dicen al instante si algo es mejor que lo que llevas.
+- **Abre las cajas en el pueblo** y fusiona en el Altar las cartas repetidas de la misma estrella.
+- **Las arenas valen la pena** cuando te sientes fuerte: el botín con destino te deja completar tu equipo.
+- **Aprende la esquiva perfecta** (Shift justo antes del golpe): da crítico seguro y cámara lenta.
+- **No temas morir:** tu Eco te espera para devolverte tu mejor pieza.
+
+---
+
+## Para desarrolladores
+
+```bash
+npm run dev      # servidor de desarrollo
+npm test         # pruebas (Vitest)
+npm run build    # comprobación de tipos + compilación
+```
+
+- **Tecnología:** Vite + TypeScript estricto + Vitest. Dibujo en Canvas 2D a 480×270, ampliado; menús en HTML.
+- **Mecánicas base** (inventario, botín, fusión de cartas, monedas, misiones, curvas de nivel): librería
+  [minialu](https://github.com/LATINALU/minialu).
+
+### Estructura
+
+| Carpeta | Qué contiene |
+|---|---|
+| `src/dominio/` | Reglas del juego, puras y probadas: partida, botín, cartas, equipo, generación de mapas, Abismo, arenas, Juicio, relicarios |
+| `src/contenido/` | Datos: almas, biomas y jefes, armas, objetos, misiones, talentos, plantillas de salas |
+| `src/juego/` | El juego en tiempo real: escena, jugador, enemigos, jefes, pueblo, edificios, efectos |
+| `src/ui/` | Menús, tiendas, inventario, HUD y estilos |
+| `src/motor/` | Física, teclado, audio, sprites y texto |
+| `test/` | Pruebas del dominio |
+
+### Atajos de desarrollo (solo en `npm run dev`)
+
+| URL | Qué hace |
+|---|---|
+| `?auto=espada&piso=7` | Empieza directo en el piso 7 con una espada (`espada`, `pesada`, `baston`, `arco`) |
+| `&jefe` · `&tiposala=arena` | Ir a la sala del guardián o a la primera arena del piso |
+| `&abismo` | Empezar en el Abismo |
+| `&juicio=8&campana` | Piedra del Juicio +8 y abrir la campana (`&campana=juicio` empieza directo) |
+| `&botin` | Suelta un abanico de botín de todas las rarezas |
+| `?pueblo=espada&panel=taberna` | Abrir un servicio del pueblo |
+| `?pueblo=espada&surtido&cajas=9&relicarios=3&forma=10&inventario` | Inventario lleno de ejemplo |
+| `?pueblo=espada&cartas&inventario&tab=cartas` | Una carta de cada estrella de 5★ a 12★ |
+| `?pueblo=espada&animar=12` | Ver la animación de apertura de un relicario |

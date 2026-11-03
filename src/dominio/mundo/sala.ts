@@ -10,6 +10,7 @@ import type { Azar } from "minialu";
 import { plantillaPara } from "../../contenido/plantillas.ts";
 import type { Barrera, Dir } from "../tipos.ts";
 import type { TipoSala } from "./generador.ts";
+import { escalonarParaSaltoSimple } from "./interiores.ts";
 
 export const TILE = 16;
 export const COLS = 30;
@@ -62,8 +63,14 @@ export function indice(tx: number, ty: number): number {
   return ty * COLS + tx;
 }
 
-export function construirSala(tipo: TipoSala, semilla: number, ap: AperturasSala, azar: Azar, densidadEnemigos: number): DatosSala {
-  const plantilla = plantillaPara(tipo, semilla);
+export interface OpcionesSala {
+  /** false: el Portador aún no tiene Doble Salto → se agregan escalones a las cornisas altas. */
+  readonly dobleSalto?: boolean;
+}
+
+export function construirSala(tipo: TipoSala, semilla: number, ap: AperturasSala, azar: Azar, densidadEnemigos: number, op: OpcionesSala = {}): DatosSala {
+  const base = plantillaPara(tipo, semilla);
+  const plantilla = op.dobleSalto === false ? { ...base, filas: escalonarParaSaltoSimple(base.filas) } : base;
   const tiles = new Uint8Array(COLS * FILAS).fill(T_ROCA);
   const spawns: Spawn[] = [];
 

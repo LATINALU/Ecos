@@ -209,6 +209,56 @@ export function validarInterior(filas: readonly string[], estricto = true): stri
   return errores;
 }
 
+/** Tramos de plataforma ('=') a los que no se llega con salto simple: [fila, desde, hasta]. */
+function tramosInalcanzables(g: Grilla): [number, number, number][] {
+  const alc = alcanzables(g);
+  const r: [number, number, number][] = [];
+  for (let y = ALTO_INTERIOR - 1; y >= 1; y--) {
+    for (let x = 0; x < ANCHO_INTERIOR; x++) {
+      if (g[y][x] !== "=") continue;
+      let x1 = x;
+      while (x1 < ANCHO_INTERIOR - 1 && g[y][x1 + 1] === "=") x1++;
+      let algun = false;
+      for (let xx = x; xx <= x1; xx++) if (alc.has(`${xx},${y - 1}`)) algun = true;
+      if (!algun) r.push([y, x, x1]);
+      x = x1;
+    }
+  }
+  return r;
+}
+
+/**
+ * Sin Doble Salto: agrega escalones (plataformas de 3) debajo de cada cornisa que solo se alcanza con doble salto,
+ * hasta que toda la sala se recorra con salto simple. Así una sala hecha a mano (o la arena de un jefe que vuela)
+ * nunca deja al Portador sin poder subir. Las salas generadas ya cumplen la regla y salen iguales.
+ */
+export function escalonarParaSaltoSimple(filas: readonly string[]): string[] {
+  const g: Grilla = filas.map((f) => f.split(""));
+  for (let iter = 0; iter < 30; iter++) {
+    const pendientes = tramosInalcanzables(g);
+    if (pendientes.length === 0) break;
+    // De abajo hacia arriba: cada escalón nuevo sirve de base al siguiente.
+    const [y, x0, x1] = pendientes[0];
+    let mejor: { g: Grilla; puntos: number } | undefined;
+    for (const fila of [y + 3, y + 2]) {
+      if (fila >= ALTO_INTERIOR) continue;
+      for (let xs = x0 - 6; xs <= x1 + 4; xs++) {
+        const prueba = g.map((f) => [...f]);
+        if (!tramo(prueba, fila, xs, 3, "=")) continue;
+        const resto = tramosInalcanzables(prueba);
+        const resuelto = !resto.some(([ry, rx0]) => ry === y && rx0 === x0);
+        const escalonListo = !resto.some(([ry, rx0, rx1]) => ry === fila && rx0 <= xs + 2 && rx1 >= xs);
+        // Preferir: cornisa resuelta > escalón alcanzable > cualquiera; y a igualdad, el más cerca de la cornisa.
+        const puntos = (resuelto ? 1000 : 0) + (escalonListo ? 100 : 0) - Math.abs(xs + 1 - (x0 + x1) / 2) - (fila === y + 3 ? 0 : 5);
+        if (mejor === undefined || puntos > mejor.puntos) mejor = { g: prueba, puntos };
+      }
+    }
+    if (mejor === undefined) break;
+    for (let yy = 0; yy < ALTO_INTERIOR; yy++) g[yy] = mejor.g[yy];
+  }
+  return g.map((f) => f.join(""));
+}
+
 /** Coloca enemigos en lugares con sentido: caminantes en el piso, torretas en plataformas, voladores en el aire. */
 function poblar(azar: Azar, g: Grilla): void {
   const alc = alcanzables(g);

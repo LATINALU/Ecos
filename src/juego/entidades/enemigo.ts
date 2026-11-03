@@ -38,6 +38,10 @@ export class Enemigo extends Criatura {
   private fase: "normal" | "aviso" | "carga" | "descanso" | "mecha" = "normal";
   private tFase = 0;
   private readonly ataqueBase: number;
+  /** Multiplicador externo del daño (Juicio: escala, afijos, Reforzado). */
+  multAtaque = 1;
+  /** Juicio (Enfurecido): bajo el 30 % de vida pega un 50 % más. */
+  enfurecido = false;
   /** El kamikaze ya explotó. */
   exploto = false;
 
@@ -120,7 +124,7 @@ export class Enemigo extends Criatura {
     if (this.tiene("regenerador") && this.hp < this.hpMax) this.hp = Math.min(this.hpMax, this.hp + this.hpMax * 0.025 * dt);
     // Furioso: bajo la mitad de vida pega un 50 % más fuerte y se mueve más rápido.
     const furia = this.tiene("furioso") && this.hp < this.hpMax * 0.5;
-    this.ataque = Math.round(this.ataqueBase * (furia ? 1.5 : 1));
+    this.ataque = Math.round(this.ataqueBase * this.multAtaque * (furia ? 1.5 : 1) * (this.enfurecido ? 1.5 : 1));
     if (furia && Math.random() < dt * 6) ctx.fx.chispas(this.cx, this.y, "#ff3d3d", 1, { velocidad: 30, gravedad: -60 });
     if (furia) dt *= 1.25;
 

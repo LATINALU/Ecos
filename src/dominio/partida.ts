@@ -3,8 +3,10 @@
 //   Catalogo + comprar (mercader), y las reglas propias: forma/resonancias, equipo, únicos y Ecos.
 // No sabe nada de render ni de teclado: la escena le pide cosas y muestra el Resultado.
 
+import { NIVEL_INICIAL_JUICIO, PISO_DESBLOQUEO_JUICIO } from "./juicio.ts";
+import { abrirRelicario, PIEDAD_INICIAL, tirarNivelCaja, type PiedadRelicario } from "./relicario.ts";
 import {
-  AzarSemilla, Billetera, Catalogo, Inventario, PuntosHabilidad, RegistroMisiones, comprar, curvaPolinomica, exito, fallo, pagoConBilletera, transferir,
+  AzarSemilla, Billetera, Catalogo, Inventario, PuntosHabilidad, RegistroMisiones, comprar, curvaPolinomica, elegirUno, exito, fallo, pagoConBilletera, transferir,
   type Azar, type ErrorHabilidad, type ErrorMision, type MisionActiva, type ReglasHabilidades, type Capa, type CurvaNiveles, type ErrorCompra, type ErrorFusion, type Pila, type Posicion, type Resultado,
 } from "minialu";
 import { ALMAS } from "../contenido/almas.ts";
@@ -15,7 +17,7 @@ import {
 } from "../contenido/grimorio.ts";
 import { ESTILOS, type DefEstilo } from "../contenido/armas.ts";
 import {
-  CONSUMIBLES, MAT_FRAGMENTO, OBJ_CARTA, dadoParaNivel, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, apilable, estiloDe, maxPila,
+  CONSUMIBLES, MAT_FRAGMENTO, OBJ_CAJA_ALMAS, OBJ_CARTA, OBJ_RELICARIO, dadoParaNivel, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, apilable, estiloDe, maxPila,
   type EstiloArma,
 } from "../contenido/objetos.ts";
 import { CORAZONES_INICIALES, CORAZONES_MAX, SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
@@ -53,7 +55,7 @@ export interface HabilidadEquipada {
   readonly cantidad: number;
 }
 
-export const TAM_MOCHILA = 24;
+export const TAM_MOCHILA = 60;
 /** Contenedor seguro: lo que va acá no se pierde al morir en el Pozo. */
 export const TAM_SEGURO = 4;
 
@@ -67,7 +69,7 @@ export interface BotinPerdido {
 export function botinVacio(b: BotinPerdido | undefined): boolean {
   return b === undefined || (b.equipo.length === 0 && b.pilas.length === 0 && b.esquirlas === 0);
 }
-export const TAM_MAZO = 24;
+export const TAM_MAZO = 60;
 
 export const CATALOGO_MERCADER = new Catalogo(
   CONSUMIBLES.map((c) => ({ tienda: "mercader", pestana: 0, objeto: c.id, precio: c.precio })),
@@ -139,6 +141,16 @@ export interface DatosPartida {
   readonly nivelesRuna?: readonly [number, number];
   /** Personaje persistente (pueblo): piso más hondo desde el que se puede empezar y misiones. */
   readonly pisoDesbloqueado?: number;
+  /** Abismo (pozo sin fin): descenso en curso en ese modo, pisos seguidos sin salida y piso desbloqueado. */
+  readonly abismo?: boolean;
+  readonly pisosSinSalida?: number;
+  readonly abismoDesbloqueado?: number;
+  /** Arenas superadas seguidas en el descenso en curso (la racha se pierde al volver al pueblo). */
+  readonly rachaArenas?: number;
+  /** Piedra del Juicio (lategame): 0 = todavía no se tiene. */
+  readonly piedraJuicio?: number;
+  /** Relicarios: piedad del bloque de 100. */
+  readonly piedadRelicario?: PiedadRelicario;
   readonly seguro?: readonly (Pila | null)[];
   readonly misiones?: { readonly activas: readonly MisionActiva[]; readonly entregadas: readonly number[] };
 }
@@ -177,6 +189,18 @@ export class Partida {
   subarma: IdSubarma | null = null;
   /** Piso más hondo desde el que se puede empezar a bajar (se desbloquea venciendo guardianes). */
   pisoDesbloqueado = 1;
+  /** El descenso en curso es en el Abismo (pozo sin fin). */
+  abismo = false;
+  /** Abismo: pisos seguidos sin salida (la piedad garantiza una tras varios). */
+  pisosSinSalida = 0;
+  /** Abismo: piso más hondo desde el que se puede empezar (tras vencer guardianes). */
+  abismoDesbloqueado = 1;
+  /** Arenas superadas en el descenso en curso: encadenarlas mejora el premio de la siguiente. */
+  rachaArenas = 0;
+  /** Nivel de la Piedra del Juicio (0 = aún no se recibió; se recibe al desbloquear el piso 12). */
+  piedraJuicio = 0;
+  /** Relicario de Almas: garantía por bloque de 100 aperturas. */
+  piedadRelicario: PiedadRelicario = PIEDAD_INICIAL;
   /** Tablón de misiones de la taberna (minialu/RegistroMisiones). */
   readonly misiones = new RegistroMisiones(mision, MAX_MISIONES_ACTIVAS);
   /** Dos ranuras de runa (pasivas equipables). */
@@ -850,8 +874,11 @@ export class Partida {
   // ---------------- Pueblo: descensos, muerte y misiones ----------------
 
   /** Antes de bajar: elegir piso inicial (hasta el desbloqueado) y salir descansado. */
-  prepararDescenso(piso: number): void {
-    this.piso = Math.max(1, Math.min(piso, this.pisoDesbloqueado));
+  prepararDescenso(piso: number, abismo = false): void {
+    this.abismo = abismo;
+    this.pisosSinSalida = 0;
+    this.rachaArenas = 0;
+    this.piso = Math.max(1, Math.min(piso, abismo ? this.abismoDesbloqueado : this.pisoDesbloqueado));
     this.segundaVidaUsada = false;
     this.cargaDefinitiva = 0;
     this.alEmpezarPiso();
@@ -871,6 +898,14 @@ export class Partida {
     const nuevo = Math.min(pisosTotales, pisoVencido + 1);
     if (nuevo <= this.pisoDesbloqueado) return false;
     this.pisoDesbloqueado = nuevo;
+    this.revisarPiedraJuicio();
+    return true;
+  }
+
+  /** Abismo: vencer al guardián de un piso deja empezar desde el siguiente. */
+  desbloquearAbismo(pisoVencido: number): boolean {
+    if (pisoVencido + 1 <= this.abismoDesbloqueado) return false;
+    this.abismoDesbloqueado = pisoVencido + 1;
     return true;
   }
 
@@ -929,6 +964,79 @@ export class Partida {
     return r.ok ? exito(undefined) : fallo(r.error);
   }
 
+  /** La Piedra del Juicio se entrega al desbloquear el Pozo Profundo. Devuelve true si se acaba de recibir. */
+  revisarPiedraJuicio(): boolean {
+    if (this.piedraJuicio > 0 || this.pisoDesbloqueado < PISO_DESBLOQUEO_JUICIO) return false;
+    this.piedraJuicio = NIVEL_INICIAL_JUICIO;
+    return true;
+  }
+
+  /**
+   * Abre una caja de la mochila: Relicario (5★~12★, con garantía por bloque de 100) o Caja de Almas (1★~6★).
+   * La carta va al mazo; si no hay lugar, la caja no se gasta.
+   */
+  abrirCaja(objeto: number): Resultado<{ carta: Carta; garantizada: boolean }, "sin-caja" | "sin-espacio"> {
+    if ((objeto !== OBJ_RELICARIO && objeto !== OBJ_CAJA_ALMAS) || this.mochila.contar(objeto) <= 0) return fallo("sin-caja");
+    const ap = objeto === OBJ_RELICARIO ? abrirRelicario(this.azar, this.piedadRelicario) : undefined;
+    const nivel = ap?.nivel ?? tirarNivelCaja(this.azar);
+    const carta = crearCarta(this.azar, elegirUno(this.azar, ALMAS).id, nivel);
+    if (!this.mazo.agregar(OBJ_CARTA, 1, { carta }).ok) return fallo("sin-espacio");
+    this.mochila.quitar(objeto, 1);
+    if (ap !== undefined) this.piedadRelicario = ap.piedad;
+    this.meta.verAlma(carta.personaje);
+    return exito({ carta, garantizada: ap?.garantizada ?? false });
+  }
+
+  abrirRelicario(): Resultado<{ carta: Carta; garantizada: boolean }, "sin-caja" | "sin-espacio"> {
+    return this.abrirCaja(OBJ_RELICARIO);
+  }
+
+  /**
+   * Ordena la mochila como un RPG: equipo (de mejor a peor rareza y nivel), cajas, consumibles, runas y materiales.
+   */
+  ordenarMochila(): void {
+    const pilas: Pila[] = [];
+    for (const pos of [...this.mochila.posiciones()]) {
+      if (this.mochila.en(pos) === null) continue;
+      const r = this.mochila.sacarDe(pos);
+      if (r.ok) pilas.push(r.valor);
+    }
+    const grupo = (p: Pila): number => {
+      if (equipoDe(p) !== undefined) return 0;
+      if (p.objeto === OBJ_RELICARIO || p.objeto === OBJ_CAJA_ALMAS) return 1;
+      if (runaDeObjeto(p.objeto) !== undefined) return 3;
+      if (consumibleDe(p.objeto)) return 2;
+      return 4;
+    };
+    pilas.sort((a, b) => {
+      const ga = grupo(a);
+      const gb = grupo(b);
+      if (ga !== gb) return ga - gb;
+      const ea = equipoDe(a);
+      const eb = equipoDe(b);
+      if (ea !== undefined && eb !== undefined) return eb.rareza - ea.rareza || eb.nivel - ea.nivel || ea.nombre.localeCompare(eb.nombre);
+      return a.objeto - b.objeto || b.cantidad - a.cantidad;
+    });
+    const posiciones = [...this.mochila.posiciones()];
+    pilas.forEach((p, i) => this.mochila.ponerEn(posiciones[i], p));
+  }
+
+  /** Poder del Portador: una cifra para comparar equipos (nivel y rareza de lo equipado). */
+  poder(): number {
+    let total = 0;
+    for (const o of Object.values(this.equipo)) if (o !== null) total += o.nivel * (4 + o.rareza * 2) + (o.refinado ?? 0) * 6;
+    return total + this.nivel() * 10;
+  }
+
+  /** Compra una pieza de equipo ya generada (mercader errante del Abismo). */
+  comprarEquipo(eq: ObjetoEquipo, precio: number): Resultado<string, "sin-fondos" | "sin-espacio"> {
+    if (this.esquirlas < precio) return fallo("sin-fondos");
+    const r = this.recoger({ tipo: "equipo", equipo: eq });
+    if (!r.ok) return fallo("sin-espacio");
+    this.billetera.debitar("esquirlas", precio);
+    return exito(eq.nombre);
+  }
+
   /** Avisa algo al tablón ("matar", "jefe"...). Devuelve true si alguna misión quedó completa. */
   registrarMision(tipo: string, objetivo = -1, cantidad = 1): boolean {
     const cambiadas = this.misiones.registrar(tipo, objetivo, cantidad);
@@ -971,7 +1079,9 @@ export class Partida {
       enemigos: this.enemigos, jefes: this.jefes, ecosVencidos: this.ecosVencidos,
       segundaVidaUsada: this.segundaVidaUsada, contadorCorazon: this.contadorCorazon,
       puntos, talentos: [...this.talentos], corazones: this.corazones, subarma: this.subarma, runas: [this.runas[0], this.runas[1]], nivelesRuna: [this.nivelesRuna[0], this.nivelesRuna[1]],
-      pisoDesbloqueado: this.pisoDesbloqueado, misiones: this.misiones.exportar(), seguro: volcar(this.seguro),
+      pisoDesbloqueado: this.pisoDesbloqueado, abismo: this.abismo, pisosSinSalida: this.pisosSinSalida,
+      abismoDesbloqueado: this.abismoDesbloqueado, rachaArenas: this.rachaArenas, piedraJuicio: this.piedraJuicio,
+      piedadRelicario: this.piedadRelicario, misiones: this.misiones.exportar(), seguro: volcar(this.seguro),
     };
   }
 
@@ -1009,6 +1119,13 @@ export class Partida {
     p.runas = d.runas !== undefined ? [d.runas[0], d.runas[1]] : [null, null];
     p.nivelesRuna = d.nivelesRuna !== undefined ? [d.nivelesRuna[0], d.nivelesRuna[1]] : [0, 0];
     p.pisoDesbloqueado = Math.max(1, d.pisoDesbloqueado ?? 1);
+    p.abismo = d.abismo ?? false;
+    p.pisosSinSalida = d.pisosSinSalida ?? 0;
+    p.abismoDesbloqueado = Math.max(1, d.abismoDesbloqueado ?? 1);
+    p.rachaArenas = d.rachaArenas ?? 0;
+    p.piedraJuicio = d.piedraJuicio ?? 0;
+    p.piedadRelicario = d.piedadRelicario ?? PIEDAD_INICIAL;
+    p.revisarPiedraJuicio();
     // Misiones: se descartan las de versiones viejas del tablón (ids que ya no existen).
     if (d.misiones !== undefined) {
       p.misiones.importar({
@@ -1058,6 +1175,10 @@ export function cargarEn(inv: Inventario, pilas: readonly (Pila | null)[]): void
     const eq = equipoDe(p);
     inv.ponerEn(posiciones[i], eq !== undefined ? { ...p, extra: { equipo: normalizarEquipo(eq) } } : p);
   });
+}
+
+function consumibleDe(id: number): boolean {
+  return CONSUMIBLES.some((c) => c.id === id);
 }
 
 export function volcarInventario(inv: Inventario): (Pila | null)[] {

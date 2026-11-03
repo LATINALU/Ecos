@@ -2,6 +2,16 @@
 // mercader, mapa, pausa, reliquias, muerte y victoria. La lógica vive en el dominio; acá solo se muestra
 // y se llama a Partida/Meta, mostrando el Resultado (ok / código de error) que devuelven.
 
+import { biomaAbismo, iniciosAbismo, numeroRomano } from "../dominio/abismo.ts";
+import type { ArticuloErrante, AvisoAbismo, OpcionesCampana } from "../juego/juego.ts";
+import { INFO_AFIJO_JUICIO, afijosJuicio, semanaDe } from "../dominio/juicio.ts";
+import {
+  BLOQUE_RELICARIO, NIVEL_MIN_RELICARIO, NOMBRE_AURA, PROB_CAJA, PROB_RELICARIO, auraDeNivel, colorEstrella, pendientes,
+} from "../dominio/relicario.ts";
+import { dibujarPortador } from "../juego/render-portador.ts";
+import { TAM_MOCHILA } from "../dominio/partida.ts";
+import { dibujarRelicario } from "../juego/entidades/objetos.ts";
+import { OBJ_CAJA_ALMAS, OBJ_RELICARIO } from "../contenido/objetos.ts";
 import { pasivaMitica } from "../contenido/miticas.ts";
 import { MODIFICADORES_POR_RAREZA } from "../dominio/equipo.ts";
 import { cabeceraTienda, esencia, esquirlas, polvo as monedaPolvo, temaTienda, type IdTienda } from "./tienda.ts";
@@ -14,7 +24,7 @@ import {
 import { ESTILOS, ORDEN_ESTILOS } from "../contenido/armas.ts";
 import { EXITO_REFINADO, REFINADO_MAX, RECETAS, costoRefinado } from "../contenido/recetas.ts";
 import { CONJUNTOS, conjunto as defConjunto } from "../contenido/conjuntos.ts";
-import { COLORES_RAREZA_RUNA, COSTO_FUSION_RUNA, NOMBRES_RAREZA_RUNA, RAREZA_RUNA_MAX, nombreRuna, objetoRuna, runaDeObjeto } from "../contenido/objetos.ts";
+import { COLORES_RAREZA_RUNA, estiloDe, COSTO_FUSION_RUNA, NOMBRES_RAREZA_RUNA, RAREZA_RUNA_MAX, nombreRuna, objetoRuna, runaDeObjeto } from "../contenido/objetos.ts";
 import { SENDAS, TALENTOS, type Senda } from "../contenido/talentos.ts";
 import { craftear, faltantes, fusionarRunas, puedeCraftear, refinarEquipado } from "../dominio/crafteo.ts";
 import { bioma, type Bioma } from "../contenido/biomas.ts";
@@ -59,7 +69,7 @@ export interface Acciones {
   jugarRanura(i: number): void;
   crearPartida(i: number, nombre: string, opciones: OpcionesInicio): void;
   /** Desde el Pozo del pueblo. */
-  descender(piso: number): void;
+  descender(piso: number, abismo?: boolean): void;
   /** Tras morir o ganar. */
   volverAlPueblo(): void;
   stockArmero(): ArticuloArmero[];
@@ -166,6 +176,7 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
     h("div", { class: "nombre", style: `color:${COLORES_RAREZA[o.rareza]}` }, o.nombre),
     h("div", { class: `sub rareza-${o.rareza}` }, h("b", { style: `color:${COLORES_RAREZA[o.rareza]}` }, NOMBRES_RAREZA[o.rareza]),
       ` · ${NOMBRE_PIEZA[o.ranura]} · Nv ${o.nivel} · ${MODIFICADORES_POR_RAREZA[o.rareza]} modificador${MODIFICADORES_POR_RAREZA[o.rareza] === 1 ? "" : "es"}`),
+    pasivasArma(o),
     formatoStats(o.stats),
     o.elemento !== undefined ? (() => {
       const e = ELEMENTOS[o.elemento];
@@ -196,6 +207,21 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
     dif);
 }
 
+/** Alcance de un arma en palabras (en píxeles es poco claro para el jugador). */
+function textoAlcance(px: number): string {
+  return px >= 100 ? "a distancia" : px >= 32 ? "largo" : px >= 22 ? "medio" : "corto";
+}
+
+/** Familia de un arma: alcance y pasivas de ataque (en la ficha del arma). */
+function pasivasArma(o: ObjetoEquipo): HTMLElement | null {
+  if (o.ranura !== "arma") return null;
+  const e = ESTILOS[estiloDe(o.base)];
+  if (e.pasivas.length === 0) return null;
+  return h("div", { class: "pasivas-arma" },
+    h("div", { class: "sub" }, `${e.nombre} · alcance ${textoAlcance(e.alcance)} · combo de ${e.mults.length}`),
+    ...e.pasivas.map((pv) => h("div", { class: "pasiva-arma" }, h("b", { style: `color:${e.color}` }, `◈ ${pv.nombre}: `), pv.descripcion)));
+}
+
 function fichaCarta(c: Carta): HTMLElement {
   const a = alma(c.personaje);
   const g = grimorio(c.personaje);
@@ -209,12 +235,75 @@ function fichaCarta(c: Carta): HTMLElement {
     h("div", { class: "cita" }, `«${a.lore}»`));
 }
 
+/** Ícono del Relicario de Almas (o de la Caja de Almas, `menor`) para los menús: lienzo animado. */
+function lienzoRelicario(escala: number, menor = false): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = 16 * escala;
+  c.height = 16 * escala;
+  c.className = "icono-relicario";
+  const g = c.getContext("2d")!;
+  const t0 = performance.now();
+  const pintar = (ahora: number): void => {
+    if (!c.isConnected && ahora - t0 > 500) return;
+    g.clearRect(0, 0, c.width, c.height);
+    g.save();
+    g.translate(8 * escala, 15 * escala);
+    dibujarRelicario(g, (ahora - t0) / 1000, escala, menor);
+    g.restore();
+    requestAnimationFrame(pintar);
+  };
+  pintar(t0);
+  return c;
+}
+
+/** Figura del Portador para el muñeco del inventario (con el aura de su Forma detrás si es de 5★ o más). */
+function lienzoPortador(p: Partida): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = 40;
+  c.height = 48;
+  c.className = "inv-figura-lienzo";
+  const g = c.getContext("2d")!;
+  const forma = p.forma;
+  const a = forma !== null ? alma(forma.personaje) : null;
+  const cuerpo = a?.color ?? "#6a6a7a";
+  const acento = a?.colorSec ?? "#d0d0e0";
+  const t0 = performance.now();
+  const pintar = (ahora: number): void => {
+    if (!c.isConnected && ahora - t0 > 500) return;
+    g.clearRect(0, 0, c.width, c.height);
+    g.fillStyle = "#00000066";
+    g.beginPath();
+    g.ellipse(20, 43, 10, 2.5, 0, 0, Math.PI * 2);
+    g.fill();
+    dibujarPortador(g, 20, 43, 1, "quieto", { cuerpo, acento }, (ahora - t0) / 1000, { variante: a?.tipo ?? 1 });
+    requestAnimationFrame(pintar);
+  };
+  pintar(t0);
+  return c;
+}
+
+type FiltroMochila = "todo" | "equipo" | "cajas" | "consumibles" | "runas" | "materiales";
+
+function categoriaPila(pila: { objeto: number; extra?: unknown }): FiltroMochila {
+  if (equipoDe(pila as never) !== undefined) return "equipo";
+  if (pila.objeto === OBJ_RELICARIO || pila.objeto === OBJ_CAJA_ALMAS) return "cajas";
+  if (runaDeObjeto(pila.objeto) !== undefined) return "runas";
+  if (MATERIALES.some((m) => m.id === pila.objeto)) return "materiales";
+  return "consumibles";
+}
+
+/** Valor de una pieza para compararla con la equipada (flecha verde/roja en la mochila). */
+function valorPieza(o: ObjetoEquipo): number {
+  return o.nivel * (4 + o.rareza * 2) + (o.refinado ?? 0) * 6;
+}
+
 function miniCarta(c: Carta | null, etiqueta: string, sel: boolean, onclick: () => void): HTMLElement {
   if (c === null) return h("button", { class: `carta vacia${sel ? " sel" : ""}`, onclick }, h("small", {}, etiqueta), "—");
   const a = alma(c.personaje);
-  return h("button", { class: `carta${sel ? " sel" : ""}${c.brillante === true ? " brillante" : ""}`, style: `--c1:${a.color};--c2:${a.colorSec};--fam:${COLOR_FAMILIA[c.tipo]}`, onclick },
+  const aura = c.nivel >= NIVEL_MIN_RELICARIO ? ` con-aura${c.nivel >= 11 ? " prisma" : ""}` : "";
+  return h("button", { class: `carta${sel ? " sel" : ""}${c.brillante === true ? " brillante" : ""}${aura}`, style: `--c1:${a.color};--c2:${a.colorSec};--fam:${COLOR_FAMILIA[c.tipo]};--aura:${auraDeNivel(c.nivel)}`, onclick },
     h("small", {}, etiqueta),
-    h("span", { class: "retrato" }),
+    h("span", { class: "retrato-marco" }, h("span", { class: "retrato" })),
     h("b", {}, a.nombre),
     h("span", { class: "estrellas" }, estrellas(c) + (c.mejoras > 0 ? ` +${c.mejoras}` : "")),
     c.rasgo !== undefined ? h("small", { class: "rasgo" }, RASGOS_CARTA[c.rasgo].nombre) : null);
@@ -305,8 +394,16 @@ export class Interfaz {
     this.banner.classList.add("visible");
   }
 
-  anunciarPiso(piso: number, b: Bioma): void {
-    this.anunciar(`Piso ${piso} — ${b.nombre}`, b.lema, b.acento);
+  anunciarPiso(piso: number, b: Bioma, abismo?: AvisoAbismo): void {
+    if (abismo === undefined) {
+      this.anunciar(`Piso ${piso} — ${b.nombre}`, b.lema, b.acento);
+      return;
+    }
+    const ciclo = abismo.ciclo > 1 ? ` · Ciclo ${numeroRomano(abismo.ciclo)}` : "";
+    const pista = abismo.salida
+      ? "Sientes una corriente de aire: en este piso hay una SALIDA escondida."
+      : "Silencio absoluto. Ninguna salida en este piso.";
+    this.anunciar(`Abismo ${piso} — ${b.nombre}${ciclo}`, abismo.guardian ? `${pista} Un guardián custodia la grieta.` : pista, abismo.salida ? "#7dffb0" : b.acento);
   }
 
   // =============================== Título ===============================
@@ -364,8 +461,9 @@ export class Interfaz {
       return h("button", { class: `estilo${id === estilo ? " sel" : ""}`, style: `--c:${e.color}`, onclick: () => this.mostrarPreparacion(ranura, id, almaId, nombreActual()) },
         h("span", { class: `icono-estilo ${id}` }),
         h("b", {}, e.nombre),
-        h("small", {}, `Combo de ${e.mults.length}`),
-        h("span", { class: "sub" }, e.descripcion));
+        h("small", {}, `Combo de ${e.mults.length} · alcance ${textoAlcance(e.alcance)}`),
+        h("span", { class: "sub" }, e.descripcion),
+        ...e.pasivas.map((pv) => h("small", { class: "pasiva-arma" }, h("b", {}, `◈ ${pv.nombre}: `), pv.descripcion)));
     }));
     const vistas = ALMAS.filter((a) => m.almaVista(a.id));
     const almas = h("div", { class: "almas" },
@@ -471,34 +569,113 @@ export class Interfaz {
     this.abrir("inventario", this.botonCerrar(), h("h2", {}, "Portador"), tabs, cuerpo);
   }
 
+  private filtroMochila: FiltroMochila = "todo";
+
+  /**
+   * Inventario estilo RPG moderno: a la izquierda el PERSONAJE (muñeco con las 12 ranuras alrededor de la figura,
+   * runas, poder y stats), al centro la MOCHILA (capacidad, filtros, ordenar, rejilla con rareza, nivel y
+   * comparación con lo equipado) y a la derecha el DETALLE del objeto elegido con sus acciones.
+   */
   private vistaEquipo(juego: ConPartida, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
-    // Muñeco: 11 ranuras (arma, 6 de armadura, 2 anillos, aretes y collar).
-    const ranuras = h("div", { class: "ranuras munieco" }, ...RANURAS.map((r) => {
+    const refrescar = (s2?: Posicion | Ranura): void => this.abrirInventario(juego, "equipo", s2);
+    const ranura = (r: Ranura): HTMLElement => {
       const o = p.equipo[r];
       return h("button", {
-        class: `ranura r-${r}${sel === r ? " sel" : ""}${o === null ? " libre" : ""}`, style: o !== null ? `border-color:${COLORES_RAREZA[o.rareza]}` : "",
+        class: `inv-ranura${sel === r ? " sel" : ""}${o === null ? " libre" : ` r${o.rareza}`}`,
+        style: o !== null ? `--c:${COLORES_RAREZA[o.rareza]}` : "",
         title: o?.nombre ?? NOMBRE_RANURA[r],
-        onclick: () => this.abrirInventario(juego, "equipo", r),
-      }, h("small", {}, NOMBRE_RANURA[r]),
-      o !== null ? lienzoEquipo(o, COLORES_RAREZA[o.rareza], 2) : lienzoPieza(piezaDeRanura(r), "#3a3050", 2));
+        onclick: () => refrescar(r),
+      },
+      o !== null ? lienzoEquipo(o, COLORES_RAREZA[o.rareza], 2) : lienzoPieza(piezaDeRanura(r), "#3a3050", 2),
+      o !== null ? h("i", { class: "nv" }, String(o.nivel)) : h("small", {}, NOMBRE_RANURA[r]));
+    };
+    const izquierda: Ranura[] = ["casco", "hombros", "pecho", "cinturon", "pantalones", "botas"];
+    const derecha: Ranura[] = ["arma", "capa", "collar", "aretes", "anillo1", "anillo2"];
+    const forma = p.forma;
+    const s0 = p.stats();
+    const stat = (nombre: string, valor: string | number, color: string): HTMLElement =>
+      h("div", { class: "inv-stat" }, h("small", {}, nombre), h("b", { style: `color:${color}` }, String(valor)));
+    const runas = h("div", { class: "inv-runas" }, ...([0, 1] as const).map((k) => {
+      const r = p.runas[k];
+      const def = r !== null ? runaDeObjeto(objetoRuna(r, p.nivelesRuna[k])) : undefined;
+      return h("button", {
+        class: "inv-runa", style: def !== undefined ? `--c:${COLORES_RAREZA_RUNA[def.nivel]}` : "", title: def?.descripcion ?? "Engarza una runa desde la mochila",
+        onclick: () => {
+          if (r === null) return;
+          const res = p.quitarRuna(k);
+          if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
+          refrescar();
+        },
+      }, h("small", {}, `Runa ${k === 0 ? "I" : "II"}`), def !== undefined ? h("span", { style: `color:${def.color}` }, def.nombre) : h("span", { class: "sub" }, "vacía"));
     }));
-    const grilla = h("div", { class: "grilla" });
+    const personaje = h("section", { class: "inv-personaje" },
+      h("div", { class: "inv-cabecera" },
+        h("b", {}, forma !== null ? alma(forma.personaje).nombre : "Portador"),
+        h("small", {}, `Nivel ${p.nivel()}${forma !== null ? ` · Forma ${estrellas(forma)}` : ""}`),
+        h("div", { class: "inv-poder", title: "Poder: nivel y rareza de lo equipado" }, h("small", {}, "PODER"), h("b", {}, String(p.poder())))),
+      h("div", { class: "inv-munieco" },
+        h("div", { class: "inv-columna" }, ...izquierda.map(ranura)),
+        h("div", { class: `inv-figura${forma !== null && forma.nivel >= NIVEL_MIN_RELICARIO ? " con-aura" : ""}${forma !== null && forma.nivel >= 11 ? " prisma" : ""}`, style: `--aura:${forma !== null ? auraDeNivel(forma.nivel) : "#7a6aa0"}` },
+          lienzoPortador(p)),
+        h("div", { class: "inv-columna" }, ...derecha.map(ranura))),
+      runas,
+      h("div", { class: "inv-stats" },
+        stat("Vida", s0.hp, "#ff6a7a"), stat("Éter", s0.mp, "#4dc3ff"), stat("Golpe", s0.golpe, "#ffd27a"),
+        stat("Técnica", s0.tecnica, "#c9a7ff"), stat("Defensa", s0.defensa, "#9fe8ff"), stat("Crítico", `${s0.critico} %`, "#ff9a4d")));
+
+    // ---- Mochila
+    const filtro = this.filtroMochila;
+    let usadas = 0;
+    const grilla = h("div", { class: "inv-grilla" });
     for (const pos of p.mochila.posiciones()) {
       const pila = p.mochila.en(pos);
+      if (pila !== null) usadas++;
       const eq = pila !== null ? equipoDe(pila) : undefined;
       const cons = pila !== null ? apilable(pila.objeto) : undefined;
       const esSel = typeof sel === "object" && sel.casilla === pos.casilla;
+      const oculta = pila !== null && filtro !== "todo" && categoriaPila(pila) !== filtro;
+      let flecha: HTMLElement | null = null;
+      if (eq !== undefined) {
+        const puesta = p.equipo[p.ranuraPara(eq)];
+        const dif = puesta === null ? 1 : valorPieza(eq) - valorPieza(puesta);
+        if (dif !== 0) flecha = h("i", { class: dif > 0 ? "mejor" : "peor" }, dif > 0 ? "▲" : "▼");
+      }
+      const color = eq !== undefined ? COLORES_RAREZA[eq.rareza] : cons?.color ?? "";
       grilla.append(h("button", {
-        class: `celda${esSel ? " sel" : ""}${pila === null ? " vacia" : ""}`,
-        style: eq !== undefined ? `--c:${COLORES_RAREZA[eq.rareza]}` : cons !== undefined ? `--c:${cons.color}` : "",
+        class: `inv-celda${esSel ? " sel" : ""}${pila === null ? " vacia" : ""}${oculta ? " filtrada" : ""}${eq !== undefined ? ` r${eq.rareza}` : ""}`,
+        style: pila !== null ? `--c:${color}` : "",
         title: eq?.nombre ?? cons?.nombre ?? "",
-        onclick: () => this.abrirInventario(juego, "equipo", pos),
-      }, pila !== null
-        ? (eq !== undefined ? lienzoEquipo(eq, COLORES_RAREZA[eq.rareza]) : lienzoIcono(iconoObjeto(pila.objeto)) ?? h("span", { class: "icono pocion" }))
+        onclick: () => refrescar(pos),
+      },
+      pila !== null
+        ? (eq !== undefined ? lienzoEquipo(eq, COLORES_RAREZA[eq.rareza])
+          : pila.objeto === OBJ_RELICARIO ? lienzoRelicario(2)
+            : pila.objeto === OBJ_CAJA_ALMAS ? lienzoRelicario(2, true)
+              : lienzoIcono(iconoObjeto(pila.objeto)) ?? h("span", { class: "icono pocion" }))
         : null,
+      eq !== undefined ? h("i", { class: "nv" }, String(eq.nivel)) : null,
+      flecha,
       pila !== null && pila.cantidad > 1 ? h("small", {}, pila.cantidad) : null));
     }
-    let detalle: HTMLElement = h("div", { class: "detalle sub" }, "Elige un objeto para ver sus detalles. Equipo: botón Equipar. Lo que no sirva, desguázalo por esquirlas.");
+    const filtros: readonly [FiltroMochila, string][] = [["todo", "Todo"], ["equipo", "Equipo"], ["cajas", "Cajas"], ["consumibles", "Consumibles"], ["runas", "Runas"], ["materiales", "Materiales"]];
+    const bolsa = h("section", { class: "inv-bolsa" },
+      h("div", { class: "inv-cabecera" },
+        h("b", {}, "Mochila"),
+        h("div", { class: "inv-capacidad", title: `${usadas} de ${TAM_MOCHILA} casillas` },
+          h("i", { style: `width:${Math.round((usadas / TAM_MOCHILA) * 100)}%`, class: usadas >= TAM_MOCHILA - 4 ? "llena" : "" }),
+          h("span", {}, `${usadas}/${TAM_MOCHILA}`)),
+        h("span", { class: "inv-esquirlas" }, `◆ ${p.esquirlas}`),
+        h("button", { class: "inv-ordenar", title: "Ordenar: equipo por rareza, cajas, consumibles, runas y materiales", onclick: () => { p.ordenarMochila(); this.audio.reproducir("recoger"); refrescar(); } }, "⇅ Ordenar")),
+      h("div", { class: "inv-filtros" }, ...filtros.map(([id, txt]) => h("button", {
+        class: filtro === id ? "on" : "",
+        onclick: () => { this.filtroMochila = id; refrescar(typeof sel === "object" || typeof sel === "string" ? sel as Posicion | Ranura : undefined); },
+      }, txt))),
+      grilla);
+
+    // ---- Detalle
+    let detalle: HTMLElement = h("div", { class: "detalle inv-vacio" },
+      h("div", { class: "inv-pista" }, "Elige un objeto para ver sus detalles."),
+      h("small", {}, "▲ mejor que lo equipado · ▼ peor. Las cajas se abren aquí."));
     if (typeof sel === "string" && (RANURAS as readonly string[]).includes(sel)) {
       const r = sel as Ranura;
       const o = p.equipo[r];
@@ -508,9 +685,11 @@ export class Interfaz {
             onclick: () => {
               const res = p.desequipar(r);
               if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
-              this.abrirInventario(juego, "equipo");
+              refrescar();
             },
           }, "Quitar"));
+      } else {
+        detalle = h("div", { class: "detalle inv-vacio" }, h("div", { class: "inv-pista" }, `${NOMBRE_RANURA[r]}: vacío`), h("small", {}, "Elige una pieza de la mochila y pulsa Equipar."));
       }
     } else if (typeof sel === "object") {
       const pila = p.mochila.en(sel);
@@ -525,7 +704,7 @@ export class Interfaz {
               onclick: () => {
                 p.equiparDesde(sel, d);
                 this.audio.reproducir("recoger");
-                this.abrirInventario(juego, "equipo", d);
+                refrescar(d);
               },
             }, destinos.length > 1 ? `Equipar en ${NOMBRE_RANURA[d]}` : "Equipar")),
             h("button", {
@@ -535,39 +714,27 @@ export class Interfaz {
                   this.audio.reproducir("romper");
                   this.toast(`Desguazado: +${r.valor} esquirlas`, "#9fe8ff");
                 }
-                this.abrirInventario(juego, "equipo");
+                refrescar();
               },
             }, `Desguazar (+${valorDesguace(eq)} ◆)`)));
       } else if (cons !== undefined && pila !== null) {
         const runa = runaDeObjeto(pila.objeto);
+        const caja = pila.objeto === OBJ_RELICARIO || pila.objeto === OBJ_CAJA_ALMAS ? this.detalleCaja(juego, p, pila.objeto) : null;
         detalle = h("div", { class: "detalle" },
           h("div", { class: "ficha" }, h("div", { class: "nombre", style: `color:${cons.color}` }, `${cons.nombre} ×${pila.cantidad}`), h("div", { class: "sub" }, cons.descripcion)),
+          caja,
           runa !== undefined ? h("div", { class: "botones" }, ...([0, 1] as const).map((k) => h("button", {
             class: k === 0 ? "principal" : "",
             onclick: () => {
               const res = p.engarzarRuna(sel, k);
               if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
               else this.audio.reproducir("raro");
-              this.abrirInventario(juego, "equipo");
+              refrescar();
             },
           }, `Engarzar en Runa ${k === 0 ? "I" : "II"}`))) : null);
       }
     }
-    const runas = h("div", { class: "ranuras" }, ...([0, 1] as const).map((k) => {
-      const r = p.runas[k];
-      const def = r !== null ? runaDeObjeto(objetoRuna(r, p.nivelesRuna[k])) : undefined;
-      return h("button", {
-        class: "ranura", style: def !== undefined ? `border-color:${COLORES_RAREZA_RUNA[def.nivel]}` : "", title: def?.descripcion ?? "Engarza una runa desde la mochila",
-        onclick: () => {
-          if (r === null) return;
-          const res = p.quitarRuna(k);
-          if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
-          this.abrirInventario(juego, "equipo");
-        },
-      }, h("small", {}, `Runa ${k === 0 ? "I" : "II"}`), def !== undefined ? h("span", { style: `color:${def.color}` }, def.nombre,
-        h("small", { style: `color:${COLORES_RAREZA_RUNA[def.nivel]}` }, ` ${NOMBRES_RAREZA_RUNA[def.nivel]}`)) : "—");
-    }));
-    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipado"), ranuras, runas, h("h3", {}, `Mochila · ◆ ${p.esquirlas}`), grilla), detalle);
+    return h("div", { class: "inv" }, personaje, bolsa, h("section", { class: "inv-detalle" }, detalle));
   }
 
   private vistaCartas(juego: ConPartida, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
@@ -788,44 +955,73 @@ export class Interfaz {
       })));
 
     const sel = elegidas.map((pos) => cartasMazo.find((c) => c.pos.casilla === pos.casilla)?.carta).filter((c): c is Carta => c !== undefined);
-    let info: HTMLElement = h("p", { class: "sub" }, "Elige tres cartas con la misma cantidad de estrellas (de cualquier alma): sale una de las tres.");
-    let fusionar: HTMLElement | null = null;
-    if (sel.length > 0) {
-      const n = sel[0].nivel;
-      const compatibles = sel.every((c) => c.nivel === n);
-      const dado = dadoParaNivel(n);
-      const dados = dado !== undefined ? p.mochila.contar(dado) : 0;
-      const costo = COSTO_FUSION[n] ?? 0;
-      const prob = n >= NIVEL_MAX_CARTA ? 0 : lagrima ? 1 : PROB_FUSION[n];
-      info = h("div", {},
-        h("p", {}, `Elegidas ${sel.length}/3 · ${textoEstrellas(n)} → ${textoEstrellas(Math.min(n + 1, NIVEL_MAX_CARTA))}`),
-        !compatibles ? h("p", { class: "baja" }, "No tienen la misma cantidad de estrellas.") : null,
-        h("p", {}, `Costo: ${costo} ◆ (tienes ${p.esquirlas}) · Probabilidad de subir: ${Math.round(prob * 100)} %`),
-        h("label", { class: "check" },
-          h("input", { type: "checkbox", checked: lagrima, onclick: () => this.abrirAltar(juego, elegidas, !lagrima) }),
-          dado !== undefined
-            ? ` Asegurar con Dado del Destino ${n + 2}★ (tienes ${dados}; si no, Lágrima de Eco: ${p.mochila.contar(OBJ_LAGRIMA)})`
-            : ` Asegurar con Lágrima de Eco (tienes ${p.mochila.contar(OBJ_LAGRIMA)})`),
-        dado !== undefined && dados === 0 ? h("p", { class: "sub" }, `Los Dados del Destino se compran en el Bazar del Pozo (${n + 2}★: ${PRECIO_DADO[n - 2]} ◆).`) : null);
-      if (sel.length === 3) {
-        fusionar = h("button", {
-          class: "principal",
-          onclick: () => {
-            const r = p.fusionar([elegidas[0], elegidas[1], elegidas[2]], lagrima);
-            if (!r.ok) {
-              this.audio.reproducir("fallo");
-              this.abrirAltar(juego, elegidas, lagrima, h("p", { class: "baja" }, textoError(r.error)));
-              return;
-            }
-            this.audio.reproducir("fusion");
-            this.acciones.guardar();
-            this.abrirAltar(juego, [], false, h("div", { class: r.valor.subio ? "resultado sube" : "resultado" },
-              r.valor.subio ? "¡La fusión asciende!" : "Las almas se reforjan sin ascender…",
-              fichaCarta(r.valor.carta)));
-          },
-        }, "Fusionar");
-      }
-    }
+    const n = sel[0]?.nivel ?? -1;
+    const compatibles = sel.every((c) => c.nivel === n);
+    // Sello 100 %: el Dado del Destino de esa estrella; si no hay, una Lágrima de Eco.
+    const dado = n >= 0 ? dadoParaNivel(n) : undefined;
+    const dados = dado !== undefined ? p.mochila.contar(dado) : 0;
+    const lagrimas = p.mochila.contar(OBJ_LAGRIMA);
+    const selloDisponible = dados > 0 || lagrimas > 0;
+    const usaSello = lagrima && selloDisponible;
+    const sello = dados > 0 && dado !== undefined
+      ? { id: dado, nombre: `Dado del Destino ${n + 2}★`, cantidad: dados }
+      : { id: OBJ_LAGRIMA, nombre: "Lágrima de Eco", cantidad: lagrimas };
+    const costo = n >= 0 ? COSTO_FUSION[n] ?? 0 : 0;
+    const prob = n < 0 ? 0 : n >= NIVEL_MAX_CARTA ? 0 : usaSello ? 1 : PROB_FUSION[n];
+
+    const ranuraCarta = (i: number): HTMLElement => {
+      const c = sel[i];
+      if (c === undefined) return h("div", { class: "ranura-fusion vacia" }, h("small", {}, `Alma ${i + 1}`), h("span", {}, "+"));
+      return h("div", { class: "ranura-fusion llena" },
+        miniCarta(c, `Alma ${i + 1}`, false, () => this.abrirAltar(juego, elegidas.filter((_, k) => k !== i), lagrima)));
+    };
+    const ranuraSello = h("button", {
+      class: `ranura-fusion sello${usaSello ? " activo" : ""}${selloDisponible ? "" : " agotado"}`,
+      disabled: !selloDisponible || n < 0,
+      title: "Asegura la fusión: sube de estrella con 100 % de probabilidad",
+      onclick: () => this.abrirAltar(juego, elegidas, !lagrima),
+    },
+    h("small", {}, "Sello 100 %"),
+    lienzoIcono(iconoObjeto(sello.id), 3) ?? h("span", { class: "glifo" }, "⚅"),
+    h("b", {}, n < 0 ? "Elige cartas" : selloDisponible ? sello.nombre : "Sin sello"),
+    h("span", { class: "sub" }, n < 0 ? "—" : selloDisponible ? `${usaSello ? "Colocado" : "Clic para colocar"} · tienes ${sello.cantidad}` : "Cómpralo en el Bazar"));
+
+    const resultado = h("div", { class: "resultado-fusion" },
+      h("small", {}, "Resultado"),
+      h("div", { class: "estrellas-meta" }, n < 0 ? "?" : textoEstrellas(Math.min(n + 1, NIVEL_MAX_CARTA))),
+      h("div", { class: "prob" }, h("i", { style: `width:${Math.round(prob * 100)}%` })),
+      h("span", {}, n < 0 ? "Probabilidad —" : `Probabilidad ${Math.round(prob * 100)} %`),
+      h("span", { class: p.esquirlas >= costo ? "sub" : "baja" }, n < 0 ? "" : `Costo ${costo} ◆`));
+
+    const listo = sel.length === 3 && compatibles && n < NIVEL_MAX_CARTA;
+    const mesa = h("div", { class: `mesa-fusion${usaSello ? " sellada" : ""}` },
+      ranuraCarta(0), ranuraCarta(1), ranuraCarta(2),
+      h("span", { class: "signo" }, "+"), ranuraSello,
+      h("span", { class: "signo" }, "→"), resultado);
+
+    const avisos: (HTMLElement | null)[] = [
+      sel.length === 0 ? h("p", { class: "sub" }, "Elige tres cartas con la misma cantidad de estrellas (de cualquier alma) en tu mazo: sale una de las tres. Clic en una ranura para sacarla.") : null,
+      sel.length > 0 && !compatibles ? h("p", { class: "baja" }, "No tienen la misma cantidad de estrellas.") : null,
+      dado !== undefined && dados === 0 ? h("p", { class: "sub" }, `El Dado del Destino ${n + 2}★ se compra en el Bazar del Pozo (${PRECIO_DADO[n - 2]} ◆). La Lágrima de Eco sirve para cualquier estrella.`) : null,
+    ];
+    const fusionar: HTMLElement = h("button", {
+      class: "principal boton-fusion",
+      disabled: !listo,
+      onclick: () => {
+        const r = p.fusionar([elegidas[0], elegidas[1], elegidas[2]], usaSello);
+        if (!r.ok) {
+          this.audio.reproducir("fallo");
+          this.abrirAltar(juego, elegidas, lagrima, h("p", { class: "baja" }, textoError(r.error)));
+          return;
+        }
+        this.audio.reproducir("fusion");
+        this.acciones.guardar();
+        this.abrirAltar(juego, [], false, h("div", { class: r.valor.subio ? "resultado sube" : "resultado" },
+          r.valor.subio ? "¡La fusión asciende!" : "Las almas se reforjan sin ascender…",
+          fichaCarta(r.valor.carta)));
+      },
+    }, usaSello ? "Fusionar (asegurada)" : "Fusionar");
+    const info = h("div", {}, ...avisos);
 
     // Mejora con Polvo de Eco
     const polvo = p.mochila.contar(OBJ_POLVO);
@@ -853,9 +1049,11 @@ export class Interfaz {
     const enPueblo = !("mapa" in juego);
     this.abrirTienda("altar", enPueblo ? "altar" : "altarPozo", this.botonCerrar(),
       cabeceraTienda(enPueblo ? "altar" : "altarPozo", [esquirlas(p.esquirlas), monedaPolvo(polvo)]),
+      h("h3", {}, "Fusión: tres almas, una sola voz"),
+      mesa, info, fusionar, mensaje ?? null,
       h("div", { class: "vista" },
-        h("div", { class: "col" }, h("h3", {}, "Fusión: tres almas, una sola voz"), grilla),
-        h("div", { class: "detalle" }, info, fusionar, mensaje ?? null,
+        h("div", { class: "col" }, h("h3", {}, "Tu mazo"), grilla),
+        h("div", { class: "detalle" },
           h("h3", {}, `Mejora · Polvo de Eco: ${polvo}`),
           h("p", { class: "sub" }, "Cada polvo suma +1~+5 a todos los stats de una carta equipada (máx. 5 veces)."),
           mejora)));
@@ -951,8 +1149,23 @@ export class Interfaz {
 
   // =============================== Mercader ===============================
 
-  abrirMercader(juego: ConPartida): void {
+  abrirMercader(juego: ConPartida, errante?: { lista: readonly ArticuloErrante[]; comprar: (i: number) => boolean }): void {
     const p = juego.partida;
+    const rarezas = errante === undefined ? null : h("div", {},
+      h("h3", {}, "Rarezas del errante · solo en este piso"),
+      errante.lista.length === 0 ? h("p", { class: "sub" }, "Ya no le queda nada raro que ofrecerte.") : null,
+      h("div", { class: "catalogo" }, ...errante.lista.map((art, i) => h("div", { class: "articulo-ficha venta", style: `--c:${COLORES_RAREZA[art.equipo.rareza]}` },
+        fichaEquipo(art.equipo, p.equipo[p.ranuraPara(art.equipo)]),
+        h("button", {
+          class: "principal",
+          disabled: p.esquirlas < art.precio,
+          onclick: () => {
+            const ok = errante.comprar(i);
+            this.audio.reproducir(ok ? "unico" : "fallo");
+            if (!ok) this.toast(p.esquirlas < art.precio ? "No te alcanzan las esquirlas" : "No tienes espacio en la mochila", "#ff9a4d");
+            this.abrirMercader(juego, errante);
+          },
+        }, `Comprar · ${art.precio} ◆`)))));
     const venta = CONSUMIBLES.map((c) => h("div", { class: "articulo" },
       h("span", { style: `color:${c.color}` }, c.nombre),
       h("span", { class: "sub" }, c.descripcion),
@@ -965,7 +1178,7 @@ export class Interfaz {
             this.audio.reproducir("fallo");
             this.toast(textoError(r.error), "#ff9a4d");
           }
-          this.abrirMercader(juego);
+          this.abrirMercader(juego, errante);
         },
       }, `${c.precio} ◆`)));
     const desguace: HTMLElement[] = [];
@@ -980,12 +1193,13 @@ export class Interfaz {
           onclick: () => {
             const r = p.desguazar(pos);
             if (r.ok) this.audio.reproducir("romper");
-            this.abrirMercader(juego);
+            this.abrirMercader(juego, errante);
           },
         }, `+${valorDesguace(eq)} ◆`)));
     }
     this.abrirTienda("mercader", "mercaderPozo", this.botonCerrar(),
       cabeceraTienda("mercaderPozo", [esquirlas(p.esquirlas)]),
+      rarezas,
       h("h3", {}, "Comprar"), ...venta,
       h("h3", {}, "Desguazar equipo"), desguace.length > 0 ? h("div", {}, ...desguace) : h("p", { class: "sub" }, "No llevas equipo para desguazar."));
   }
@@ -1038,6 +1252,7 @@ export class Interfaz {
     this.abrirTienda("taberna", "taberna", this.botonCerrar(),
       cabeceraTienda("taberna", [esquirlas(p.esquirlas)]),
       aviso ?? null,
+      this.registroDesafios(p),
       h("div", { class: "vista" },
         h("div", { class: "col" },
           h("h3", {}, `Misiones activas (${activas.length}/${MAX_MISIONES_ACTIVAS})`),
@@ -1063,6 +1278,236 @@ export class Interfaz {
           h("button", { onclick: () => this.mostrarMemorial() }, "Memorial de los Ecos"))));
   }
 
+  /** Registro de desafíos: arenas, récords y la Piedra del Juicio con los afijos de esta semana. */
+  private registroDesafios(p: Partida): HTMLElement {
+    const r = this.meta.registro;
+    const semana = semanaDe(new Date());
+    const piedra = p.piedraJuicio;
+    const afijos = afijosJuicio(Math.max(piedra, 10), semana);
+    return h("div", { class: "registro-desafios" },
+      h("h3", {}, "Registro de desafíos"),
+      h("div", { class: "records" },
+        h("div", {}, h("b", {}, String(r.arenas ?? 0)), h("small", {}, "arenas superadas")),
+        h("div", {}, h("b", {}, String(r.arenasIntocables ?? 0)), h("small", {}, "intocables")),
+        h("div", {}, h("b", {}, `${r.mejorReloj ?? 0} s`), h("small", {}, "mejor Reloj de Arena")),
+        h("div", {}, h("b", {}, `×${r.mayorRacha ?? 0}`), h("small", {}, "mayor racha")),
+        h("div", {}, h("b", {}, piedra > 0 ? `+${piedra}` : "—"), h("small", {}, "Piedra del Juicio")),
+        h("div", {}, h("b", {}, r.mejorJuicio !== undefined ? `+${r.mejorJuicio}` : "—"), h("small", {}, `mejor Juicio · ${r.juiciosATiempo ?? 0} a tiempo`))),
+      piedra > 0
+        ? h("div", { class: "afijos-semana" },
+          h("small", {}, "Afijos del Juicio esta semana (se suman en +2, +4, +7 y +10):"),
+          ...afijos.map((x, k) => h("span", { class: "afijo", style: `--c:${INFO_AFIJO_JUICIO[x].color}`, title: INFO_AFIJO_JUICIO[x].descripcion },
+            `+${[2, 4, 7, 10][k]} ${INFO_AFIJO_JUICIO[x].nombre}`)))
+        : h("p", { class: "sub" }, "Desbloquea el piso 12 para recibir la Piedra del Juicio: las campanas de las arenas ofrecerán desafíos de nivel con afijos semanales."));
+  }
+
+  /** Relicario en el inventario: tabla de estrellas, la garantía del bloque y el botón de abrir. */
+  /** Caja en el inventario: tabla de estrellas (y la garantía si es un Relicario), abrir una o abrir todas. */
+  private detalleCaja(juego: ConPartida, p: Partida, objeto: number): HTMLElement {
+    const relicario = objeto === OBJ_RELICARIO;
+    const desde = relicario ? NIVEL_MIN_RELICARIO : 0;
+    const probs = relicario ? PROB_RELICARIO : PROB_CAJA;
+    const falta = relicario ? pendientes(p.piedadRelicario) : {};
+    const tabla = h("div", { class: "tabla-relicario" }, ...probs.map((pr, i) => {
+      const nivel = desde + i;
+      const cuota = falta[nivel];
+      const aura = nivel >= NIVEL_MIN_RELICARIO;
+      return h("span", { class: `aura-chip${nivel >= 11 ? " prisma" : ""}${aura ? "" : " sin-aura"}`, style: `--aura:${colorEstrella(nivel)}` },
+        h("b", {}, `${nivel + 1}★`),
+        h("small", {}, aura ? NOMBRE_AURA[nivel - NIVEL_MIN_RELICARIO] : "sin aura"),
+        h("small", {}, `${pr * 100 < 1 ? (pr * 100).toFixed(1) : Math.round(pr * 100)} %`),
+        cuota !== undefined ? h("small", { class: cuota > 0 ? "falta" : "ok" }, cuota > 0 ? `faltan ${cuota}` : "✓") : null);
+    }));
+    const buscar = (): Posicion | undefined => [...p.mochila.posiciones()].find((x) => p.mochila.en(x)?.objeto === objeto);
+    const abrirUna = (): void => {
+      const r = p.abrirCaja(objeto);
+      if (!r.ok) {
+        this.audio.reproducir("fallo");
+        this.toast(r.error === "sin-espacio" ? "Tu mazo está lleno: haz lugar antes de abrirla" : "No te quedan", "#ff9a4d");
+        return;
+      }
+      this.acciones.guardar();
+      this.animarRelicario(r.valor.carta, r.valor.garantizada, () => this.abrirInventario(juego, "equipo", buscar()),
+        p.mochila.contar(objeto) > 0 ? () => { this.abrirInventario(juego, "equipo", buscar()); abrirUna(); } : undefined, objeto);
+    };
+    const abrirTodas = (): void => {
+      const cartas: Carta[] = [];
+      while (p.mochila.contar(objeto) > 0) {
+        const r = p.abrirCaja(objeto);
+        if (!r.ok) break;
+        cartas.push(r.valor.carta);
+      }
+      if (cartas.length === 0) {
+        this.audio.reproducir("fallo");
+        this.toast("Tu mazo está lleno: haz lugar antes de abrirlas", "#ff9a4d");
+        return;
+      }
+      this.acciones.guardar();
+      this.resumenCajas(cartas, objeto, () => this.abrirInventario(juego, "equipo", buscar()));
+    };
+    const cantidad = p.mochila.contar(objeto);
+    return h("div", { class: "relicario-info" },
+      relicario ? h("small", {}, `Garantía: apertura ${p.piedadRelicario.abiertos}/${BLOQUE_RELICARIO} del bloque. Antes de cerrarlo salen al menos 1×12★, 3×11★, 5×10★ y 8×9★.`) : null,
+      tabla,
+      h("div", { class: "botones" },
+        h("button", { class: `principal boton-relicario${relicario ? "" : " menor"}`, onclick: abrirUna }, relicario ? "Abrir relicario" : "Abrir caja"),
+        cantidad > 1 ? h("button", { onclick: abrirTodas }, `Abrir todas (${cantidad})`) : null));
+  }
+
+  /** "Abrir todas": las cartas que salieron, de la más rara a la más común, con su aura. */
+  private resumenCajas(cartas: Carta[], objeto: number, cerrar: () => void): void {
+    const orden = [...cartas].sort((a, b) => b.nivel - a.nivel);
+    const mejor = orden[0];
+    this.audio.reproducir(mejor.nivel >= 9 ? "unico" : mejor.nivel >= 6 ? "fusion" : "raro");
+    const capa = h("div", { class: "relicario-capa listo calma", style: `--aura:${colorEstrella(mejor.nivel)}` },
+      h("div", { class: "relicario-titulo" }, `${objeto === OBJ_RELICARIO ? "Relicarios" : "Cajas de Almas"} abiertas: ${cartas.length}`),
+      h("div", { class: "relicario-estrellas", style: `color:${colorEstrella(mejor.nivel)}` }, `Lo mejor: ${mejor.nivel + 1}★`),
+      h("div", { class: "resumen-cajas" }, ...orden.map((c) => miniCarta(c, "", false, () => undefined))),
+      h("div", { class: "menu" }, h("button", { class: "principal", onclick: () => { capa.remove(); cerrar(); } }, "Continuar")));
+    document.body.append(capa);
+  }
+
+  /**
+   * Apertura de una caja: tiembla, su luz SUBE estrella por estrella (con el color de cada una) hasta la que
+   * tocó —cuanto más rara, más escalones y más suspenso— y estalla mostrando la carta con su aura.
+   * Relicario: de 5★ a 12★. Caja de Almas: de 1★ a 6★. Clic para saltar la animación.
+   */
+  animarRelicario(carta: Carta, garantizada: boolean, cerrar: () => void, otro?: () => void, objeto = OBJ_RELICARIO): void {
+    const relicario = objeto === OBJ_RELICARIO;
+    const desde = relicario ? NIVEL_MIN_RELICARIO : 0;
+    const capa = h("div", { class: `relicario-capa${relicario ? "" : " menor"}` });
+    const lienzo = document.createElement("canvas");
+    lienzo.width = 240;
+    lienzo.height = 200;
+    lienzo.className = "relicario-lienzo";
+    const titulo = h("div", { class: "relicario-titulo" }, relicario ? "Relicario de Almas" : "Caja de Almas");
+    const revelado = h("div", { class: "relicario-revelado" });
+    capa.append(titulo, lienzo, revelado);
+    document.body.append(capa);
+    const g = lienzo.getContext("2d")!;
+    g.imageSmoothingEnabled = false;
+    const escalones = carta.nivel - desde;
+    const T_TEMBLOR = relicario ? 1.1 : 0.7;
+    const T_ESCALON = relicario ? 0.55 : 0.4;
+    const total = T_TEMBLOR + (escalones + 1) * T_ESCALON + 0.4;
+    const inicio = performance.now();
+    let ultimo = -1;
+    let terminado = false;
+    const final = colorEstrella(carta.nivel);
+
+    const revelar = (): void => {
+      if (terminado) return;
+      terminado = true;
+      this.audio.reproducir(carta.nivel >= 9 ? "unico" : carta.nivel >= 6 ? "fusion" : carta.nivel >= 4 ? "raro" : "recoger");
+      capa.style.setProperty("--aura", final);
+      capa.classList.add("listo", `nivel-${carta.nivel + 1}`);
+      window.setTimeout(() => capa.classList.add("calma"), 750);
+      if (carta.nivel >= 11) capa.classList.add("prisma");
+      const aura = carta.nivel >= NIVEL_MIN_RELICARIO ? ` · Aura ${NOMBRE_AURA[carta.nivel - NIVEL_MIN_RELICARIO]}` : "";
+      revelado.append(
+        h("div", { class: "relicario-estrellas", style: `color:${final}` }, `${carta.nivel + 1}★${aura}`),
+        garantizada ? h("div", { class: "relicario-garantia" }, "Garantía del bloque cumplida") : "",
+        miniCarta(carta, "", false, () => undefined),
+        fichaCarta(carta),
+        h("div", { class: "menu" },
+          otro !== undefined ? h("button", { class: "principal", onclick: () => { capa.remove(); otro(); } }, relicario ? "Abrir otro" : "Abrir otra") : "",
+          h("button", { class: otro === undefined ? "principal" : "", onclick: () => { capa.remove(); cerrar(); } }, "Continuar")));
+    };
+
+    const cuadro = (ahora: number): void => {
+      if (!capa.isConnected) return;
+      const t = terminado ? total : Math.min(total, (ahora - inicio) / 1000);
+      g.clearRect(0, 0, lienzo.width, lienzo.height);
+      const k = t < T_TEMBLOR ? -1 : Math.min(escalones, Math.floor((t - T_TEMBLOR) / T_ESCALON));
+      const nivel = desde + Math.max(0, k);
+      if (k !== ultimo && k >= 0) {
+        ultimo = k;
+        this.audio.reproducir(nivel >= 9 ? "unico" : nivel >= 6 ? "raro" : "recoger");
+      }
+      // 12★: luz prismática que recorre todos los colores.
+      const color = k < 0 ? "#ffffff" : nivel >= 11 ? `hsl(${Math.floor(t * 240) % 360}, 100%, 65%)` : colorEstrella(nivel);
+      const fuerza = t < T_TEMBLOR ? t / T_TEMBLOR : 1;
+      const brillo = Math.max(0, nivel - 2);
+      const cx = 120;
+      const base = 150;
+      g.save();
+      g.translate(cx, base - 40);
+      g.globalCompositeOperation = "lighter";
+      const rayos = 6 + brillo * 2;
+      for (let r = 0; r < rayos; r++) {
+        const a = (r / rayos) * Math.PI * 2 + t * (0.6 + brillo * 0.12);
+        g.fillStyle = color;
+        g.globalAlpha = 0.12 * fuerza + (terminado ? 0.18 : 0);
+        g.beginPath();
+        g.moveTo(0, 0);
+        const largo = 50 + brillo * 10 + (terminado ? 40 : 0);
+        g.lineTo(Math.cos(a - 0.08) * largo, Math.sin(a - 0.08) * largo);
+        g.lineTo(Math.cos(a + 0.08) * largo, Math.sin(a + 0.08) * largo);
+        g.closePath();
+        g.fill();
+      }
+      const grad = g.createRadialGradient(0, 0, 0, 0, 0, 44 + brillo * 6);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      g.globalAlpha = 0.5 * fuerza + 0.2 * Math.sin(t * 9) * fuerza;
+      g.fillStyle = grad;
+      g.fillRect(-120, -120, 240, 240);
+      g.restore();
+      if (!terminado) {
+        const temblor = (0.5 + Math.max(0, k) * 0.4) * fuerza;
+        g.save();
+        g.translate(cx + Math.round((Math.random() - 0.5) * 2 * temblor * 3), base + Math.round((Math.random() - 0.5) * temblor * 2));
+        dibujarRelicario(g, t * 2, 4, !relicario);
+        g.restore();
+        if (k >= 0) {
+          g.fillStyle = color;
+          g.font = "bold 18px serif";
+          g.textAlign = "center";
+          g.fillText(`${nivel + 1}★`, cx, 24);
+        }
+      }
+      if (!terminado && t >= total) revelar();
+      requestAnimationFrame(cuadro);
+    };
+    capa.addEventListener("click", (e) => {
+      if (!terminado && e.target !== null && !(e.target instanceof HTMLButtonElement)) revelar();
+    });
+    this.audio.reproducir("cofre");
+    requestAnimationFrame(cuadro);
+    // Por si el navegador frena los cuadros (pestaña en segundo plano): la carta se revela igual.
+    window.setTimeout(revelar, total * 1000 + 300);
+  }
+
+  /** Campana del desafío: la arena normal, o el Juicio si se tiene la piedra. */
+  abrirCampana(op: OpcionesCampana): void {
+    const d = op.def;
+    const pieza = d.pieza !== undefined ? `${NOMBRE_PIEZA[d.destino]} (${NOMBRES_RAREZA[d.pieza]} o mejor)` : null;
+    const premios = [`Cofre: ${["madera", "plata", "oro", "mítico"][d.cofre]}`, pieza, d.carta ? "Carta de alma de jefe" : null, `${d.esquirlas} ◆`].filter((x) => x !== null);
+    const juicio = op.juicio;
+    this.abrir("faro",
+      h("h2", { style: `color:${d.color}` }, d.nombre),
+      h("p", { class: "sub" }, d.regla),
+      h("div", { class: "campana-info" },
+        h("div", {}, h("small", {}, "Oleadas"), h("b", {}, String(d.oleadas))),
+        d.tiempo !== undefined ? h("div", {}, h("small", {}, "Tiempo"), h("b", {}, `${d.tiempo} s`)) : null,
+        h("div", {}, h("small", {}, "Botín con destino"), h("b", {}, NOMBRE_PIEZA[d.destino])),
+        h("div", {}, h("small", {}, "Racha"), h("b", {}, op.racha > 0 ? `×${op.racha} → ×${op.racha + 1}` : "—"))),
+      h("p", {}, `Premio: ${premios.join(" · ")}`),
+      h("p", { class: "sub" }, "Sellos: Intocable (sin recibir golpes) mejora cofre y pieza · encadenar arenas en el descenso sube la racha."),
+      juicio !== undefined
+        ? h("div", { class: "juicio" },
+          h("h3", {}, `El Juicio +${juicio.nivel}`),
+          h("p", { class: "sub" }, `Enemigos con ×${juicio.escala.toFixed(2)} de vida y daño · ${juicio.tiempo} s · a tiempo la piedra sube (+1/+2/+3), tarde baja 1. `
+            + `Premio: pieza ${NOMBRES_RAREZA[Math.min(5, 2 + Math.floor(juicio.nivel / 3))]} o mejor.`),
+          h("div", { class: "afijos-semana" }, ...juicio.afijos.map((x) => h("span", { class: "afijo", style: `--c:${INFO_AFIJO_JUICIO[x].color}` },
+            h("b", {}, INFO_AFIJO_JUICIO[x].nombre), ` — ${INFO_AFIJO_JUICIO[x].descripcion}`))))
+        : null,
+      h("div", { class: "menu" },
+        h("button", { class: "principal", onclick: () => { this.cerrar(); op.empezar(false); } }, "Tocar la campana"),
+        juicio !== undefined ? h("button", { class: "principal juicio-boton", onclick: () => { this.cerrar(); op.empezar(true); } }, `Invocar el Juicio +${juicio.nivel}`) : null,
+        h("button", { onclick: () => this.cerrar() }, "Todavía no")));
+  }
+
   /** Bazar: compra (minialu/Catalogo + comprar) y venta (precioDeVenta) de consumibles, materiales, runas y cartas. */
   abrirBazar(juego: ConPartida, pestana: "comprar" | "vender" = "comprar"): void {
     const p = juego.partida;
@@ -1071,21 +1516,36 @@ export class Interfaz {
       h("button", { class: pestana === "vender" ? "tab on" : "tab", onclick: () => this.abrirBazar(juego, "vender") }, "Vender"));
     let cuerpo: HTMLElement;
     if (pestana === "comprar") {
-      cuerpo = h("div", {}, ...[...CONSUMIBLES, ...MATERIALES].map((c) => {
+      const comprarN = (id: number, n: number): void => {
+        let hechas = 0;
+        let error = "";
+        for (let k = 0; k < n; k++) {
+          const r = comprarEnPueblo(p, id);
+          if (!r.ok) { error = String(r.error); break; }
+          hechas++;
+        }
+        this.audio.reproducir(hechas > 0 ? "recoger" : "fallo");
+        if (hechas === 0) this.toast(textoError(error), "#ff9a4d");
+        this.acciones.guardar();
+        this.abrirBazar(juego, "comprar");
+      };
+      const ficha = (c: { id: number; nombre: string; descripcion: string; color: string }): HTMLElement => {
         const precio = precioPueblo(c.id);
-        return h("div", { class: "articulo" },
-          h("span", { class: "con-icono", style: `color:${c.color}` }, lienzoIcono(iconoObjeto(c.id), 2), c.nombre),
-          h("span", { class: "sub" }, `${c.descripcion} · tienes ${p.mochila.contar(c.id)}`),
-          h("button", {
-            disabled: p.esquirlas < precio,
-            onclick: () => {
-              const r = comprarEnPueblo(p, c.id);
-              this.audio.reproducir(r.ok ? "recoger" : "fallo");
-              if (!r.ok) this.toast(textoError(r.error), "#ff9a4d");
-              this.abrirBazar(juego, "comprar");
-            },
-          }, `${precio} ◆`));
-      }));
+        return h("div", { class: "articulo-ficha", style: `--c:${c.color}` },
+          h("div", { class: "icono-grande" }, lienzoIcono(iconoObjeto(c.id), 3) ?? h("span", { class: "glifo" }, c.nombre.startsWith("Dado") ? "⚅" : "◆")),
+          h("b", {}, c.nombre),
+          h("span", { class: "sub" }, c.descripcion),
+          h("span", { class: "tienes" }, `En la mochila: ${p.mochila.contar(c.id)}`),
+          h("div", { class: "botones" },
+            h("button", { class: "principal", disabled: p.esquirlas < precio, onclick: () => comprarN(c.id, 1) }, `${precio} ◆`),
+            h("button", { disabled: p.esquirlas < precio * 5, onclick: () => comprarN(c.id, 5) }, `×5 · ${precio * 5} ◆`)));
+      };
+      const dados = CONSUMIBLES.filter((c) => c.nombre.startsWith("Dado"));
+      const consumibles = CONSUMIBLES.filter((c) => !c.nombre.startsWith("Dado"));
+      cuerpo = h("div", {},
+        h("h3", {}, "Consumibles"), h("div", { class: "catalogo" }, ...consumibles.map(ficha)),
+        h("h3", {}, "Dados del Destino · sello 100 % para la fusión"), h("div", { class: "catalogo" }, ...dados.map(ficha)),
+        h("h3", {}, "Materiales de forja"), h("div", { class: "catalogo" }, ...MATERIALES.map(ficha)));
     } else {
       const filas: HTMLElement[] = [];
       for (const pos of p.mochila.posiciones()) {
@@ -1094,10 +1554,13 @@ export class Interfaz {
         const eq = equipoDe(pila);
         const def = apilable(pila.objeto);
         const valor = valorVenta(p, pos);
-        filas.push(h("div", { class: "articulo" },
-          h("span", { style: `color:${eq !== undefined ? COLORES_RAREZA[eq.rareza] : def?.color ?? "#fff"}` }, `${eq?.nombre ?? def?.nombre ?? "?"}${pila.cantidad > 1 ? ` ×${pila.cantidad}` : ""}`),
-          h("span", { class: "sub" }, eq !== undefined ? `${NOMBRES_RAREZA[eq.rareza]} · ${NOMBRE_PIEZA[eq.ranura]}` : ""),
+        const color = eq !== undefined ? COLORES_RAREZA[eq.rareza] : def?.color ?? "#fff";
+        filas.push(h("div", { class: "articulo-ficha venta", style: `--c:${color}` },
+          h("div", { class: "icono-grande" }, lienzoIcono(iconoObjeto(pila.objeto), 3)),
+          h("b", { style: `color:${color}` }, `${eq?.nombre ?? def?.nombre ?? "?"}${pila.cantidad > 1 ? ` ×${pila.cantidad}` : ""}`),
+          h("span", { class: "sub" }, eq !== undefined ? `${NOMBRES_RAREZA[eq.rareza]} · ${NOMBRE_PIEZA[eq.ranura]}` : "Objeto"),
           h("button", {
+            class: "principal",
             disabled: valor <= 0,
             onclick: () => {
               const r = vender(p, pos);
@@ -1110,10 +1573,12 @@ export class Interfaz {
         const pila = p.mazo.en(pos);
         const c = pila !== null ? cartaDe(pila) : undefined;
         if (c === undefined) continue;
-        filas.push(h("div", { class: "articulo" },
-          h("span", { style: `color:${alma(c.personaje).colorSec}` }, `${nombreCarta(c)} ${estrellas(c)}`),
+        filas.push(h("div", { class: "articulo-ficha venta", style: `--c:${alma(c.personaje).colorSec}` },
+          h("div", { class: "icono-grande" }, miniCarta(c, "", false, () => undefined)),
+          h("b", { style: `color:${alma(c.personaje).colorSec}` }, `${nombreCarta(c)} ${estrellas(c)}`),
           h("span", { class: "sub" }, "Carta de Alma"),
           h("button", {
+            class: "principal",
             onclick: () => {
               venderCarta(p, pos);
               this.audio.reproducir("recoger");
@@ -1121,7 +1586,7 @@ export class Interfaz {
             },
           }, `+${valorCarta(p, pos)} ◆`)));
       }
-      cuerpo = filas.length > 0 ? h("div", {}, ...filas) : h("p", { class: "sub" }, "No llevas nada para vender.");
+      cuerpo = filas.length > 0 ? h("div", { class: "catalogo" }, ...filas) : h("p", { class: "sub" }, "No llevas nada para vender.");
     }
     this.abrirTienda("bazar", "mercader", this.botonCerrar(),
       cabeceraTienda("mercader", [esquirlas(p.esquirlas)]),
@@ -1224,7 +1689,18 @@ export class Interfaz {
         return h("button", { class: n === p.pisoDesbloqueado ? "principal" : "", style: `border-color:${b.acento}`, onclick: () => this.acciones.descender(n) },
           h("b", { style: `color:${b.acento}` }, `Piso ${n}`), h("small", {}, b.nombre));
       })),
-      p.pisoDesbloqueado < PISOS_TOTALES ? h("p", { class: "sub" }, "Vence al guardián de un piso para poder empezar desde el siguiente.") : null);
+      p.pisoDesbloqueado < PISOS_TOTALES ? h("p", { class: "sub" }, "Vence al guardián de un piso para poder empezar desde el siguiente.") : null,
+      h("div", { class: "abismo" },
+        h("h3", {}, "El Abismo — pozo sin fin"),
+        h("p", { class: "sub" }, "No tiene fondo. Cada piso tiene una GRIETA para seguir bajando, pero casi nunca hay salida: "
+          + "están escondidas (no salen en el mapa hasta encontrarlas) y escasean cuanto más bajas. Al llegar a un piso sabrás si "
+          + "hay una. Las zonas se repiten en ciclos cada vez más duros y cada 5 pisos un guardián custodia la grieta."),
+        h("p", { class: "baja" }, `Récord: profundidad ${this.meta.registro.mejorAbismo ?? 0}`),
+        h("div", { class: "pisos" }, ...iniciosAbismo(p.abismoDesbloqueado).map((n) => {
+          const b = biomaAbismo(n);
+          return h("button", { class: n === 1 ? "principal" : "", style: `border-color:${b.acento}`, onclick: () => this.acciones.descender(n, true) },
+            h("b", { style: `color:${b.acento}` }, `Abismo ${n}`), h("small", {}, b.nombre));
+        }))));
   }
 
   /** Faro de cada piso: descansar o volver al pueblo. */
@@ -1238,13 +1714,24 @@ export class Interfaz {
         h("button", { onclick: () => this.cerrar() }, "Seguir explorando")));
   }
 
-  abrirPortal(op: { final: boolean; seguir: () => void; volver: () => void }): void {
+  abrirPortal(op: { final: boolean; abismo?: boolean; seguir: () => void; volver?: () => void }): void {
+    if (op.abismo === true || op.volver === undefined) {
+      this.abrir("faro",
+        h("h2", {}, "La Grieta"),
+        h("p", { class: "sub" }, "Un desgarro en la roca que baja sin fondo. No hay vuelta atrás por aquí: en el Abismo solo se vuelve "
+          + "al pueblo por una SALIDA. Si este piso tenía una y no la encontraste, se pierde."),
+        h("div", { class: "menu" },
+          h("button", { class: "principal", onclick: () => { this.cerrar(); op.seguir(); } }, "Saltar a la grieta"),
+          h("button", { onclick: () => this.cerrar() }, "Todavía no")));
+      return;
+    }
+    const volver = op.volver;
     this.abrir("faro",
       h("h2", {}, op.final ? "El Corazón calla" : "Portal hacia abajo"),
       h("p", { class: "sub" }, op.final ? "El camino a la superficie está abierto."
         : "El guardián cayó. Extrae ahora y pon tu botín a salvo, o sigue bajando arriesgándolo todo: si caes, lo pierdes."),
       h("div", { class: "menu" },
-        op.final ? null : h("button", { class: "principal", onclick: () => { this.cerrarForzado(); op.volver(); } }, "Extraer al pueblo"),
+        op.final ? null : h("button", { class: "principal", onclick: () => { this.cerrarForzado(); volver(); } }, "Extraer al pueblo"),
         h("button", { class: op.final ? "principal" : "", onclick: () => { this.cerrar(); op.seguir(); } }, op.final ? "Ascender con el Corazón" : "Seguir bajando (arriesgar)"),
         h("button", { onclick: () => this.cerrar() }, "Todavía no")));
   }

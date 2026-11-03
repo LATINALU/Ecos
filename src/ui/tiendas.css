@@ -270,3 +270,100 @@ canvas.retrato-npc { display: block; width: 5.4em; height: auto; image-rendering
   .bolsa { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
 }
 .panel.tienda .grilla:empty::after { content: "Nada por aquí todavía."; color: #a8957a; font-style: italic; grid-column: 1 / -1; padding: 0.4em; }
+
+/* El Abismo (pozo sin fin) dentro del panel del Pozo */
+.panel.tienda .abismo {
+  margin-top: 1em; padding: 0.8em 1em; border: 1px solid #b04dff66; border-radius: 6px;
+  background: radial-gradient(ellipse at 50% 120%, #b04dff22, #0000 70%), #0a0612cc;
+}
+.panel.tienda .abismo h3 { color: #c98aff; letter-spacing: 0.08em; }
+
+/* ---------------- Mesa de fusión: 3 almas + Sello 100 % → resultado ---------------- */
+.panel.tienda .mesa-fusion {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(5.5em, 1fr)) auto minmax(7em, 1.2fr) auto minmax(7em, 1.2fr);
+  align-items: stretch;
+  gap: 0.6em;
+  padding: 1em;
+  margin: 0.4em 0 0.8em;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--tema) 40%, #000);
+  background:
+    radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--tema) 18%, transparent), transparent 70%),
+    repeating-conic-gradient(from 0deg at 50% 120%, #ffffff05 0 6deg, transparent 6deg 12deg),
+    #0d0812;
+  box-shadow: inset 0 0 40px #000c, 0 0 0 1px #000;
+}
+.panel.tienda .mesa-fusion.sellada { box-shadow: inset 0 0 40px #000c, 0 0 0 1px #000, 0 0 24px #ffd27a55; }
+.panel.tienda .ranura-fusion {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.3em;
+  min-height: 8.5em; padding: 0.4em; border-radius: 8px; text-align: center;
+  background: linear-gradient(160deg, #1d1428, #0b0710);
+  border: 2px dashed color-mix(in srgb, var(--tema) 45%, #000);
+}
+.panel.tienda .ranura-fusion small { color: #a8957a; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.7em; }
+.panel.tienda .ranura-fusion.vacia span { font-size: 2em; color: color-mix(in srgb, var(--tema) 50%, #000); }
+.panel.tienda .ranura-fusion.llena { border-style: solid; border-color: var(--tema); box-shadow: 0 0 14px color-mix(in srgb, var(--tema) 35%, transparent); }
+.panel.tienda .ranura-fusion.llena .carta { width: 100%; }
+.panel.tienda .ranura-fusion.sello { border-color: #ffd27a88; cursor: pointer; }
+.panel.tienda .ranura-fusion.sello canvas { width: 2.8em; max-width: none; filter: grayscale(0.7) brightness(0.7); }
+.panel.tienda .ranura-fusion.sello.activo { border-style: solid; border-color: #ffd27a; background: radial-gradient(circle, #ffd27a33, #1d1428 70%); box-shadow: 0 0 18px #ffd27a77; }
+.panel.tienda .ranura-fusion.sello.activo canvas { filter: drop-shadow(0 0 6px #ffd27a); animation: latido-sello 1.4s ease-in-out infinite; }
+.panel.tienda .ranura-fusion.sello.agotado { opacity: 0.55; }
+.panel.tienda .ranura-fusion.sello b { color: #ffe9a8; font-size: 0.85em; }
+@keyframes latido-sello { 50% { transform: scale(1.12); } }
+.panel.tienda .mesa-fusion .signo { align-self: center; font-size: 1.6em; color: var(--tema); text-shadow: 0 0 8px var(--tema); }
+.panel.tienda .resultado-fusion {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35em;
+  border-radius: 8px; padding: 0.5em; background: #120b18; border: 2px solid color-mix(in srgb, var(--tema) 60%, #000);
+}
+.panel.tienda .resultado-fusion small { color: #a8957a; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.7em; }
+.panel.tienda .estrellas-meta { color: #ffd27a; font-size: 1.1em; text-shadow: 0 0 8px #ffd27a88; text-align: center; }
+.panel.tienda .resultado-fusion .prob { width: 100%; height: 0.55em; border-radius: 99px; background: #050302; overflow: hidden; box-shadow: inset 0 1px 3px #000; }
+.panel.tienda .resultado-fusion .prob i { display: block; height: 100%; background: linear-gradient(90deg, #a07cff, #ffd27a); }
+.panel.tienda .boton-fusion { display: block; width: 100%; font-size: 1.15em; padding: 0.6em; margin-bottom: 0.6em; }
+
+/* ---------------- Catálogo en fichas (Bazar) ---------------- */
+.panel.tienda .catalogo { display: grid; grid-template-columns: repeat(auto-fill, minmax(12em, 1fr)); gap: 0.6em; margin: 0.4em 0 0.9em; }
+.panel.tienda .articulo-ficha {
+  --c: var(--tema);
+  display: flex; flex-direction: column; align-items: center; gap: 0.3em; text-align: center;
+  padding: 0.7em 0.6em; border-radius: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 10%, #1a120c), #0f0a07);
+  border: 1px solid color-mix(in srgb, var(--c) 45%, #000);
+  border-top: 3px solid var(--c);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.panel.tienda .articulo-ficha:hover { transform: translateY(-2px); box-shadow: 0 6px 18px #000a, 0 0 14px color-mix(in srgb, var(--c) 30%, transparent); }
+.panel.tienda .articulo-ficha .icono-grande {
+  display: grid; place-items: center; width: 3.6em; height: 3.6em; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c) 30%, transparent), transparent 70%);
+}
+.panel.tienda .articulo-ficha .icono-grande canvas.icono-sprite { width: 2.6em; max-width: none; }
+.panel.tienda .articulo-ficha.venta .icono-grande .carta { transform: scale(0.6); pointer-events: none; }
+.panel.tienda .articulo-ficha b { color: var(--c); }
+.panel.tienda .articulo-ficha .sub { font-size: 0.8em; flex: 1; }
+.panel.tienda .articulo-ficha .tienes { font-size: 0.78em; color: #d8c8a8; }
+.panel.tienda .articulo-ficha .botones { display: flex; gap: 0.3em; width: 100%; }
+.panel.tienda .articulo-ficha .botones button { flex: 1; }
+@media (max-width: 700px) {
+  .panel.tienda .mesa-fusion { grid-template-columns: repeat(3, 1fr); }
+  .panel.tienda .mesa-fusion .signo { display: none; }
+}
+.panel.tienda .glifo { font-size: 2.2em; line-height: 1; color: var(--c, #ffd27a); text-shadow: 0 0 10px var(--c, #ffd27a), 0 2px 0 #000; }
+
+/* ---------- Desafíos: campana, Juicio y registro ---------- */
+.campana-info { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.campana-info > div { background: #00000055; border: 1px solid #ffffff22; border-radius: 4px; padding: 4px 8px; display: flex; flex-direction: column; min-width: 70px; }
+.campana-info small { color: #a8a0c0; font-size: 10px; }
+.juicio { border: 1px solid #b04dff; background: linear-gradient(180deg, #2a1440cc, #12081ccc); border-radius: 6px; padding: 6px 10px; margin: 8px 0; box-shadow: 0 0 12px #b04dff44 inset; }
+.juicio h3 { color: #c9a7ff; margin: 2px 0; }
+.afijos-semana { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.afijo { border: 1px solid var(--c); color: var(--c); border-radius: 3px; padding: 2px 6px; font-size: 11px; background: #00000066; }
+.afijo b { color: var(--c); }
+.juicio-boton { background: linear-gradient(180deg, #7a3ad0, #4a1a8a) !important; border-color: #c9a7ff !important; }
+.registro-desafios { margin: 4px 0 10px; border-bottom: 1px solid #ffffff22; padding-bottom: 8px; }
+.registro-desafios .records { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
+.registro-desafios .records > div { background: #00000055; border-radius: 4px; padding: 4px 8px; display: flex; flex-direction: column; }
+.registro-desafios .records b { font-size: 16px; color: #ffe9a8; }
+.registro-desafios .records small { color: #a8a0c0; font-size: 10px; }

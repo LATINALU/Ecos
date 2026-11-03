@@ -2,7 +2,7 @@
 // Implementa el Contexto que usan las entidades para interactuar con el mundo.
 
 import { hd } from "../motor/texto-hd.ts";
-import { AzarSistema, entero, type Azar } from "minialu";
+import { AzarSistema, elegirUno, entero, type Azar } from "minialu";
 import {
   ORIGEN_CONDUCTA, PISOS_TOTALES, SALAS_POR_PISO, bioma, cantidadAfijosElite, probElite,
   type AfijoElite, type Bioma, type ConductaBase, type ConductaEnemigo, type ConductaNueva,
@@ -10,7 +10,7 @@ import {
 import { botinCofre, botinEnemigo, botinVela, type Premio } from "../dominio/botin.ts";
 import { crearEco, premiosEco, type Eco } from "../dominio/eco.ts";
 import type { Meta } from "../dominio/meta.ts";
-import { aperturas, generarPiso, type MapaPiso, type SalaMapa } from "../dominio/mundo/generador.ts";
+import { aperturas, generarPiso, podarBarreras, type MapaPiso, type SalaMapa } from "../dominio/mundo/generador.ts";
 import {
   ALTO_SALA, ANCHO_SALA, COLS, ENEMIGOS_SPAWN, FILAS, FILAS_PUERTA, T_CRISTAL, T_PINCHOS, T_RAICES, T_ROCA, T_VACIO, TILE,
   construirSala, esSolido, indice,
@@ -18,7 +18,7 @@ import {
 import { Partida, type DatosPartida, type ResumenPartida } from "../dominio/partida.ts";
 import { calcularGolpe } from "../dominio/stats.ts";
 import { ELEMENTOS, afinidadPiso, multiplicadorElemental } from "../contenido/elementos.ts";
-import { INFO_RELIQUIA, OPUESTA, RANURAS, type Dir, type Reliquia } from "../dominio/tipos.ts";
+import { INFO_RELIQUIA, NOMBRE_PIEZA, OPUESTA, RANURAS, type Dir, type Reliquia } from "../dominio/tipos.ts";
 import type { Audio } from "../motor/audio.ts";
 import type { Entrada } from "../motor/entrada.ts";
 import { solapan, type Rect, type Tiles } from "../motor/fisica.ts";
@@ -38,6 +38,39 @@ import { MedidorCombo, type AccionEstilo } from "./medidor-combo.ts";
 import { Iluminacion, dibujarBarreras, dibujarVineta, fondoBioma, prerenderSala, primerPlano, type Luz } from "./render.ts";
 import { Vela } from "./entidades/vela.ts";
 import { AzarSemilla } from "minialu";
+import { generarEquipo } from "../dominio/equipo.ts";
+import { crearCarta } from "../dominio/cartas.ts";
+import { ESTILOS } from "../contenido/armas.ts";
+import { biomaAbismo, cicloAbismo, hayGuardianAbismo, salasAbismo, tirarSalida, ZONAS_ABISMO } from "../dominio/abismo.ts";
+import { arenaPara, arenasDelPiso, premioArena, type DefArena, type Sello } from "../dominio/desafios.ts";
+import {
+  afijosJuicio, escalaJuicio, INFO_AFIJO_JUICIO, nuevoNivelPiedra, premioJuicio, semanaDe, tiempoJuicio, type AfijoJuicio,
+} from "../dominio/juicio.ts";
+import { cartaDeJefe } from "../dominio/botin.ts";
+import { valorDesguace, type ObjetoEquipo, type Rareza } from "../dominio/equipo.ts";
+import { NOMBRES_RAREZA } from "../contenido/objetos.ts";
+
+/** Lo que se anuncia al llegar a un piso del Abismo. */
+export interface AvisoAbismo {
+  readonly salida: boolean;
+  readonly guardian: boolean;
+  readonly ciclo: number;
+}
+
+export interface OpcionesCampana {
+  readonly def: DefArena;
+  readonly piso: number;
+  readonly racha: number;
+  /** Solo si el Portador ya tiene la Piedra del Juicio. */
+  readonly juicio?: { readonly nivel: number; readonly afijos: readonly AfijoJuicio[]; readonly tiempo: number; readonly escala: number };
+  empezar(juicio: boolean): void;
+}
+
+/** Mercader errante del Abismo: piezas raras a precio alto. */
+export interface ArticuloErrante {
+  readonly equipo: ObjetoEquipo;
+  readonly precio: number;
+}
 
 export interface EventosJuego {
   mensaje(texto: string, color: string): void;
@@ -46,18 +79,34 @@ export interface EventosJuego {
   /** Faro: descansar (una vez por piso). Ya no lleva al pueblo: para salir hay que extraer. */
   abrirFaro(op: { puedeDescansar: boolean; descansar: () => void }): void;
   /** Portal del guardián: seguir bajando (arriesgando lo que llevas) o extraer al pueblo. */
-  abrirPortal(op: { final: boolean; seguir: () => void; volver: () => void }): void;
+  abrirPortal(op: { final: boolean; abismo?: boolean; seguir: () => void; volver?: () => void }): void;
   /** Termina el descenso y vuelve al pueblo (el personaje conserva todo). */
   volverAlPueblo(motivo: "extraccion" | "portal"): void;
   guardarDescenso(d: DatosDescenso): void;
   borrarDescenso(): void;
   abrirMercader(): void;
+  /** Campana del desafío: muestra la arena (y el Juicio si ya se tiene la piedra) y deja elegir. */
+  abrirCampana(op: OpcionesCampana): void;
   reliquia(r: Reliquia): void;
   jefe(nombre: string, titulo: string): void;
-  nuevoPiso(piso: number, b: Bioma): void;
+  nuevoPiso(piso: number, b: Bioma, abismo?: AvisoAbismo): void;
   muerte(resumen: ResumenPartida, eco: Eco): void;
   victoria(resumen: ResumenPartida): void;
   guardar(): void;
+}
+
+interface EstadoArena {
+  def: DefArena;
+  oleada: number;
+  estado: EstadoSala;
+  activa: boolean;
+  golpes: number;
+  /** Segundos que quedan (si hay contrarreloj). */
+  tiempo: number;
+  tiempoTotal?: number;
+  /** Juicio (lategame): nivel de la piedra y afijos de la semana. */
+  juicio?: { nivel: number; afijos: Set<AfijoJuicio> };
+  relojVolcan: number;
 }
 
 interface EstadoSala {
@@ -89,7 +138,7 @@ export interface DatosDescenso {
 }
 
 export type InicioJuego =
-  | { readonly tipo: "descenso"; readonly partida: Partida; readonly piso: number }
+  | { readonly tipo: "descenso"; readonly partida: Partida; readonly piso: number; readonly abismo?: boolean }
   | { readonly tipo: "continuar"; readonly datos: DatosDescenso };
 
 /** Segundos que hay que aguantar dentro de la zona de extracción. */
@@ -183,16 +232,17 @@ export class Juego implements Contexto {
       const d = inicio.datos;
       this.partida = Partida.restaurar(meta, d.partida);
       this.mapa = d.mapa;
+      podarBarreras(this.mapa, meta.listaReliquias());
       this.estados = new Map(d.estados.map(([id, e]) => [id, { ...e, muertos: new Set(e.muertos), velasRotas: new Set(e.velasRotas ?? []) }]));
       this.cargarSala(d.sala, null);
       this.jugador.colocar(d.x, d.y);
-      this.audio.ambientar(this.partida.piso - 1);
-      this.eventos.nuevoPiso(this.partida.piso, this.bioma);
+      this.audio.ambientar(this.indiceAmbiente);
+      this.eventos.nuevoPiso(this.partida.piso, this.bioma, this.avisoAbismo());
       return;
     }
     meta.registro.partidas++;
     this.partida = inicio.partida;
-    this.partida.prepararDescenso(inicio.piso);
+    this.partida.prepararDescenso(inicio.piso, inicio.abismo ?? false);
     this.nuevoPiso();
   }
 
@@ -221,6 +271,36 @@ export class Juego implements Contexto {
     this.jugador.colocar(4 * TILE, 14 * TILE - this.jugador.h);
   }
 
+  /** Solo para desarrollo (capturas): toca la campana de la arena; con `iniciar`, empieza ya (normal o Juicio). */
+  depurarCampana(iniciar?: "normal" | "juicio"): void {
+    const obj = this.interactuables.find((i) => i.tipo === "campana");
+    if (obj === undefined) return;
+    if (iniciar === undefined) {
+      this.tocarCampana(obj);
+      return;
+    }
+    obj.usado = true;
+    const piedra = Math.max(2, this.partida.piedraJuicio);
+    this.empezarArena(iniciar === "juicio" ? { nivel: piedra, afijos: new Set(afijosJuicio(piedra, semanaDe(new Date()))) } : undefined);
+  }
+
+  /** Solo para desarrollo (capturas): un abanico de botín de todas las rarezas alrededor del Portador. */
+  depurarBotin(): void {
+    const az = this.partida.azar;
+    const premios: Premio[] = [
+      { tipo: "esquirlas", cantidad: 80 },
+      { tipo: "objeto", objeto: 1, cantidad: 1 },
+      { tipo: "carta", carta: crearCarta(az, 0, 6) },
+      ...([0, 1, 2, 3, 4, 5] as const).map((r): Premio => ({ tipo: "equipo", equipo: { ...generarEquipo(az, this.partida.piso, r, ["arma"]), rareza: r } })),
+    ];
+    premios.forEach((p, i) => {
+      const b = new BotinSuelo(p, this.jugador.cx - 150 + i * 34, this.jugador.y);
+      b.vx = 0;
+      b.t = 1;
+      this.botines.push(b);
+    });
+  }
+
   refrescarArte(): void {
     this.sala.rehacer();
   }
@@ -236,7 +316,23 @@ export class Juego implements Contexto {
     return this.sala;
   }
 
+  /** El descenso es en el Abismo (pozo sin fin). */
+  get abismo(): boolean {
+    return this.partida.abismo;
+  }
+
+  private get indiceAmbiente(): number {
+    return this.abismo ? (this.partida.piso - 1) % ZONAS_ABISMO : this.partida.piso - 1;
+  }
+
+  private avisoAbismo(): AvisoAbismo | undefined {
+    if (!this.abismo) return undefined;
+    const p = this.partida.piso;
+    return { salida: (this.mapa.extracciones ?? []).length > 0, guardian: hayGuardianAbismo(p), ciclo: cicloAbismo(p) };
+  }
+
   get bioma(): Bioma {
+    if (this.abismo) return biomaAbismo(this.partida.piso);
     return bioma(this.partida.piso);
   }
 
@@ -279,6 +375,7 @@ export class Juego implements Contexto {
     const danio = Math.max(1, Math.round(golpe.danio * this.partida.multiplicadorRecibido() * (1 - j.buffEscudo)));
     this.partida.ganarCarga(3);
     const r = this.partida.recibirDanio(danio);
+    if (this.arena?.activa === true) this.arena.golpes++;
     if (this.cargaExtraccion > 0) {
       this.cargaExtraccion = 0;
       this.mensaje("¡Extracción interrumpida!", "#ff6a6a");
@@ -328,7 +425,10 @@ export class Juego implements Contexto {
       this.fx.congelar(0.02);
       return true;
     }
-    if (c.bloquea(dirX, a.tipo)) {
+    // Pasivas de ataque de la familia del arma (solo golpes básicos).
+    const pa = a.arma !== undefined && a.tipo === "golpe" ? ESTILOS[a.arma] : undefined;
+    const rompe = pa?.rompeGuardia === true && c instanceof Enemigo && c.conGuardia;
+    if (!rompe && c.bloquea(dirX, a.tipo)) {
       this.fx.texto(c.cx, c.y - 4, "¡Bloqueo!", "#aaaaff");
       this.fx.chispas(c.cx - dirX * c.w / 2, c.cy, "#ffffff", 6, { velocidad: 100 });
       this.audio.reproducir("bloqueo");
@@ -342,11 +442,17 @@ export class Juego implements Contexto {
     this.jugador.criticoGarantizado = false;
     const critBasico = a.tipo === "golpe" ? this.partida.efectoAlma("golpeCritico") : 0;
     const buff = 1 + this.jugador.buffDanio;
-    const g = calcularGolpe(this.azarCombate, a.potencia * this.partida.multiplicadorDanio() * ejecutor * this.combo.multiplicadorDanio * buff, 1, c.defensa,
-      garantizado ? 100 : s.critico + critBasico, 1.75 + mods.critDanio);
+    const lejos = pa?.bonoDistancia !== undefined
+      ? 1 + pa.bonoDistancia * Math.max(0, Math.min(1, (Math.abs(c.cx - this.jugador.cx) - 48) / 150))
+      : 1;
+    const g = calcularGolpe(this.azarCombate, a.potencia * this.partida.multiplicadorDanio() * ejecutor * this.combo.multiplicadorDanio * buff * lejos, 1,
+      c.defensa * (1 - (pa?.ignoraDefensa ?? 0)),
+      garantizado ? 100 : s.critico + critBasico + (pa?.critBasico ?? 0), 1.75 + mods.critDanio + (pa?.critDanio ?? 0));
+    if (lejos >= 1.3) this.fx.texto(c.cx, c.y - 14, "¡Certero!", "#ffe9a8");
+    if (pa?.roboUltimo !== undefined && a.final === true) this.partida.curar(Math.max(1, Math.round(g.danio * pa.roboUltimo)));
     c.aplicarDanio(g.danio, this);
     c.empujar(dirX, a.empuje * (g.critico ? 1.4 : 1));
-    if (a.rompeGuardia === true && c instanceof Enemigo && c.conGuardia) {
+    if ((a.rompeGuardia === true || pa?.rompeGuardia === true) && c instanceof Enemigo && c.conGuardia) {
       c.romperGuardia();
       this.fx.texto(c.cx, c.y - 10, "¡Guardia rota!", "#ffe27a");
     }
@@ -539,16 +645,39 @@ export class Juego implements Contexto {
 
   private nuevoPiso(): void {
     const piso = this.partida.piso;
-    this.mapa = generarPiso(this.partida.azar, {
-      piso,
-      cantidadSalas: SALAS_POR_PISO[piso - 1] ?? 12,
-      // El Pozo Profundo (piso 11+) tiene mapas más grandes.
-      ancho: piso > 10 ? 9 : 7,
-      alto: piso > 10 ? 6 : 5,
-      reliquiasPoseidas: this.meta.listaReliquias(),
-      reliquiaAColocar: this.meta.reliquiaParaPiso(piso),
-      hayEco: this.meta.ecoDelPiso(piso) !== undefined,
-    });
+    if (this.abismo) {
+      // Abismo: mapa grande, sin reliquias; la salida (si hay) se esconde lejos.
+      const salida = tirarSalida(this.partida.azar, piso, this.partida.pisosSinSalida);
+      this.partida.pisosSinSalida = salida ? 0 : this.partida.pisosSinSalida + 1;
+      this.mapa = generarPiso(this.partida.azar, {
+        piso,
+        cantidadSalas: salasAbismo(piso),
+        ancho: 9,
+        alto: 6,
+        reliquiasPoseidas: this.meta.listaReliquias(),
+        hayEco: this.meta.ecoDelPiso(piso) !== undefined,
+        salidas: salida ? 1 : 0,
+        // De aquí no se sube: el Abismo conserva altar y mercader.
+        servicios: true,
+        // El mercader del Abismo es ERRANTE: solo aparece en algunos pisos, con rarezas a precio alto.
+        mercader: this.partida.azar.siguiente() < 0.35,
+        arenas: arenasDelPiso(piso, true),
+      });
+    } else {
+      this.mapa = generarPiso(this.partida.azar, {
+        piso,
+        cantidadSalas: SALAS_POR_PISO[piso - 1] ?? 12,
+        // El Pozo Profundo (piso 11+) tiene mapas más grandes.
+        ancho: piso > 10 ? 9 : 7,
+        alto: piso > 10 ? 6 : 5,
+        reliquiasPoseidas: this.meta.listaReliquias(),
+        reliquiaAColocar: this.meta.reliquiaParaPiso(piso),
+        hayEco: this.meta.ecoDelPiso(piso) !== undefined,
+        // El Pozo no tiene tiendas ni altares (para eso se sube al pueblo): su lugar lo ocupan los desafíos.
+        servicios: false,
+        arenas: arenasDelPiso(piso, false),
+      });
+    }
     this.estados = new Map();
     this.avisosBarrera.clear();
     this.avisosPozo.clear();
@@ -557,9 +686,39 @@ export class Juego implements Contexto {
     this.jugador.colocar((inicio?.x ?? 200) + 30, 14 * TILE - this.jugador.h);
     this.jugador.vx = 0;
     this.jugador.vy = 0;
-    this.audio.ambientar(piso - 1);
-    this.eventos.nuevoPiso(piso, this.bioma);
+    this.audio.ambientar(this.indiceAmbiente);
+    this.eventos.nuevoPiso(piso, this.bioma, this.avisoAbismo());
+    this.stockErrante = null;
+    if (this.abismo && this.mapa.salas.some((x) => x.tipo === "mercader")) {
+      this.mensaje("Se oye la campanilla de un mercader errante en algún lugar de este piso…", "#ffb23d");
+    }
     this.guardarProgreso();
+  }
+
+  // ---------------- Mercader errante (Abismo) ----------------
+
+  private stockErrante: ArticuloErrante[] | null = null;
+
+  /** Rarezas del mercader errante de este piso (Épicas o mejores). Se generan al primer vistazo. */
+  errante(): { lista: readonly ArticuloErrante[]; comprar: (i: number) => boolean } | undefined {
+    if (!this.abismo) return undefined;
+    if (this.stockErrante === null) {
+      const azar = new AzarSemilla(this.partida.semilla ^ (this.partida.piso * 104729));
+      this.stockErrante = [0, 1, 2].map(() => {
+        const equipo = generarEquipo(azar, this.partida.piso, azar.siguiente() < 0.25 ? 4 : 3);
+        return { equipo, precio: valorDesguace(equipo) * 8 + this.partida.piso * 40 };
+      });
+    }
+    const lista = this.stockErrante;
+    return {
+      lista,
+      comprar: (i) => {
+        const art = lista[i];
+        if (art === undefined || !this.partida.comprarEquipo(art.equipo, art.precio).ok) return false;
+        lista.splice(i, 1);
+        return true;
+      },
+    };
   }
 
   estadoDe(id: number): EstadoSala {
@@ -585,10 +744,11 @@ export class Juego implements Contexto {
     this.guardarEstadoSala();
     const sm = this.mapa.salas[id];
     const estado = this.estadoDe(id);
+    const primeraVez = !estado.visitada;
     estado.visitada = true;
     const ap = aperturas(this.mapa, id);
     const densidad = 0.55 + this.partida.piso * 0.12;
-    const datos = construirSala(sm.tipo, sm.semilla, ap, this.partida.azar, densidad);
+    const datos = construirSala(sm.tipo, sm.semilla, ap, this.partida.azar, densidad, { dobleSalto: this.jugador.reliquias.has("dobleSalto") });
     this.sala = new SalaActiva(sm, datos.tiles, datos.nombre, this.bioma);
     this.criaturas = [];
     this.proyectiles = [];
@@ -630,7 +790,8 @@ export class Juego implements Contexto {
           break;
         }
         case "yunque":
-          this.interactuables.push(new Interactuable("yunque", x, y));
+          // En el Pozo se forja en el pueblo; el yunque del faro solo queda en el Abismo.
+          if (this.abismo) this.interactuables.push(new Interactuable("yunque", x, y));
           break;
         case "mercader":
           this.interactuables.push(new Interactuable("mercader", x, y));
@@ -643,7 +804,8 @@ export class Juego implements Contexto {
           }
           break;
         case "jefe":
-          if (estado.jefeVencido) {
+          // Abismo: la grieta solo está custodiada cada pocos pisos.
+          if (estado.jefeVencido || (this.abismo && !hayGuardianAbismo(this.partida.piso))) {
             this.interactuables.push(new Interactuable("portal", x, piso));
           } else {
             this.invocarJefe(x, piso);
@@ -668,6 +830,10 @@ export class Juego implements Contexto {
 
     this.zonaExtraccion = (this.mapa.extracciones ?? []).includes(id) ? this.ubicarExtraccion() : null;
     this.cargaExtraccion = 0;
+    if (this.abismo && this.zonaExtraccion !== null && primeraVez) {
+      this.mensaje("¡Una SALIDA! Aguanta 5 s en la luz verde para volver al pueblo", "#7dffb0");
+      this.audio.reproducir("reliquia");
+    }
     this.poblarSala(sm, estado, densidad);
 
     this.cadena = ap.arr !== undefined || ap.aba !== undefined
@@ -687,7 +853,7 @@ export class Juego implements Contexto {
   // ---------------- Población de las salas: enemigos, élites, cofres, arenas y bóvedas ----------------
 
   /** Crea un monstruo: al bajar, parte de las conductas originales pasan a las nuevas; las élites traen afijos. */
-  private crearEnemigo(base: ConductaBase, x: number, y: number, forzarElite = false): Enemigo {
+  private crearEnemigo(base: ConductaBase, x: number, y: number, forzarElite = false, minAfijos = 0): Enemigo {
     const piso = this.partida.piso;
     const azar = this.partida.azar;
     let conducta: ConductaEnemigo = base;
@@ -698,7 +864,7 @@ export class Juego implements Contexto {
     const afijos: AfijoElite[] = [];
     if (elite) {
       const pool: AfijoElite[] = ["veloz", "blindado", "vampiro", "regenerador", "explosivo", "furioso"];
-      for (let k = 0; k < cantidadAfijosElite(piso) && pool.length > 0; k++) afijos.push(pool.splice(entero(azar, pool.length), 1)[0]);
+      for (let k = 0; k < Math.max(minAfijos, cantidadAfijosElite(piso)) && pool.length > 0; k++) afijos.push(pool.splice(entero(azar, pool.length), 1)[0]);
     }
     const e = new Enemigo(conducta, piso, this.bioma, x - 7, y, elite, afijos);
     e.x = x - e.w / 2;
@@ -783,54 +949,271 @@ export class Juego implements Contexto {
       if (!(estado.cofres ?? []).includes(2000)) this.mensaje("Una bóveda: sus guardianes no la entregarán sin pelear", "#ffe9a8");
     }
     if (sm.tipo === "arena" && estado.arena !== -1) {
-      this.arena = { oleada: 0, total: 2 + Math.floor(this.partida.piso / 6), estado };
-      this.siguienteOleada();
+      // Desafío opcional: nada empieza hasta tocar la campana.
+      const def = arenaPara(sm.semilla, this.partida.piso);
+      this.arena = { def, oleada: 0, estado, activa: false, golpes: 0, tiempo: 0, relojVolcan: 3 };
+      const centro = this.ubicarExtraccion();
+      const campana = new Interactuable("campana", centro.x + centro.w / 2, centro.y + centro.h);
+      campana.color = def.color;
+      this.interactuables.push(campana);
+      this.mensaje(`${def.nombre} · premio: ${NOMBRE_PIEZA[def.destino].toLowerCase()}. Toca la campana para empezar.`, def.color);
     } else {
       this.arena = null;
     }
   }
 
   /** Arena: sella las puertas y lanza oleadas; al limpiar la última, abre y deja un cofre. */
-  private arena: { oleada: number; total: number; estado: EstadoSala } | null = null;
+  private arena: EstadoArena | null = null;
+
+  /** La campana: muestra la arena y, en el lategame, ofrece el Juicio. */
+  private tocarCampana(obj: Interactuable): void {
+    const a = this.arena;
+    if (a === null || a.activa) return;
+    const p = this.partida;
+    const piedra = p.piedraJuicio;
+    const afijos = afijosJuicio(piedra, semanaDe(new Date()));
+    this.eventos.abrirCampana({
+      def: a.def,
+      piso: p.piso,
+      racha: p.rachaArenas,
+      juicio: piedra > 0 ? { nivel: piedra, afijos, tiempo: tiempoJuicio(a.def.oleadas), escala: escalaJuicio(piedra) } : undefined,
+      empezar: (juicio) => {
+        obj.usado = true;
+        this.audio.reproducir("reliquia");
+        this.empezarArena(juicio ? { nivel: piedra, afijos: new Set(afijos) } : undefined);
+      },
+    });
+  }
+
+  /** Al elegir en la campana: se sellan las puertas y llega la primera oleada. */
+  private empezarArena(juicio?: { nivel: number; afijos: Set<AfijoJuicio> }): void {
+    const a = this.arena;
+    if (a === null || a.activa) return;
+    a.activa = true;
+    a.golpes = 0;
+    a.juicio = juicio;
+    a.tiempoTotal = juicio !== undefined ? tiempoJuicio(a.def.oleadas) : a.def.tiempo;
+    a.tiempo = a.tiempoTotal ?? 0;
+    a.relojVolcan = 3;
+    const color = juicio !== undefined ? "#b04dff" : a.def.color;
+    this.fx.destellar(color, juicio !== undefined ? 0.6 : 0.35);
+    this.fx.sacudir(juicio !== undefined ? 6 : 3);
+    if (juicio !== undefined) {
+      const nombres = [...juicio.afijos].map((x) => INFO_AFIJO_JUICIO[x].nombre).join(" · ");
+      this.mensaje(`Juicio +${juicio.nivel}${nombres !== "" ? ` — ${nombres}` : ""}`, "#c9a7ff");
+    }
+    this.siguienteOleada();
+  }
+
+  /** Juicio: escala al enemigo con el nivel de la piedra y los afijos Fortificado / Tiránico. */
+  private aplicarJuicio(e: Enemigo, juicio: { nivel: number; afijos: Set<AfijoJuicio> }): void {
+    let vida = escalaJuicio(juicio.nivel);
+    let danio = vida;
+    const fuerte = e.categoria === "elite";
+    if (!fuerte && juicio.afijos.has("fortificado")) {
+      vida *= 1.3;
+      danio *= 1.2;
+    }
+    if (fuerte && juicio.afijos.has("tiranico")) {
+      vida *= 1.6;
+      danio *= 1.3;
+    }
+    e.hpMax = Math.round(e.hpMax * vida);
+    e.hp = e.hpMax;
+    e.multAtaque *= danio;
+  }
 
   private siguienteOleada(): void {
     const a = this.arena;
     if (a === null) return;
     a.oleada++;
     const lugares = this.posicionesSuelo();
-    const n = 3 + Math.floor(this.partida.piso / 4) + a.oleada;
+    const n = a.def.enemigos(a.oleada);
     const bases: readonly ConductaBase[] = ["caminante", "saltador", "volador", "torreta", "escudero"];
+    const color = a.juicio !== undefined ? "#b04dff" : a.def.color;
+    const nuevos: Enemigo[] = [];
     for (let k = 0; k < n && lugares.length > 0; k++) {
       const l = lugares.splice(entero(this.partida.azar, lugares.length), 1)[0];
+      if (a.def.elites === "campeon") {
+        // Duelo: el campeón de la zona, con tres afijos y mucha más vida.
+        const e = this.crearEnemigo(elegirUno(this.partida.azar, ["caminante", "escudero", "saltador"] as const), l.x, l.y, true, 3);
+        e.hpMax = Math.round(e.hpMax * 4);
+        e.hp = e.hpMax;
+        e.multAtaque *= 1.2;
+        nuevos.push(e);
+        continue;
+      }
       const tipo = bases[entero(this.partida.azar, bases.length)];
-      const e = this.crearEnemigo(tipo, l.x, l.y, a.oleada === a.total && k === 0);
+      const abisal = a.juicio?.afijos.has("abisal") === true && k % 3 === 0;
+      const elite = a.def.elites === "todos" || (a.oleada === a.def.oleadas && k === 0) || abisal;
+      const e = this.crearEnemigo(tipo, l.x, l.y, elite);
       if (tipo === "volador") e.y = l.y - 3 * TILE;
+      nuevos.push(e);
+    }
+    // Espectral: entre oleadas se suman sombras voladoras.
+    if (a.juicio?.afijos.has("espectral") === true && a.oleada > 1) {
+      for (let k = 0; k < 2; k++) {
+        const e = this.crearEnemigo("volador", 120 + k * 240, 8 * TILE);
+        nuevos.push(e);
+      }
+    }
+    for (const e of nuevos) {
+      if (a.juicio !== undefined) this.aplicarJuicio(e, a.juicio);
       this.criaturas.push(e);
-      this.fx.chispas(l.x, l.y - 8, "#ff6a3d", 10, { velocidad: 70, brillo: true });
+      this.fx.chispas(e.cx, e.y + e.h - 8, color, 10, { velocidad: 70, brillo: true });
     }
     this.sellarPuertas(true);
-    this.eventos.jefe(`Arena · oleada ${a.oleada}/${a.total}`, "Nadie sale hasta que caigan todos");
+    const titulo = a.juicio !== undefined ? `Juicio +${a.juicio.nivel} · ${a.def.nombre}` : a.def.nombre;
+    this.eventos.jefe(`${titulo} · oleada ${a.oleada}/${a.def.oleadas}`, a.oleada === 1 ? a.def.regla : "Nadie sale hasta que caigan todos");
     this.audio.reproducir("jefe");
   }
 
-  private revisarArena(): void {
+  /** Juicio: efectos de los afijos mientras dura (Enfurecido y Volcánico). */
+  private actualizarJuicio(dt: number, a: EstadoArena): void {
+    const j = a.juicio;
+    if (j === undefined) return;
+    if (j.afijos.has("enfurecido")) {
+      for (const c of this.criaturas) {
+        if (c instanceof Enemigo && !c.muerto && !c.enfurecido && c.hp < c.hpMax * 0.3) {
+          c.enfurecido = true;
+          this.fx.texto(c.cx, c.y - 6, "¡Enfurecido!", INFO_AFIJO_JUICIO.enfurecido.color);
+        }
+      }
+    }
+    if (j.afijos.has("volcanico")) {
+      a.relojVolcan -= dt;
+      if (a.relojVolcan <= 0) {
+        a.relojVolcan = 3.5;
+        const jug = this.jugador;
+        this.peligros.push({
+          x: jug.cx - 12, y: jug.y + jug.h - 40, w: 24, h: 40, aviso: 1, activo: 0.35,
+          danio: Math.round(6 + this.partida.piso * 1.5 * escalaJuicio(j.nivel)), color: INFO_AFIJO_JUICIO.volcanico.color, golpeo: false,
+        });
+      }
+    }
+  }
+
+  /** Juicio: lo que pasa cuando cae un enemigo (Reforzado, Sanguino, Explosivo). */
+  private muerteEnJuicio(c: Criatura): void {
     const a = this.arena;
-    if (a === null || this.terminado) return;
+    const j = a?.juicio;
+    if (a === null || !a.activa || j === undefined || c.esJefe) return;
+    const danio = Math.round((5 + this.partida.piso * 1.2) * escalaJuicio(j.nivel));
+    if (j.afijos.has("reforzado")) {
+      for (const o of this.criaturas) {
+        if (o === c || o.muerto || !(o instanceof Enemigo)) continue;
+        o.hpMax = Math.round(o.hpMax * 1.12);
+        o.hp = Math.round(o.hp * 1.12);
+        o.multAtaque *= 1.12;
+        this.fx.chispas(o.cx, o.cy, INFO_AFIJO_JUICIO.reforzado.color, 6, { velocidad: 40, brillo: true, gravedad: -40 });
+      }
+    }
+    if (j.afijos.has("sanguino")) {
+      this.peligros.push({ x: c.cx - 18, y: c.y + c.h - 6, w: 36, h: 6, aviso: 0.4, activo: 6, danio, color: INFO_AFIJO_JUICIO.sanguino.color, golpeo: false });
+    }
+    if (j.afijos.has("explosivo")) {
+      this.peligros.push({ x: c.cx - 26, y: c.cy - 26, w: 52, h: 52, aviso: 1.1, activo: 0.25, danio: danio * 2, color: INFO_AFIJO_JUICIO.explosivo.color, golpeo: false });
+    }
+  }
+
+  private revisarArena(dt: number): void {
+    const a = this.arena;
+    if (a === null || !a.activa || this.terminado) return;
+    this.actualizarJuicio(dt, a);
+    if (a.tiempoTotal !== undefined && a.tiempo > 0) {
+      a.tiempo -= dt;
+      if (a.tiempo <= 0) {
+        this.mensaje(a.juicio !== undefined ? "¡Se acabó el tiempo! La piedra bajará un nivel" : "¡La arena cayó! Termina igual, pero el premio baja", "#ff9a4d");
+        this.audio.reproducir("fallo");
+      }
+    }
     if (this.criaturas.some((c) => !c.muerto && !(c instanceof Vela))) return;
-    if (a.oleada < a.total) {
+    if (a.oleada < a.def.oleadas) {
       this.siguienteOleada();
       return;
     }
-    // Arena superada.
+    this.completarArena(a);
+  }
+
+  /** Desafío superado: cofre según el mérito, la pieza con destino, esquirlas y (en el Duelo) una carta. */
+  private completarArena(a: EstadoArena): void {
+    const p = this.partida;
+    const reg = this.meta.registro;
+    let cofre: number;
+    let pieza: Rareza | undefined;
+    let esquirlas: number;
+    let sellos: Sello[];
+    if (a.juicio !== undefined) {
+      const r = premioJuicio(a.juicio.nivel, p.piso, a.tiempo, a.tiempoTotal ?? 1);
+      const antes = p.piedraJuicio;
+      p.piedraJuicio = nuevoNivelPiedra(antes, r.cambio);
+      ({ cofre, pieza, esquirlas } = r);
+      sellos = [{
+        texto: r.cambio > 0 ? `¡A tiempo! Piedra +${antes} → +${p.piedraJuicio}` : `Fuera de tiempo. Piedra +${antes} → +${p.piedraJuicio}`,
+        bueno: r.cambio > 0,
+      }];
+      if (r.cambio > 0) {
+        reg.juiciosATiempo = (reg.juiciosATiempo ?? 0) + 1;
+        reg.mejorJuicio = Math.max(reg.mejorJuicio ?? 0, a.juicio.nivel);
+      }
+    } else {
+      const r = premioArena(a.def, { golpesRecibidos: a.golpes, tiempoSobrante: a.tiempoTotal !== undefined ? a.tiempo : undefined, racha: p.rachaArenas });
+      ({ cofre, pieza, esquirlas } = r);
+      sellos = [...r.sellos];
+    }
+    // Registro de desafíos y misiones.
+    p.rachaArenas++;
+    reg.arenas = (reg.arenas ?? 0) + 1;
+    reg.mayorRacha = Math.max(reg.mayorRacha ?? 0, p.rachaArenas);
+    if (a.golpes === 0) {
+      reg.arenasIntocables = (reg.arenasIntocables ?? 0) + 1;
+      this.avisarMision(p.registrarMision("intocable"));
+    }
+    if (a.def.variante === "reloj" && a.juicio === undefined && a.tiempo > 0) reg.mejorReloj = Math.max(reg.mejorReloj ?? 0, Math.floor(a.tiempo));
+    this.avisarMision(p.registrarMision("arena", p.piso));
+
     a.estado.arena = -1;
     this.arena = null;
     this.sellarPuertas(false);
     const centro = this.ubicarExtraccion();
-    this.ponerCofre(centro.x + centro.w / 2, centro.y + centro.h, 3000, Math.max(1, Math.min(3, 1 + Math.floor(this.partida.piso / 8))), a.estado);
-    this.fx.destellar("#ff6a3d", 0.4);
-    this.eventos.jefe("¡Arena superada!", "Un cofre aparece en el centro");
+    const cx = centro.x + centro.w / 2;
+    const suelo = centro.y + centro.h;
+    this.ponerCofre(cx, suelo, 3000, cofre, a.estado);
+    const fortuna = p.modificadoresBotin().fortuna ?? 0;
+    const extra: Premio[] = [{ tipo: "esquirlas", cantidad: esquirlas }];
+    if (pieza !== undefined) extra.push({ tipo: "equipo", equipo: generarEquipo(p.azar, p.piso, pieza, a.def.destino, undefined, fortuna) });
+    if (a.def.carta) extra.push(cartaDeJefe(p.azar, p.piso, fortuna));
+    this.soltar(extra, cx, suelo - 20);
+    const color = a.juicio !== undefined ? "#b04dff" : a.def.color;
+    this.fx.destellar(color, 0.45);
+    for (const [k, sl] of sellos.entries()) this.fx.texto(cx, suelo - 40 - k * 10, sl.texto, sl.bueno ? "#7dffb0" : "#ff9a4d", true);
+    const nombre = a.juicio !== undefined ? `Juicio +${a.juicio.nivel}` : a.def.nombre;
+    this.eventos.jefe(`¡${nombre} superado!`, `${NOMBRE_COFRE[cofre]}${pieza !== undefined ? ` · ${NOMBRE_PIEZA[a.def.destino]} (${NOMBRES_RAREZA[pieza]})` : ""}${a.def.carta ? " · carta de alma" : ""}`);
     this.audio.reproducir("unico");
+    this.eventos.guardar();
     this.guardarProgreso();
+  }
+
+  /** Contrarreloj de la arena o del Juicio (en pantalla, arriba al centro). */
+  private dibujarRelojArena(g: CanvasRenderingContext2D): void {
+    const a = this.arena;
+    if (a === null || !a.activa || a.tiempoTotal === undefined) return;
+    const resto = Math.max(0, a.tiempo);
+    const frac = resto / a.tiempoTotal;
+    const base = a.juicio !== undefined ? "#c9a7ff" : a.def.color;
+    const color = resto <= 0 ? "#8a84a0" : resto < 10 ? "#ff6a6a" : base;
+    g.fillStyle = "#000000aa";
+    g.fillRect(ANCHO_SALA / 2 - 60, 30, 120, 14);
+    g.fillStyle = color;
+    g.fillRect(ANCHO_SALA / 2 - 58, 40, Math.round(116 * frac), 2);
+    // Marcas de +2 y +3 de la piedra (40 % y 20 % del tiempo).
+    if (a.juicio !== undefined) {
+      g.fillStyle = "#ffffff88";
+      g.fillRect(ANCHO_SALA / 2 - 58 + Math.round(116 * 0.4), 39, 1, 4);
+      g.fillRect(ANCHO_SALA / 2 - 58 + Math.round(116 * 0.2), 39, 1, 4);
+    }
+    const pref = a.juicio !== undefined ? `Juicio +${a.juicio.nivel}` : "Arena";
+    hd.texto(g, resto > 0 ? `${pref}: ${Math.ceil(resto)} s` : `${pref}: tarde`, ANCHO_SALA / 2, 38, { color, alinear: "center" });
   }
 
   /** Busca un tramo de suelo firme de 3 baldosas (sin pinchos ni pozo), lo más cerca posible del centro. */
@@ -1116,7 +1499,7 @@ export class Juego implements Contexto {
 
     this.actualizarBotin(dt);
     this.actualizarExtraccion(dt);
-    this.revisarArena();
+    this.revisarArena(dt);
     // Regeneración: cada 5 s cura lo que diga el stat.
     this.relojRegen += dt;
     if (this.relojRegen >= 5) {
@@ -1245,8 +1628,8 @@ export class Juego implements Contexto {
       const nombre = INFO_RELIQUIA[reliquia].nombre;
       this.mensaje(
         tile === T_CRISTAL
-          ? (tiene ? "Cristal resonante: atraviésalo con la Embestida (Shift)" : `Un cristal resonante. Necesitas: ${nombre}`)
-          : (tiene ? "Muro de raíces: quémalo a golpes con la Garra Ígnea" : `Un muro de raíces. Necesitas: ${nombre}`),
+          ? (tiene ? "Cristal resonante: atraviésalo con la Embestida (Shift)" : `Un cristal resonante. Necesitas: ${nombre} — está en este piso`)
+          : (tiene ? "Muro de raíces: quémalo a golpes con la Garra Ígnea" : `Un muro de raíces. Necesitas: ${nombre} — está en este piso`),
         INFO_RELIQUIA[reliquia].color,
       );
     }
@@ -1299,6 +1682,9 @@ export class Juego implements Contexto {
       case "altar":
         this.eventos.abrirAltar();
         break;
+      case "campana":
+        this.tocarCampana(obj);
+        break;
       case "yunque":
         this.eventos.abrirYunque();
         break;
@@ -1331,6 +1717,11 @@ export class Juego implements Contexto {
         this.guardarProgreso();
         break;
       case "portal":
+        if (this.abismo) {
+          // La grieta solo baja: en el Abismo se sale únicamente por las salidas.
+          this.eventos.abrirPortal({ final: false, abismo: true, seguir: () => this.descender() });
+          break;
+        }
         this.eventos.abrirPortal({
           final: this.partida.piso >= PISOS_TOTALES,
           seguir: () => this.descender(),
@@ -1345,14 +1736,21 @@ export class Juego implements Contexto {
     if (this.terminado) return;
     this.terminado = true;
     this.partida.registrarMision("extraer", this.partida.piso);
-    this.meta.registro.mejorPiso = Math.max(this.meta.registro.mejorPiso, this.partida.piso);
+    this.registrarProfundidad();
     this.audio.silenciarAmbiente();
     this.eventos.borrarDescenso();
     this.eventos.volverAlPueblo(motivo);
   }
 
+  /** Récord del modo en curso: piso del Pozo o profundidad del Abismo. */
+  private registrarProfundidad(): void {
+    const r = this.meta.registro;
+    if (this.abismo) r.mejorAbismo = Math.max(r.mejorAbismo ?? 0, this.partida.piso);
+    else r.mejorPiso = Math.max(r.mejorPiso, this.partida.piso);
+  }
+
   private descender(): void {
-    if (this.partida.piso >= PISOS_TOTALES) {
+    if (!this.abismo && this.partida.piso >= PISOS_TOTALES) {
       this.terminar(true);
       return;
     }
@@ -1377,6 +1775,7 @@ export class Juego implements Contexto {
     }
     this.audio.reproducir("muerte");
     this.sumarEstilo("muerte");
+    this.muerteEnJuicio(c);
     // Élite explosiva (o kamikaze que no llegó a explotar por sí mismo): estalla al morir, con aviso.
     if (c instanceof Enemigo && c.tiene("explosivo") && !c.exploto) c.explotar(this, 1.2, 44, 0.6);
     this.fx.chispas(c.cx, c.cy, "#ffffff", c.esJefe ? 80 : 18, { velocidad: c.esJefe ? 220 : 120, vida: 0.7 });
@@ -1407,8 +1806,18 @@ export class Juego implements Contexto {
     }
     if (c.categoria === "jefe") {
       this.avisarMision(this.partida.registrarMision("jefe", this.partida.piso));
-      if (this.partida.desbloquearPiso(this.partida.piso, PISOS_TOTALES)) {
-        this.mensaje(`Desde el pueblo ya puedes empezar a bajar en el piso ${this.partida.pisoDesbloqueado}`, "#ffe27a");
+      if (this.abismo) {
+        if (this.partida.desbloquearAbismo(this.partida.piso)) {
+          this.mensaje(`Desde el pueblo ya puedes empezar el Abismo en el piso ${this.partida.abismoDesbloqueado}`, "#ffe27a");
+        }
+      } else {
+        const teniaPiedra = this.partida.piedraJuicio > 0;
+        if (this.partida.desbloquearPiso(this.partida.piso, PISOS_TOTALES)) {
+          this.mensaje(`Desde el pueblo ya puedes empezar a bajar en el piso ${this.partida.pisoDesbloqueado}`, "#ffe27a");
+        }
+        if (!teniaPiedra && this.partida.piedraJuicio > 0) {
+          this.eventos.jefe("La Piedra del Juicio", "Las campanas de las arenas ahora ofrecen el Juicio");
+        }
       }
       estado.jefeVencido = true;
       this.partida.jefes++;
@@ -1421,7 +1830,8 @@ export class Juego implements Contexto {
       this.sellarPuertas(false);
       this.interactuables.push(new Interactuable("portal", ANCHO_SALA / 2, 14 * TILE));
       this.mensaje(
-        this.partida.piso >= PISOS_TOTALES ? "El Corazón del Pozo deja de latir. El portal lleva a la superficie." : "El guardián cae. Un portal se abre hacia abajo.",
+        this.abismo ? "El guardián cae. La grieta sigue bajando, sin fondo."
+          : this.partida.piso >= PISOS_TOTALES ? "El Corazón del Pozo deja de latir. El portal lleva a la superficie." : "El guardián cae. Un portal se abre hacia abajo.",
         "#ffe27a",
       );
       this.eventos.guardar();
@@ -1486,7 +1896,7 @@ export class Juego implements Contexto {
   private cerrarRegistro(victoria: boolean): void {
     this.eventos.borrarDescenso();
     this.meta.ganarEsencia(this.partida.esenciaGanada(victoria));
-    this.meta.registro.mejorPiso = Math.max(this.meta.registro.mejorPiso, this.partida.piso);
+    this.registrarProfundidad();
     this.eventos.guardar();
   }
 
@@ -1530,7 +1940,7 @@ export class Juego implements Contexto {
 
     this.dibujarExtraccion(g);
     for (const i of this.interactuables) i.dibujar(g, b.acento);
-    for (const bo of this.botines) bo.dibujar(g);
+    for (const bo of this.botines) bo.dibujar(g, Math.abs(bo.x + 4 - j.cx) < 34 && Math.abs(bo.y - j.cy) < 36);
     for (const c of this.criaturas) {
       c.dibujar(g);
       this.dibujarEstado(g, c);
@@ -1617,6 +2027,7 @@ export class Juego implements Contexto {
       hd.texto(g, texto, x + 4, y + 9, { color: "#ffe9a8" });
     }
     g.restore();
+    this.dibujarRelojArena(g);
 
     if (this.fx.destello > 0) {
       g.globalAlpha = this.fx.destello * 0.6;

@@ -12,6 +12,10 @@ export const OBJ_POLVO = 3;
 export const OBJ_LAGRIMA = 4;
 /** Dados del Destino (4★ a 12★): ids 30 a 38. */
 export const OBJ_DADO_BASE = 30;
+/** Relicario de Almas: se abre desde el inventario y da una carta de 5★ a 12★ (ver dominio/relicario.ts). */
+export const OBJ_RELICARIO = 20;
+/** Caja de Almas: la sueltan los monstruos; da una carta de 1★ a 6★. */
+export const OBJ_CAJA_ALMAS = 21;
 
 export interface DefConsumible {
   readonly id: number;
@@ -92,9 +96,10 @@ export interface DefBase {
 export const BASES: readonly DefBase[] = [
   // ---- Armas (ids 100-109, 114-116)
   { id: 100, nombre: "Espada Mellada", ranura: "arma", estilo: "espada", porNivel: { golpe: 3.2 } },
-  { id: 101, nombre: "Guanteletes", ranura: "arma", estilo: "punos", porNivel: { golpe: 1.8, patada: 2.2 } },
+  // 101, 103 y 115 eran armas de puños: ahora son de las cuatro familias (mismos ids para los guardados).
+  { id: 101, nombre: "Gladio", ranura: "arma", estilo: "espada", porNivel: { golpe: 2.9, critico: 0.5 }, rasgos: { velocidad: 0.08 } },
   { id: 102, nombre: "Bastón de Hueso", ranura: "arma", estilo: "baston", porNivel: { tecnica: 3.4, mp: 1.5 } },
-  { id: 103, nombre: "Grebas de Hierro", ranura: "arma", estilo: "punos", porNivel: { patada: 3.6 } },
+  { id: 103, nombre: "Maza de Hierro", ranura: "arma", estilo: "pesada", porNivel: { golpe: 3.6, hp: 1.2 } },
   { id: 104, nombre: "Mazo de Guerra", ranura: "arma", estilo: "pesada", porNivel: { golpe: 3.9, patada: 0.8 } },
   { id: 105, nombre: "Arco de Hueso", ranura: "arma", estilo: "arco", porNivel: { golpe: 2.7, critico: 0.5 } },
   { id: 106, nombre: "Báculo del Eremita", ranura: "arma", estilo: "baston", porNivel: { tecnica: 3, mp: 2, critico: 0.3 } },
@@ -102,7 +107,7 @@ export const BASES: readonly DefBase[] = [
   { id: 108, nombre: "Hoja Bastarda", ranura: "arma", estilo: "espada", porNivel: { golpe: 3.5 }, rasgos: { alcance: 0.25 } },
   { id: 109, nombre: "Lucero del Alba", ranura: "arma", estilo: "pesada", porNivel: { golpe: 4.2, critico: 0.3 }, rasgos: { critDanio: 0.3 } },
   { id: 114, nombre: "Arco Largo", ranura: "arma", estilo: "arco", porNivel: { golpe: 3 }, rasgos: { alcance: 0.35 } },
-  { id: 115, nombre: "Garras de Hierro", ranura: "arma", estilo: "punos", porNivel: { golpe: 2.2, patada: 1.8, critico: 0.6 }, rasgos: { critDanio: 0.25 } },
+  { id: 115, nombre: "Arco Corto", ranura: "arma", estilo: "arco", porNivel: { golpe: 2.5, critico: 0.6 }, rasgos: { velocidad: 0.12 } },
   { id: 116, nombre: "Cetro del Abismo", ranura: "arma", estilo: "baston", porNivel: { tecnica: 3.6, suerte: 0.4 }, rasgos: { eterGolpe: 2 } },
   // ---- Pecho
   { id: 110, nombre: "Coraza", ranura: "pecho", porNivel: { hp: 5, defensa: 1 } },
@@ -389,11 +394,24 @@ export function consumible(id: number): DefConsumible | undefined {
   return CONSUMIBLES.find((c) => c.id === id);
 }
 
+/** Objetos especiales: no se venden en el Bazar. */
+export const OBJETOS_ESPECIALES: readonly DefConsumible[] = [
+  {
+    id: OBJ_RELICARIO, nombre: "Relicario de Almas", maxPila: 99, precio: 0, color: "#ffd27a",
+    descripcion: "Un cofrecito sellado que late; lo sueltan los guardianes. Ábrelo desde el inventario: guarda UNA carta de alma de 5★ a 12★. "
+      + "Cada 100 aperturas garantizan al menos 1 de 12★, 3 de 11★, 5 de 10★ y 8 de 9★.",
+  },
+  {
+    id: OBJ_CAJA_ALMAS, nombre: "Caja de Almas", maxPila: 99, precio: 0, color: "#b8a8e0",
+    descripcion: "Una cajita de hueso con un alma dormida; la sueltan los monstruos. Ábrela desde el inventario: guarda UNA carta de 1★ a 6★.",
+  },
+];
+
 /** Consumible o material: todo lo que se apila en la mochila. */
 export function apilable(id: number): DefConsumible | undefined {
   const ru = runaDeObjeto(id);
   if (ru !== undefined) return { id, nombre: nombreRuna(ru), maxPila: 5, precio: 0, color: ru.nivel === 0 ? ru.color : COLORES_RAREZA_RUNA[ru.nivel], descripcion: `${NOMBRES_RAREZA_RUNA[ru.nivel]}. ${ru.descripcion}` };
-  return consumible(id) ?? MATERIALES.find((m) => m.id === id);
+  return consumible(id) ?? MATERIALES.find((m) => m.id === id) ?? OBJETOS_ESPECIALES.find((m) => m.id === id);
 }
 
 /** Estilo de combate de un arma (base o única). Sin arma: a puño limpio. */

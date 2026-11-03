@@ -3,6 +3,8 @@
 // El personaje (Partida) es persistente por ranura: baja con todo, vuelve con todo; al caer pierde un 25 %
 // de las esquirlas que lleva. El banco y la Meta (reliquias, esencia, ecos) también son de la ranura.
 
+import { MAT_FRAGMENTO, OBJ_CAJA_ALMAS, OBJ_POCION, OBJ_RELICARIO } from "./contenido/objetos.ts";
+import { generarEquipo } from "./dominio/equipo.ts";
 import { crearCarta } from "./dominio/cartas.ts";
 import { hd } from "./motor/texto-hd.ts";
 import { AzarSistema } from "minialu";
@@ -87,7 +89,7 @@ const ui = new Interfaz(capaUi, meta, audio, {
     entrarPueblo("inicio");
     ui.anunciar(`Bienvenido, ${nombre}`, "Último Refugio · el pueblo sobre el Pozo", "#ffd27a");
   },
-  descender: (piso) => descender(piso),
+  descender: (piso, abismo) => descender(piso, abismo ?? false),
   volverAlPueblo: () => entrarPueblo("pozo"),
   stockArmero: () => stock,
   banco: () => banco,
@@ -154,13 +156,13 @@ function entrarPueblo(desde: "inicio" | "pozo"): void {
   guardarTodo(null);
 }
 
-function descender(piso: number): void {
+function descender(piso: number, abismo = false): void {
   if (partida === null) return;
   audio.activar();
   ui.cerrarForzado();
   entrada.limpiar();
   pueblo = null;
-  iniciarJuego({ tipo: "descenso", partida, piso });
+  iniciarJuego({ tipo: "descenso", partida, piso, abismo });
   guardarTodo();
 }
 
@@ -189,7 +191,8 @@ const eventosPueblo: EventosPueblo = {
 const eventos: EventosJuego = {
   mensaje: (t, c) => ui.toast(t, c),
   abrirAltar: () => { if (juego !== null) ui.abrirAltar(juego); },
-  abrirMercader: () => { if (juego !== null) ui.abrirMercader(juego); },
+  abrirMercader: () => { if (juego !== null) ui.abrirMercader(juego, juego.errante()); },
+  abrirCampana: (op) => ui.abrirCampana(op),
   abrirYunque: () => { if (juego !== null) ui.abrirYunque(juego); },
   abrirFaro: (op) => ui.abrirFaro(op),
   abrirPortal: (op) => ui.abrirPortal(op),
@@ -201,7 +204,7 @@ const eventos: EventosJuego = {
   borrarDescenso: () => guardarTodo(null),
   reliquia: (r) => ui.mostrarReliquia(r, () => entrada.limpiar()),
   jefe: (nombre, titulo) => ui.anunciar(nombre, titulo, "#ff6a6a"),
-  nuevoPiso: (piso, b) => ui.anunciarPiso(piso, b),
+  nuevoPiso: (piso, b, abismo) => ui.anunciarPiso(piso, b, abismo),
   muerte: (res, eco) => setTimeout(() => {
     guardarTodo(null);
     ui.mostrarMuerte(res, eco);
@@ -367,13 +370,31 @@ void sprites.cargar().then(() => {
   banco = new Banco();
   partida = new Partida(meta, (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, { estilo });
   partida.pisoDesbloqueado = PISOS_TOTALES;
+  partida.abismoDesbloqueado = 999;
+  partida.revisarPiedraJuicio();
+  if (q.has("juicio")) partida.piedraJuicio = Math.max(2, Number(q.get("juicio") ?? 2));
   // &mazo=a,b,c,d,e → mazo de almas completo (ids de alma) a 4★; &mazo solo → al azar. &cargada → Definitiva llena.
   if (q.has("mazo")) {
     const ids = (q.get("mazo") ?? "").split(",").filter((x) => x !== "").map(Number);
     for (let r = 0; r < 5; r++) partida.almas[r] = crearCarta(partida.azar, ids[r] ?? Math.floor(Math.random() * 12), 3);
   }
+  // &relicarios=N → N Relicarios de Almas en la mochila; &animar=12 → animación de apertura de una carta de 12★.
+  if (q.has("relicarios")) partida.mochila.agregar(OBJ_RELICARIO, Number(q.get("relicarios") ?? 3));
+  // &cajas=N → Cajas de Almas; &surtido → equipo de todas las rarezas y consumibles; &forma=N → Forma de N★;
+  // &cartas → una carta de cada estrella de 5★ a 12★ en el mazo (para ver las auras).
+  if (q.has("cajas")) partida.mochila.agregar(OBJ_CAJA_ALMAS, Number(q.get("cajas") ?? 5));
+  if (q.has("surtido")) {
+    for (let r = 0; r < 12; r++) partida.recoger({ tipo: "equipo", equipo: { ...generarEquipo(partida.azar, 6 + r, (r % 6) as 0) } });
+    partida.mochila.agregar(OBJ_POCION, 4);
+    partida.mochila.agregar(MAT_FRAGMENTO, 17);
+  }
+  if (q.has("forma")) partida.forma = crearCarta(partida.azar, partida.forma?.personaje ?? 0, Math.max(0, Math.min(11, Number(q.get("forma")) - 1)));
+  if (q.has("cartas")) for (let n = 4; n <= 11; n++) partida.recoger({ tipo: "carta", carta: crearCarta(partida.azar, n % 12, n) });
   if (q.has("pueblo")) {
     entrarPueblo("inicio");
+    if (q.has("animar")) ui.animarRelicario(crearCarta(partida.azar, Math.floor(Math.random() * 12), Math.max(4, Math.min(11, Number(q.get("animar")) - 1))), false, () => undefined);
+    // &x=N → parar al Portador en esa x de la calle (capturas del pueblo).
+    if (q.has("x") && pueblo !== null) pueblo.jugador.colocar(Number(q.get("x")), 14 * 16 - pueblo.jugador.h);
     // &panel=taberna|mercader|armero|banco|altar|herrero|santuario|pozo abre ese servicio (capturas).
     const panel = q.get("panel");
     if (panel !== null) {
@@ -382,13 +403,15 @@ void sprites.cargar().then(() => {
     }
     if (q.has("inventario") && pueblo !== null) {
       const tab = (q.get("tab") ?? "equipo") as "equipo" | "cartas" | "habilidades" | "stats";
-      ui.abrirInventario(pueblo, tab, tab === "cartas" ? 1 : undefined);
+      const relic = [...partida.mochila.posiciones()].find((x) => partida?.mochila.en(x)?.objeto === OBJ_RELICARIO);
+      ui.abrirInventario(pueblo, tab, tab === "cartas" ? 1 : q.has("relicarios") ? relic : undefined);
     }
     return;
   }
 
-  descender(Number(q.get("piso") ?? 1));
+  descender(Number(q.get("piso") ?? 1), q.has("abismo"));
   if (q.has("cargada") && partida !== null) partida.cargaDefinitiva = 100;
+  if (q.has("botin") && juego !== null) juego.depurarBotin();
   // &tiposala=arena|boveda|tesoro → primera sala de ese tipo del piso.
   const tipoSala = q.get("tiposala");
   if (tipoSala !== null && juego !== null) {
@@ -396,6 +419,11 @@ void sprites.cargar().then(() => {
     if (s !== undefined) juego.depurarIr(Number(q.get("piso") ?? 1), s.id);
   }
   if (q.has("sala")) juego?.depurarIr(Number(q.get("piso") ?? 1), Number(q.get("sala") ?? 0));
+  // &campana → abre el diálogo de la campana; &campana=normal|juicio → empieza el desafío directamente.
+  if (q.has("campana") && juego !== null) {
+    const modo = q.get("campana");
+    juego.depurarCampana(modo === "normal" || modo === "juicio" ? modo : undefined);
+  }
   if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
   if (q.has("extraccion") && juego !== null) {
     juego.depurarIr(Number(q.get("piso") ?? 1), 0);

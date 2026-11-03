@@ -30,7 +30,18 @@ export interface Registro {
   jefes: number;
   ecosVencidos: number;
   mejorPiso: number;
+  /** Profundidad más honda alcanzada en el Abismo (guardados viejos no lo tienen). */
+  mejorAbismo?: number;
   enemigos: number;
+  /** Registro de desafíos (guardados viejos no lo tienen). */
+  arenas?: number;
+  arenasIntocables?: number;
+  /** Reloj de Arena: más segundos sobrantes. */
+  mejorReloj?: number;
+  /** Juicio: nivel más alto superado a tiempo, y Juicios superados a tiempo. */
+  mejorJuicio?: number;
+  juiciosATiempo?: number;
+  mayorRacha?: number;
 }
 
 export interface DatosMeta {

@@ -11,6 +11,7 @@
 // Eventos que registra el juego (objetivo = piso cuando corresponde, -1 = cualquiera):
 //   "matar", "elite", "vela", "cofre", "extraer", "jefe", "eco" (por piso)
 //   "rango" (combo en rango S o más), "habilidad", "definitiva", "fusionar", "refinar", "mejorar".
+//   "arena" (desafío superado, por piso), "intocable" (desafío sin recibir golpes).
 
 import type { DefinicionMision, RecompensaMision } from "minialu";
 import { MAT_FRAGMENTO, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO } from "./objetos.ts";
@@ -111,6 +112,12 @@ ZONAS.forEach((z, i) => {
     { titulo: `Encargo: ${z.criaturas}`, descripcion: "Repetible.", objetivos: [`Derrota ${30 + n * 5} criaturas en el piso ${n}`], zona: n, linea: "encargo" });
   agregar({ id: base + 51, requiere: base + 1, repetible: true, objetivos: [o("extraer", 1), o("cofre", 2)], recompensa: premio(n, 65, [{ objeto: OBJ_POCION, cantidad: 1 }]) },
     { titulo: `Encargo: botín de ${z.nombre}`, descripcion: "Repetible. Trae el botín vivo.", objetivos: [`Extrae desde el piso ${n}`, `Abre 2 cofres en el piso ${n}`], zona: n, linea: "encargo" });
+  agregar({ id: base + 52, requiere: base + 1, repetible: true, objetivos: [o("arena", 1 + Math.floor(n / 4))], recompensa: premio(n, 75, [{ objeto: MAT_FRAGMENTO, cantidad: 1 + Math.floor(n / 3) }]) },
+    { titulo: `Encargo: la campana de ${z.nombre}`, descripcion: "Repetible. Ilse paga por cada historia de arena.", objetivos: [`Supera ${1 + Math.floor(n / 4)} desafío(s) en el piso ${n}`], zona: n, linea: "encargo" });
+  if (n >= 3) {
+    m(11, base + 6, [o("intocable", 1, -1)], premio(n, 110, [{ objeto: OBJ_POLVO, cantidad: 2 }], 5 * n),
+      `Sin un rasguño`, "Dicen que hay Portadores que salen de la arena sin una gota de sangre.", ["Supera un desafío sin recibir golpes"], "combate");
+  }
 });
 
 export const MISIONES: readonly DefinicionMision[] = MISIONES_LISTA;

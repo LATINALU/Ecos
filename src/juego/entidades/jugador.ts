@@ -658,7 +658,7 @@ export class Jugador implements Cuerpo {
             tipo: "flecha", x: this.cx + this.dir * 8, y: this.y + (this.agachado ? 6 : 8),
             vx: Math.cos(ang) * velocidad * this.dir, vy: Math.sin(ang) * velocidad, w: 8, h: 3,
             vida: alcance / velocidad, atraviesa: perfora, color: p.equipo.arma?.elemento !== undefined ? ELEMENTOS[p.equipo.arma.elemento].color : e.color,
-            ataqueJugador: { potencia: s.golpe * e.mults[a.combo] * (p.tieneTalento("remate") && ultimo ? 1.4 : 1), tipo: "golpe", empuje: e.empujes[a.combo], quema, eter: e.eter },
+            ataqueJugador: { potencia: s.golpe * e.mults[a.combo] * (p.tieneTalento("remate") && ultimo ? 1.4 : 1), tipo: "golpe", empuje: e.empujes[a.combo], quema, eter: e.eter, arma: e.id, final: ultimo },
           }));
         }
         ctx.audio.reproducir("embestida");
@@ -681,7 +681,17 @@ export class Jugador implements Cuerpo {
       const empuje = giro ? 220 : e.empujes[a.combo];
       const potencia = s.golpe * mult * (gemelo ? 0.7 : 1);
       this.zonaActiva = r;
-      ctx.golpearArea(r, { potencia, tipo: "golpe", empuje, quema, eter: e.eter, aturde, cuerpoACuerpo: true }, this.dir, a.golpeados);
+      ctx.golpearArea(r, { potencia, tipo: "golpe", empuje, quema, eter: e.eter, aturde, cuerpoACuerpo: true, arma: e.id, final: ultimo && !giro }, this.dir, a.golpeados);
+      // Báculo · Orbe de éter: el golpe final del combo lanza un orbe que atraviesa.
+      if (ultimo && !giro && e.orbeUltimo === true && a.extra < 3) {
+        a.extra = 3;
+        ctx.agregarProyectil(new Proyectil({
+          tipo: "orbe", x: this.cx + this.dir * 12, y: this.cy - 2, vx: this.dir * 230, vy: 0, w: 10, h: 10, vida: 0.8,
+          atraviesa: true, color: e.color,
+          ataqueJugador: { potencia: s.tecnica * 0.9 * e.tecnica, tipo: "tecnica", empuje: 90 },
+        }));
+        ctx.fx.chispas(this.cx + this.dir * 12, this.cy, e.color, 10, { velocidad: 60, brillo: true, gravedad: 0 });
+      }
       if (this.reliquias.has("garraIgnea")) ctx.tocarBarreras(r, "fuego");
       // Golpe de Éter: el último golpe del combo dispara una onda.
       if (ultimo && p.tieneTalento("golpeEter") && a.extra < 2 && a.t >= desde) {

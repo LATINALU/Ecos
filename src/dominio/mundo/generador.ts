@@ -52,6 +52,17 @@ export interface OpcionesGenerador {
   readonly reliquiaAColocar?: Reliquia;
   readonly hayEco: boolean;
   readonly probBarrera?: number;
+  /** Abismo: cantidad exacta de salidas, escondidas lejos del inicio (por defecto 1~2 como en el Pozo). */
+  readonly salidas?: number;
+  /**
+   * Salas con servicios (altar y mercader). El Pozo no los tiene: para comprar y mejorar está la superficie.
+   * El Abismo sí, porque de ahí no se sube. Por defecto true.
+   */
+  readonly servicios?: boolean;
+  /** Sala del mercader (por defecto igual que `servicios`). En el Abismo es un mercader ERRANTE: no siempre está. */
+  readonly mercader?: boolean;
+  /** Salas de desafío (arenas con oleadas). Por defecto: una desde el piso 2 y una más cada 8 pisos. */
+  readonly arenas?: number;
 }
 
 const PESO_DIR: ReadonlyArray<readonly [Dir, number]> = [["aba", 1.1], ["izq", 1.3], ["der", 1.3], ["arr", 0.35]];
@@ -102,10 +113,34 @@ export function resolver(mapa: MapaPiso, iniciales: readonly Reliquia[]): { alca
   }
 }
 
+/**
+ * Un piso es válido si, con lo que el Portador ya tiene más lo que encuentra en el propio piso, llega al jefe,
+ * a las salas clave y a TODAS las salidas. Nadie queda atorado detrás de algo que todavía no puede conseguir.
+ */
 export function esValido(mapa: MapaPiso, iniciales: readonly Reliquia[]): boolean {
   const { alcanzables: alc } = resolver(mapa, iniciales);
   if (!alc.has(mapa.jefe)) return false;
+  if (!(mapa.extracciones ?? []).every((id) => alc.has(id))) return false;
   return mapa.salas.every((s) => (s.tipo !== "altar" && s.tipo !== "reliquia" && s.tipo !== "eco") || alc.has(s.id));
+}
+
+/** Barreras que se pueden poner en un piso: solo las de reliquias que el Portador tiene o que encuentra en él. */
+export function barrerasPermitidas(poseidas: readonly Reliquia[], enElPiso?: Reliquia): Barrera[] {
+  const llaves = new Set<Reliquia>(poseidas);
+  if (enElPiso !== undefined) llaves.add(enElPiso);
+  return (Object.keys(RELIQUIA_DE_BARRERA) as Barrera[]).filter((b) => llaves.has(RELIQUIA_DE_BARRERA[b]));
+}
+
+/**
+ * Quita las barreras imposibles de un mapa ya hecho (descensos guardados antes de esta regla): las que piden una
+ * reliquia que el Portador no tiene y que tampoco está en ninguna sala del piso.
+ */
+export function podarBarreras(mapa: MapaPiso, poseidas: readonly Reliquia[]): void {
+  const enPiso = new Set<Reliquia>(poseidas);
+  for (const s of mapa.salas) if (s.reliquia !== undefined) enPiso.add(s.reliquia);
+  for (const c of mapa.conexiones) {
+    if (c.barrera !== undefined && !enPiso.has(RELIQUIA_DE_BARRERA[c.barrera])) c.barrera = undefined;
+  }
 }
 
 function distancias(salas: readonly SalaMapa[], conexiones: readonly Conexion[], inicio: number): number[] {
@@ -191,14 +226,19 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
     const eco = tomar(salas.filter((s) => dist[s.id] >= 2));
     if (eco !== undefined) eco.tipo = "eco";
   }
-  const altar = tomar(salas.filter((s) => dist[s.id] >= 1 && dist[s.id] <= 3));
-  if (altar !== undefined) altar.tipo = "altar";
+  const servicios = op.servicios ?? true;
+  if (servicios) {
+    const altar = tomar(salas.filter((s) => dist[s.id] >= 1 && dist[s.id] <= 3));
+    if (altar !== undefined) altar.tipo = "altar";
+  }
   const tesoro = tomar(hojas);
   if (tesoro !== undefined) tesoro.tipo = "tesoro";
-  const mercader = tomar(salas.filter((s) => dist[s.id] >= 2));
-  if (mercader !== undefined) mercader.tipo = "mercader";
-  // Arenas (oleadas con la sala sellada): una desde el piso 2 y una más cada 8 pisos.
-  const arenas = op.piso >= 2 ? 1 + Math.floor(op.piso / 8) : 0;
+  if (op.mercader ?? servicios) {
+    const mercader = tomar(salas.filter((s) => dist[s.id] >= 2));
+    if (mercader !== undefined) mercader.tipo = "mercader";
+  }
+  // Arenas (desafíos con oleadas y la sala sellada).
+  const arenas = op.arenas ?? (op.piso >= 2 ? 1 + Math.floor(op.piso / 8) : 0);
   for (let k = 0; k < arenas; k++) {
     const a = tomar(salas.filter((s) => dist[s.id] >= 2));
     if (a !== undefined) a.tipo = "arena";
@@ -211,8 +251,16 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
 
   // Extracción (estilo Tarkov): 1~2 salas normales lejos del inicio. Una a media distancia y otra al fondo.
   const extracciones: number[] = [];
+  if (op.salidas !== undefined) {
+    // Abismo: las salidas se esconden lejos (la mitad más honda del mapa), al azar.
+    const lejanas = salas.filter((s) => s.tipo === "normal").sort((a, b) => dist[b.id] - dist[a.id]);
+    const pool = lejanas.slice(0, Math.max(1, Math.ceil(lejanas.length / 2)));
+    for (let k = 0; k < op.salidas && pool.length > 0; k++) extracciones.push(pool.splice(entero(azar, pool.length), 1)[0].id);
+  }
   const candidatas = salas.filter((s) => s.tipo === "normal" && dist[s.id] >= 2).sort((a, b) => dist[a.id] - dist[b.id]);
-  if (candidatas.length > 0) {
+  if (op.salidas !== undefined) {
+    // ya ubicadas
+  } else if (candidatas.length > 0) {
     extracciones.push(candidatas[Math.floor(candidatas.length / 2)].id);
     const fondo = candidatas[candidatas.length - 1];
     if (candidatas.length >= 3 && !extracciones.includes(fondo.id)) extracciones.push(fondo.id);
@@ -221,11 +269,13 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
     if (resto.length > 0) extracciones.push(elegirUno(azar, resto).id);
   }
 
-  if (conBarreras) {
+  // Barreras: solo de reliquias que el Portador ya tiene o que va a encontrar en este piso.
+  const tipos = barrerasPermitidas(op.reliquiasPoseidas, salas.some((s) => s.reliquia !== undefined) ? op.reliquiaAColocar : undefined);
+  if (conBarreras && tipos.length > 0) {
     const prob = op.probBarrera ?? 0.3;
     for (const c of conexiones) {
       if ((c.dir === "izq" || c.dir === "der") && c.a !== inicio && c.b !== inicio && azar.siguiente() < prob) {
-        c.barrera = azar.siguiente() < 0.5 ? "cristal" : "raices";
+        c.barrera = elegirUno(azar, tipos);
       }
     }
   }

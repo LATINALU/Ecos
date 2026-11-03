@@ -1,3 +1,4 @@
+import type { EstiloArma } from "../contenido/objetos.ts";
 // Lo que las entidades pueden pedirle al mundo. Lo implementa Juego; las entidades no se conocen entre sí.
 
 import type { Bioma } from "../contenido/biomas.ts";
@@ -36,6 +37,10 @@ export interface AtaqueJugador {
   readonly definitiva?: boolean;
   /** Golpe doble de la pasiva (no vuelve a disparar pasivas de golpe). */
   readonly eco?: boolean;
+  /** Golpe básico de un arma: aplica las pasivas de ataque de su familia. */
+  readonly arma?: EstiloArma;
+  /** Último golpe del combo (Sangría). */
+  readonly final?: boolean;
 }
 
 /** Zona de peligro anunciada (raíces que brotan, lluvia de huesos): avisa y después daña. */

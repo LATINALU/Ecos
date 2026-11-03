@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { AzarSemilla } from "minialu";
 import { PASIVAS_MITICAS } from "../src/contenido/miticas.ts";
-import { CONSUMIBLES, NOMBRES_RAREZA, OBJ_DADO_BASE, OBJ_LAGRIMA, PRECIO_DADO, dadoParaNivel } from "../src/contenido/objetos.ts";
+import { CONSUMIBLES, NOMBRES_RAREZA, OBJ_DADO_BASE, OBJ_LAGRIMA, OBJ_RELICARIO, PRECIO_DADO, dadoParaNivel } from "../src/contenido/objetos.ts";
 import { botinEnemigo } from "../src/dominio/botin.ts";
 import { NIVEL_MAX_CARTA, crearCarta, fusionarCartas } from "../src/dominio/cartas.ts";
 import { comprarEnPueblo } from "../src/dominio/comercio.ts";
@@ -85,7 +85,7 @@ describe("drops", () => {
     for (let i = 0; i < 30; i++) {
       const jefe = botinEnemigo(azar, 6, "jefe");
       expect(jefe.filter((p) => p.tipo === "equipo" && p.equipo.rareza >= 3).length).toBeGreaterThanOrEqual(2);
-      expect(jefe.filter((p) => p.tipo === "carta")).toHaveLength(2);
+      expect(jefe.filter((p) => p.tipo === "objeto" && p.objeto === OBJ_RELICARIO)).toHaveLength(1);
     }
   });
 });
