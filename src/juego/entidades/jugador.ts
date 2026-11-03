@@ -168,7 +168,8 @@ export class Jugador implements Cuerpo {
 
   /** Saltos en el aire: Alas de Ceniza y Runa del Viento suman uno cada una. */
   private saltosExtra(ctx: Contexto): number {
-    return (this.reliquias.has("dobleSalto") ? 1 : 0) + (ctx.partida.tieneRuna("viento") ? 1 : 0);
+    const viento = ctx.partida.potenciaRuna("viento");
+    return (this.reliquias.has("dobleSalto") ? 1 : 0) + (viento === 0 ? 0 : viento >= 2.2 ? 2 : 1);
   }
 
   private agacharse(): void {
@@ -938,7 +939,7 @@ export class Jugador implements Cuerpo {
     this.accion = null;
     this.atras = DURACION_ATRAS;
     this.atrasFantasma = ctx.partida.tieneTalento("pasoFantasma");
-    this.cdAtras = this.atrasFantasma ? 0.21 : 0.42;
+    this.cdAtras = (this.atrasFantasma ? 0.21 : 0.42) * (this.reliquias.has("botasCefiro") ? 0.6 : 1);
     this.vy = -60;
     ctx.audio.reproducir("embestida");
     ctx.fx.chispas(this.cx, this.y + this.h, "#ffffff55", 6, { velocidad: 50, vida: 0.3, gravedad: 0 });

@@ -294,32 +294,87 @@ export const UNICOS: readonly DefUnico[] = [
 ];
 
 // ---------------- Runas (pasivas equipables, 2 ranuras) ----------------
+//
+// 16 runas, cada una en 4 rarezas (Común, Rara, Épica, Legendaria) que multiplican su efecto (×1 · ×1,5 · ×2,2 · ×3,2).
+// Tres runas iguales se fusionan en el Yunque en una de la rareza siguiente.
+// Ids de objeto: rareza Común = 300 + índice (los guardados viejos siguen valiendo); el resto, 3000 + índice·10 + rareza.
 
-export type IdRuna = "brasa" | "vampiro" | "viento" | "acero" | "avaro" | "calma" | "eco" | "furia" | "coleccionista" | "escarcha";
+export type IdRuna =
+  | "brasa" | "vampiro" | "viento" | "acero" | "avaro" | "calma" | "eco" | "furia" | "coleccionista" | "escarcha"
+  | "tormenta" | "ponzona" | "fortaleza" | "presteza" | "sabio" | "verdugo";
 
 export interface DefRuna {
   readonly id: IdRuna;
   readonly objeto: number;
   readonly nombre: string;
   readonly color: string;
+  /** Descripción a rareza Común. */
   readonly descripcion: string;
+  /** Descripción con el multiplicador de su rareza. */
+  readonly texto: (m: number) => string;
 }
 
+export const NOMBRES_RAREZA_RUNA = ["Común", "Rara", "Épica", "Legendaria"] as const;
+export const COLORES_RAREZA_RUNA = ["#c8c8c8", "#4da6ff", "#b46bff", "#ffb23d"] as const;
+/** Multiplicador del efecto según la rareza de la runa. */
+export const MULT_RUNA: readonly number[] = [1, 1.5, 2.2, 3.2];
+export const RAREZA_RUNA_MAX = 3;
+/** Esquirlas para fusionar 3 runas de esta rareza en una de la siguiente. */
+export const COSTO_FUSION_RUNA: readonly number[] = [150, 600, 2400];
+
+const pctR = (v: number): string => `${Math.round(v * 100)} %`;
+const r1 = (v: number): string => (Math.round(v * 10) / 10).toString().replace(".", ",");
+
+const runa = (id: IdRuna, objeto: number, nombre: string, color: string, texto: (m: number) => string): DefRuna =>
+  ({ id, objeto, nombre, color, texto, descripcion: texto(1) });
+
 export const RUNAS: readonly DefRuna[] = [
-  { id: "brasa", objeto: 300, nombre: "Runa de Brasa", color: "#ff7a3d", descripcion: "Tus golpes y patadas queman." },
-  { id: "vampiro", objeto: 301, nombre: "Runa del Vampiro", color: "#ff4d6d", descripcion: "Te curas un 4 % del daño que haces." },
-  { id: "viento", objeto: 302, nombre: "Runa del Viento", color: "#bff3ff", descripcion: "Un salto extra en el aire." },
-  { id: "acero", objeto: 303, nombre: "Runa de Acero", color: "#c8c2d6", descripcion: "+20 % de defensa." },
-  { id: "avaro", objeto: 304, nombre: "Runa del Avaro", color: "#ffd23d", descripcion: "+35 % de esquirlas." },
-  { id: "calma", objeto: 305, nombre: "Runa de la Calma", color: "#7dff9a", descripcion: "+8 de Regeneración." },
-  { id: "eco", objeto: 306, nombre: "Runa del Eco", color: "#c9a7ff", descripcion: "Las técnicas cuestan un 15 % menos de éter." },
-  { id: "furia", objeto: 307, nombre: "Runa de Furia", color: "#ff3d3d", descripcion: "+30 % de daño cuando te queda menos del 40 % de vida." },
-  { id: "coleccionista", objeto: 308, nombre: "Runa del Coleccionista", color: "#ffb23d", descripcion: "+30 de Suerte (más botín, mejores rasgos)." },
-  { id: "escarcha", objeto: 309, nombre: "Runa de Escarcha", color: "#7fe3ff", descripcion: "Tus críticos aturden 0,8 s." },
+  runa("brasa", 300, "Runa de Brasa", "#ff7a3d", (m) => `Tus golpes y patadas queman y haces +${pctR(0.05 * m)} de daño.`),
+  runa("vampiro", 301, "Runa del Vampiro", "#ff4d6d", (m) => `Te curas un ${pctR(0.04 * m)} del daño que haces.`),
+  runa("viento", 302, "Runa del Viento", "#bff3ff", (m) => `${m >= 2.2 ? "Dos saltos" : "Un salto"} extra en el aire.`),
+  runa("acero", 303, "Runa de Acero", "#c8c2d6", (m) => `+${pctR(0.2 * m)} de defensa.`),
+  runa("avaro", 304, "Runa del Avaro", "#ffd23d", (m) => `+${pctR(0.35 * m)} de esquirlas.`),
+  runa("calma", 305, "Runa de la Calma", "#7dff9a", (m) => `+${Math.round(8 * m)} de Regeneración.`),
+  runa("eco", 306, "Runa del Eco", "#c9a7ff", (m) => `Las habilidades cuestan un ${pctR(0.15 * m)} menos de éter.`),
+  runa("furia", 307, "Runa de Furia", "#ff3d3d", (m) => `+${pctR(0.3 * m)} de daño cuando te queda menos del 40 % de vida.`),
+  runa("coleccionista", 308, "Runa del Coleccionista", "#ffb23d", (m) => `+${Math.round(30 * m)} de Suerte (más botín, mejores rarezas).`),
+  runa("escarcha", 309, "Runa de Escarcha", "#7fe3ff", (m) => `Tus críticos aturden ${r1(Math.min(2, 0.8 * m))} s.`),
+  // ---- Runas nuevas
+  runa("tormenta", 310, "Runa de la Tormenta", "#ffe84a", (m) => `${pctR(0.1 * m)} de que tus golpes lancen un rayo en cadena.`),
+  runa("ponzona", 311, "Runa Ponzoñosa", "#9aff5a", (m) => `${pctR(0.14 * m)} de que tus golpes envenenen.`),
+  runa("fortaleza", 312, "Runa de la Fortaleza", "#e8e0cc", (m) => `+${pctR(0.07 * m)} de vida máxima.`),
+  runa("presteza", 313, "Runa de Presteza", "#7fe3ff", (m) => `+${pctR(0.07 * m)} de velocidad de ataque.`),
+  runa("sabio", 314, "Runa del Sabio", "#9fe8ff", (m) => `−${pctR(0.07 * m)} de enfriamiento de habilidades.`),
+  runa("verdugo", 315, "Runa del Verdugo", "#ff5a6a", (m) => `+${pctR(0.22 * m)} de daño crítico.`),
 ];
 
-export function runaDeObjeto(id: number): DefRuna | undefined {
-  return RUNAS.find((r) => r.objeto === id);
+/** Id de objeto de una runa de cierta rareza. */
+export function objetoRuna(id: IdRuna, nivel: number): number {
+  const i = RUNAS.findIndex((r) => r.id === id);
+  return nivel <= 0 ? RUNAS[i].objeto : 3000 + i * 10 + Math.min(RAREZA_RUNA_MAX, nivel);
+}
+
+export interface RunaObjeto extends DefRuna {
+  readonly nivel: number;
+}
+
+export function runaDeObjeto(id: number): RunaObjeto | undefined {
+  const comun = RUNAS.find((r) => r.objeto === id);
+  if (comun !== undefined) return { ...comun, nivel: 0 };
+  if (id >= 3000 && id < 3000 + RUNAS.length * 10) {
+    const i = Math.floor((id - 3000) / 10);
+    const nivel = (id - 3000) % 10;
+    if (nivel >= 1 && nivel <= RAREZA_RUNA_MAX) {
+      const def = RUNAS[i];
+      return { ...def, nivel, nombre: def.nombre, descripcion: def.texto(MULT_RUNA[nivel]) };
+    }
+  }
+  return undefined;
+}
+
+/** Nombre con rareza ("Runa de Brasa · Épica"). */
+export function nombreRuna(r: RunaObjeto): string {
+  return r.nivel === 0 ? r.nombre : `${r.nombre} · ${NOMBRES_RAREZA_RUNA[r.nivel]}`;
 }
 
 export function unico(id: number): DefUnico | undefined {
@@ -336,8 +391,8 @@ export function consumible(id: number): DefConsumible | undefined {
 
 /** Consumible o material: todo lo que se apila en la mochila. */
 export function apilable(id: number): DefConsumible | undefined {
-  const runa = runaDeObjeto(id);
-  if (runa !== undefined) return { id, nombre: runa.nombre, maxPila: 1, precio: 0, color: runa.color, descripcion: runa.descripcion };
+  const ru = runaDeObjeto(id);
+  if (ru !== undefined) return { id, nombre: nombreRuna(ru), maxPila: 5, precio: 0, color: ru.nivel === 0 ? ru.color : COLORES_RAREZA_RUNA[ru.nivel], descripcion: `${NOMBRES_RAREZA_RUNA[ru.nivel]}. ${ru.descripcion}` };
   return consumible(id) ?? MATERIALES.find((m) => m.id === id);
 }
 

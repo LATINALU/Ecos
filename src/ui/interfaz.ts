@@ -14,9 +14,9 @@ import {
 import { ESTILOS, ORDEN_ESTILOS } from "../contenido/armas.ts";
 import { EXITO_REFINADO, REFINADO_MAX, RECETAS, costoRefinado } from "../contenido/recetas.ts";
 import { CONJUNTOS, conjunto as defConjunto } from "../contenido/conjuntos.ts";
-import { RUNAS, runaDeObjeto } from "../contenido/objetos.ts";
+import { COLORES_RAREZA_RUNA, COSTO_FUSION_RUNA, NOMBRES_RAREZA_RUNA, RAREZA_RUNA_MAX, nombreRuna, objetoRuna, runaDeObjeto } from "../contenido/objetos.ts";
 import { SENDAS, TALENTOS, type Senda } from "../contenido/talentos.ts";
-import { craftear, faltantes, puedeCraftear, refinarEquipado } from "../dominio/crafteo.ts";
+import { craftear, faltantes, fusionarRunas, puedeCraftear, refinarEquipado } from "../dominio/crafteo.ts";
 import { bioma, type Bioma } from "../contenido/biomas.ts";
 import {
   BASES, COLORES_RAREZA, CONSUMIBLES, MAT_FRAGMENTO, MATERIALES, PRECIO_DADO, dadoParaNivel, NOMBRES_RAREZA, OBJ_LAGRIMA, OBJ_POLVO, RASGOS_EQUIPO, apilable, unico, type EstiloArma,
@@ -80,13 +80,14 @@ const ERRORES: Readonly<Record<string, string>> = {
   "nivel-maximo": "Esa carta ya está en su máximo de estrellas",
   "al-maximo": "Ya está al máximo",
   "sin-polvo": "Necesitas Polvo de Eco",
-  "sin-lagrima": "No tienes Lágrimas de Eco",
+  "sin-lagrima": "Necesitas un Dado del Destino de esa estrella o una Lágrima de Eco",
   "repetida": "Elige tres cartas distintas",
   "casilla-vacia": "No hay nada ahí",
   "vacia": "No hay nada equipado ahí",
   "no-a-la-venta": "Eso no está a la venta",
   "monto-invalido": "Monto inválido",
   "faltan-materiales": "Faltan materiales",
+  "faltan-runas": "Necesitas tres runas iguales de la misma rareza",
   "nada-que-refinar": "No tienes nada equipado ahí",
   "requisito": "Primero aprende el talento anterior de esa senda",
   "ya-aprendido": "Ya lo aprendiste",
@@ -554,16 +555,17 @@ export class Interfaz {
     }
     const runas = h("div", { class: "ranuras" }, ...([0, 1] as const).map((k) => {
       const r = p.runas[k];
-      const def = r !== null ? RUNAS.find((x) => x.id === r) : undefined;
+      const def = r !== null ? runaDeObjeto(objetoRuna(r, p.nivelesRuna[k])) : undefined;
       return h("button", {
-        class: "ranura", style: def !== undefined ? `border-color:${def.color}` : "", title: def?.descripcion ?? "Engarza una runa desde la mochila",
+        class: "ranura", style: def !== undefined ? `border-color:${COLORES_RAREZA_RUNA[def.nivel]}` : "", title: def?.descripcion ?? "Engarza una runa desde la mochila",
         onclick: () => {
           if (r === null) return;
           const res = p.quitarRuna(k);
           if (!res.ok) this.toast(textoError(res.error), "#ff9a4d");
           this.abrirInventario(juego, "equipo");
         },
-      }, h("small", {}, `Runa ${k === 0 ? "I" : "II"}`), def !== undefined ? h("span", { style: `color:${def.color}` }, def.nombre) : "—");
+      }, h("small", {}, `Runa ${k === 0 ? "I" : "II"}`), def !== undefined ? h("span", { style: `color:${def.color}` }, def.nombre,
+        h("small", { style: `color:${COLORES_RAREZA_RUNA[def.nivel]}` }, ` ${NOMBRES_RAREZA_RUNA[def.nivel]}`)) : "—");
     }));
     return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipado"), ranuras, runas, h("h3", {}, `Mochila · ◆ ${p.esquirlas}`), grilla), detalle);
   }
@@ -756,9 +758,9 @@ export class Interfaz {
           h("div", { class: n >= 4 ? "sube" : "sub" }, `(4) ${c.cuatro.descripcion}`),
           h("div", { class: n >= 6 ? "sube" : "sub" }, `(6) ${c.seis.descripcion}`));
       }),
-      ...p.runas.filter((r) => r !== null).map((r) => {
-        const def = RUNAS.find((x) => x.id === r)!;
-        return h("div", { style: `color:${def.color}` }, `◆ ${def.nombre}: ${def.descripcion}`);
+      ...([0, 1] as const).filter((k) => p.runas[k] !== null).map((k) => {
+        const def = runaDeObjeto(objetoRuna(p.runas[k]!, p.nivelesRuna[k]))!;
+        return h("div", { style: `color:${def.color}` }, `◆ ${nombreRuna(def)}: ${def.descripcion}`);
       }),
       p.piezasConjunto().size === 0 && p.runas.every((r) => r === null) ? h("p", { class: "sub" }, "Sin conjuntos ni runas. Las piezas de conjunto caen en cada zona y los guardianes siempre sueltan una.") : null,
       h("h3", {}, "Reliquias"),
@@ -915,13 +917,36 @@ export class Interfaz {
         }, `Refinar (+${nivel}→+${nivel + 1})`));
     });
     const enPueblo = !("mapa" in juego);
+    // Fusión de runas: tres iguales de la misma rareza → una de la rareza siguiente.
+    const fusionables = [...new Set([...p.mochila.posiciones()].map((q) => p.mochila.en(q)?.objeto).filter((o): o is number => o !== undefined))]
+      .map((o) => ({ o, ru: runaDeObjeto(o), n: p.mochila.contar(o) }))
+      .filter((x) => x.ru !== undefined);
+    const runasUi = fusionables.length === 0 ? h("p", { class: "sub" }, "No llevas runas. Caen de élites, cofres y guardianes; tres iguales se funden en una más rara.")
+      : h("div", {}, ...fusionables.map(({ o, ru, n }) => {
+        const r = ru!;
+        const max = r.nivel >= RAREZA_RUNA_MAX;
+        const costo = max ? 0 : COSTO_FUSION_RUNA[r.nivel];
+        return h("div", { class: "receta" },
+          h("b", { style: `color:${COLORES_RAREZA_RUNA[r.nivel]}` }, `${nombreRuna(r)} ×${n}`),
+          h("span", { class: "sub" }, max ? "Rareza máxima." : `3 → ${NOMBRES_RAREZA_RUNA[r.nivel + 1]} (${r.texto([1, 1.5, 2.2, 3.2][r.nivel + 1])})`),
+          h("button", {
+            disabled: max || n < 3 || p.esquirlas < costo,
+            onclick: () => {
+              const res = fusionarRunas(p, o);
+              this.audio.reproducir(res.ok ? "unico" : "fallo");
+              this.acciones.guardar();
+              refrescar(h("p", { class: res.ok ? "resultado sube" : "baja" }, res.ok ? `¡Runa fundida! ${res.valor}` : textoError(res.error)));
+            },
+          }, max ? "—" : `Fundir · ${costo} ◆`));
+      }));
     this.abrirTienda("yunque", enPueblo ? "herrero" : "yunqueFaro", this.botonCerrar(),
       cabeceraTienda(enPueblo ? "herrero" : "yunqueFaro", [esquirlas(p.esquirlas)]),
       h("h3", {}, "Materiales"),
       materiales,
       resultado ?? null,
       h("h3", {}, "Recetas"), ...recetas,
-      h("h3", {}, "Refinar equipo puesto"), ...refinar);
+      h("h3", {}, "Refinar equipo puesto"), ...refinar,
+      h("h3", {}, "Fundir runas"), runasUi);
   }
 
   // =============================== Mercader ===============================
@@ -1234,6 +1259,7 @@ export class Interfaz {
     const leyenda: [string, string][] = [
       ["#ffe9a8", "Tú"], ["#ffffff", "Faro"], ["#ff3d3d", "Guardián"], ["#a07cff", "Altar"], ["#ffd23d", "Tesoro"],
       ["#7fe3ff", "Reliquia"], ["#ffb23d", "Mercader"], ["#ff8aff", "Eco"], ["#7dffb0", "Extracción"],
+      ["#ff6a3d", "Arena"], ["#ffe9a8", "Bóveda"],
     ];
     this.abrir("mapa", this.botonCerrar(),
       h("h2", {}, `Piso ${juego.partida.piso} · ${bioma(juego.partida.piso).nombre}`),

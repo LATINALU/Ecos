@@ -181,6 +181,10 @@ export function dibujarIconoSubarma(g: CanvasRenderingContext2D, id: keyof typeo
 
 export type TipoInteractuable = "cofre" | "altar" | "faro" | "reliquia" | "mercader" | "portal" | "yunque";
 
+/** Rarezas de cofre: madera, plata, oro y mítico. */
+export const NOMBRE_COFRE = ["Cofre", "Cofre de plata", "Cofre de oro", "Cofre mítico"] as const;
+export const COLOR_COFRE = ["#c8a070", "#d8e0ff", "#ffd23d", "#ff4d6d"] as const;
+
 export class Interactuable {
   x: number;
   y: number;
@@ -188,6 +192,10 @@ export class Interactuable {
   h: number;
   t = Math.random() * 5;
   usado = false;
+  /** Cofres: 0 madera, 1 plata, 2 oro, 3 mítico. */
+  nivel = 0;
+  /** Cofres: clave para recordar si se abrió. */
+  clave = 0;
   readonly tipo: TipoInteractuable;
   readonly reliquia?: Reliquia;
 
@@ -208,7 +216,7 @@ export class Interactuable {
 
   etiqueta(): string {
     switch (this.tipo) {
-      case "cofre": return "Abrir cofre";
+      case "cofre": return `Abrir ${NOMBRE_COFRE[this.nivel].toLowerCase()}`;
       case "altar": return "Altar de las Almas";
       case "faro": return "Faro de descenso";
       case "reliquia": return this.reliquia !== undefined ? `Tomar: ${INFO_RELIQUIA[this.reliquia].nombre}` : "";
@@ -234,11 +242,22 @@ export class Interactuable {
     };
     switch (this.tipo) {
       case "cofre": {
-        if (!this.usado) brillo("#ffd23d", 14, 0.15);
+        const color = COLOR_COFRE[this.nivel];
+        if (!this.usado) brillo(color, 14 + this.nivel * 6, 0.15 + this.nivel * 0.07);
         const atlas = sprites.imagen("castillo");
         if (atlas !== null) {
           const cuadro = this.usado ? 3 : Math.floor(this.t * 1.5) % 4 === 0 ? 1 : 0;
           dibujarRecorte(g, atlas, COFRE[cuadro], x, y + this.h - 16);
+          // Herrajes del color de su rareza y destellos en los cofres buenos.
+          if (this.nivel > 0) {
+            g.fillStyle = color;
+            g.fillRect(x + 1, y + this.h - 6, 14, 1);
+            g.fillRect(x + 7, y + this.h - 9, 2, 3);
+            if (!this.usado && Math.floor(this.t * 4) % 3 === 0) {
+              g.fillStyle = "#ffffff";
+              g.fillRect(x + 2 + Math.floor(this.t * 7) % 12, y + this.h - 13, 1, 1);
+            }
+          }
           break;
         }
         g.fillStyle = "#5a3a22";

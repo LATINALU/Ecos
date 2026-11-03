@@ -74,5 +74,7 @@ export function conjunto(id: IdConjunto): DefConjunto {
 }
 
 export function conjuntoDelPiso(piso: number): DefConjunto {
-  return CONJUNTOS.find((c) => c.pisos.includes(piso)) ?? CONJUNTOS[CONJUNTOS.length - 1];
+  // Del piso 11 en adelante los conjuntos vuelven a empezar (Pozo Profundo: las mismas familias, más fuertes).
+  const p = ((Math.max(1, piso) - 1) % 10) + 1;
+  return CONJUNTOS.find((c) => c.pisos.includes(p)) ?? CONJUNTOS[CONJUNTOS.length - 1];
 }

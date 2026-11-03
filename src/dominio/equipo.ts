@@ -116,7 +116,8 @@ export function nivelObjeto(piso: number, azar: Azar): number {
  */
 export function tirarRarezaEquipo(azar: Azar, piso: number, minima: Rareza = 0, fortuna = 0): Rareza {
   const pesos = PESOS_RAREZA[Math.max(0, Math.min(piso - 1, PESOS_RAREZA.length - 1))];
-  const inclinacion = Math.max(0, fortuna) / 100;
+  // El Pozo Profundo (piso 11+) también inclina la tabla: cada piso más hondo pesa como 8 de suerte.
+  const inclinacion = (Math.max(0, fortuna) + Math.max(0, piso - 10) * 8) / 100;
   const tabla = pesos.map((p, i) => [i as Rareza, i < minima ? 0 : p * (1 + inclinacion * i * 0.35)] as const).filter(([, p]) => p > 0);
   return tabla.length === 0 ? minima : elegirPorPeso(azar, tabla);
 }

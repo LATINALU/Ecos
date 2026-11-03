@@ -96,7 +96,9 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
   const b = bioma(p.piso);
   texto(g, `Piso ${p.piso} · ${b.nombre}`, 476, 262, b.acento, "right");
 
-  dibujarMinimapa(g, juego.mapa, juego, 406, 4);
+  // Mapas grandes del Pozo Profundo: celdas más chicas para que entren.
+  const celda = juego.mapa.ancho > 7 ? 8 : 9;
+  dibujarMinimapa(g, juego.mapa, juego, 478 - juego.mapa.ancho * celda - 2, 4, celda);
   dibujarCombo(g, juego);
 
   // Jefe
@@ -104,8 +106,8 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
   if (jefe !== undefined) {
     const w = 260;
     const x = 240 - w / 2;
-    texto(g, jefe.nombre, 240, 236, "#ffd0d0", "center");
-    barra(g, x, 240, w, 5, jefe.hp / jefe.hpMax, jefe.hp / jefe.hpMax < 0.5 ? "#ff3d3d" : "#d83a5a", "#2a0a10");
+    texto(g, jefe.nombre, 240, 214, "#ffd0d0", "center");
+    barra(g, x, 218, w, 5, jefe.hp / jefe.hpMax, jefe.hp / jefe.hpMax < 0.5 ? "#ff3d3d" : "#d83a5a", "#2a0a10");
   }
 }
 
@@ -183,8 +185,10 @@ export function dibujarMinimapa(g: CanvasRenderingContext2D, mapa: MapaPiso, jue
   g.fillStyle = "#000000aa";
   g.fillRect(ox - 2, oy - 2, w + 4, h + 4);
   const actual = juego.salaActualId();
+  // Ojo del Abismo: el mapa entero se ve desde el principio.
+  const todo = juego.jugador.reliquias.has("ojoAbismo");
   for (const s of mapa.salas) {
-    const visitada = juego.salaVisitada(s.id);
+    const visitada = juego.salaVisitada(s.id) || todo;
     const vecinaVisitada = !visitada && Object.values(aperturas(mapa, s.id)).some((v) => v !== undefined && juego.salaVisitada(v.destino));
     if (!visitada && !vecinaVisitada) continue;
     const x = ox + s.x * celda;
@@ -194,6 +198,7 @@ export function dibujarMinimapa(g: CanvasRenderingContext2D, mapa: MapaPiso, jue
     if (visitada) {
       const icono: Partial<Record<string, string>> = {
         jefe: "#ff3d3d", altar: "#a07cff", tesoro: "#ffd23d", reliquia: "#7fe3ff", mercader: "#ffb23d", eco: "#ff8aff", inicio: "#ffffff",
+        arena: "#ff6a3d", boveda: "#ffe9a8",
       };
       const c = icono[s.tipo];
       if (c !== undefined) {

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AzarSemilla } from "minialu";
 import { BIOMAS, PISOS_TOTALES, escalaEnemigo } from "../src/contenido/biomas.ts";
 import { CONJUNTOS, conjuntoDelPiso } from "../src/contenido/conjuntos.ts";
-import { MAT_FRAGMENTO, RUNAS } from "../src/contenido/objetos.ts";
+import { MAT_FRAGMENTO, runaDeObjeto } from "../src/contenido/objetos.ts";
 import { ANIMACIONES_CRIATURAS } from "../src/contenido/sprites.generado.ts";
 import { TALENTOS } from "../src/contenido/talentos.ts";
 import { botinEnemigo } from "../src/dominio/botin.ts";
@@ -14,11 +14,14 @@ import { Meta } from "../src/dominio/meta.ts";
 import { Partida } from "../src/dominio/partida.ts";
 
 describe("zonas y jefes", () => {
-  it("hay al menos 10 zonas, cada una con nombre, fondo y guardián propios", () => {
-    expect(PISOS_TOTALES).toBeGreaterThanOrEqual(10);
+  it("hay 24 zonas, cada una con nombre, guardián y atmósfera (fondo + partículas + paleta) propios", () => {
+    expect(PISOS_TOTALES).toBe(24);
     expect(new Set(BIOMAS.map((b) => b.nombre)).size).toBe(BIOMAS.length);
     expect(new Set(BIOMAS.map((b) => b.jefe.nombre)).size).toBe(BIOMAS.length);
-    expect(new Set(BIOMAS.map((b) => b.fondo)).size).toBe(BIOMAS.length);
+    expect(new Set(BIOMAS.map((b) => `${b.fondo}|${b.particula}|${b.acento}`)).size).toBe(BIOMAS.length);
+    expect(new Set(BIOMAS.map((b) => b.fondo)).size).toBe(14);
+    // El jefe final sigue siendo El Que Recuerda, ahora en el piso 24.
+    expect(BIOMAS[23].jefe.id).toBe("recuerda");
   });
 
   it("los jefes configurables tienen forma y ataques; los sprites de cada zona existen", () => {
@@ -44,7 +47,7 @@ describe("zonas y jefes", () => {
     const azar = new AzarSemilla(3);
     for (let piso = 1; piso <= 10; piso++) {
       const botin = botinEnemigo(azar, piso, "jefe");
-      expect(botin.some((p) => p.tipo === "objeto" && RUNAS.some((r) => r.objeto === p.objeto))).toBe(true);
+      expect(botin.some((p) => p.tipo === "objeto" && runaDeObjeto(p.objeto) !== undefined)).toBe(true);
       expect(botin.some((p) => p.tipo === "equipo" && p.equipo.conjunto === conjuntoDelPiso(piso).id)).toBe(true);
     }
   });
@@ -54,12 +57,11 @@ describe("runas", () => {
   it("se engarzan, no se repiten y cambian los stats", () => {
     const p = new Partida(Meta.nueva(), 1);
     const def = p.stats().defensa;
-    p.mochila.agregar(303, 1); // Runa de Acero
-    p.mochila.agregar(303, 1);
-    const pos = [...p.mochila.posiciones()].filter((q) => p.mochila.en(q)?.objeto === 303);
-    expect(p.engarzarRuna(pos[0], 0).ok).toBe(true);
+    p.mochila.agregar(303, 2); // dos Runas de Acero (se apilan)
+    const pos = () => [...p.mochila.posiciones()].find((q) => p.mochila.en(q)?.objeto === 303)!;
+    expect(p.engarzarRuna(pos(), 0).ok).toBe(true);
     expect(p.stats().defensa).toBeGreaterThan(def);
-    const r = p.engarzarRuna(pos[1], 1);
+    const r = p.engarzarRuna(pos(), 1);
     expect(r.ok ? null : r.error).toBe("repetida");
     expect(p.quitarRuna(0).ok).toBe(true);
     expect(p.stats().defensa).toBe(def);

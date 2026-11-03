@@ -390,6 +390,60 @@ export function fondoBioma(b: Bioma, capa: 0 | 1): HTMLCanvasElement {
         g.fillRect(x + ancho / 2 - 1, cy, 2, 30 + hash(i, 8) * 60);
         break;
       }
+      case "cascadas": {
+        // cortinas de agua cayendo entre peñascos
+        g.fillRect(x, 0, ancho * 0.25, H);
+        g.globalAlpha *= 0.6;
+        for (let k = 0; k < 4; k++) g.fillRect(x + ancho * 0.3 + k * 4, 0, 2, H);
+        g.globalAlpha = capa === 0 ? 0.55 : 0.35;
+        g.beginPath();
+        g.ellipse(x + ancho * 0.4, H - 30, ancho * 0.6, 12, 0, 0, Math.PI * 2);
+        g.fill();
+        break;
+      }
+      case "colmena": {
+        // celdas hexagonales de una colmena gigante
+        const r = 10 + hash(i, 9) * 8;
+        for (let k = 0; k < 5; k++) {
+          const cx = x + (k % 2) * r * 1.5;
+          const cy = 30 + k * r * 1.8 + hash(i, k) * 20;
+          g.beginPath();
+          for (let a = 0; a < 6; a++) {
+            const ang = (a / 6) * Math.PI * 2;
+            const px = cx + Math.cos(ang) * r;
+            const py = cy + Math.sin(ang) * r;
+            if (a === 0) g.moveTo(px, py);
+            else g.lineTo(px, py);
+          }
+          g.closePath();
+          g.lineWidth = 3;
+          g.strokeStyle = color;
+          g.stroke();
+        }
+        break;
+      }
+      case "obsidiana": {
+        // columnas basálticas y agujas de vidrio volcánico
+        const alto = 80 + hash(i, 6) * 140;
+        g.fillRect(x, H - alto, ancho * 0.5, alto);
+        g.beginPath();
+        g.moveTo(x + ancho * 0.6, H);
+        g.lineTo(x + ancho * 0.8, H - alto * 1.2);
+        g.lineTo(x + ancho, H);
+        g.fill();
+        break;
+      }
+      case "raicesGigantes": {
+        // raíces enormes que bajan desde el techo
+        g.beginPath();
+        g.moveTo(x, 0);
+        g.quadraticCurveTo(x + ancho, H * 0.4, x + ancho * 0.3, H);
+        g.lineWidth = 6 + hash(i, 4) * 8;
+        g.strokeStyle = color;
+        g.stroke();
+        g.fillRect(x - 6, 0, ancho * 0.8, 10);
+        break;
+      }
     }
   }
   g.globalAlpha = 1;

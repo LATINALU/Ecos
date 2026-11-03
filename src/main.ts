@@ -389,6 +389,12 @@ void sprites.cargar().then(() => {
 
   descender(Number(q.get("piso") ?? 1));
   if (q.has("cargada") && partida !== null) partida.cargaDefinitiva = 100;
+  // &tiposala=arena|boveda|tesoro → primera sala de ese tipo del piso.
+  const tipoSala = q.get("tiposala");
+  if (tipoSala !== null && juego !== null) {
+    const s = juego.mapa.salas.find((x) => x.tipo === tipoSala);
+    if (s !== undefined) juego.depurarIr(Number(q.get("piso") ?? 1), s.id);
+  }
   if (q.has("sala")) juego?.depurarIr(Number(q.get("piso") ?? 1), Number(q.get("sala") ?? 0));
   if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
   if (q.has("extraccion") && juego !== null) {

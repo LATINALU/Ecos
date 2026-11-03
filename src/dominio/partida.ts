@@ -22,7 +22,7 @@ import { CORAZONES_INICIALES, CORAZONES_MAX, SUBARMAS, type IdSubarma } from "..
 import { TALENTOS, talento, type IdTalento } from "../contenido/talentos.ts";
 import { MAX_MISIONES_ACTIVAS, mision } from "../contenido/misiones.ts";
 import { CONJUNTOS, type BonoConjunto, type IdConjunto } from "../contenido/conjuntos.ts";
-import { RASGOS_EQUIPO, RUNAS, runaDeObjeto, type IdRasgoEquipo, type IdRuna } from "../contenido/objetos.ts";
+import { MULT_RUNA, RASGOS_EQUIPO, objetoRuna, runaDeObjeto, type IdRasgoEquipo, type IdRuna } from "../contenido/objetos.ts";
 import { potenciaElemental, type Elemento } from "../contenido/elementos.ts";
 import type { ModificadoresBotin, Premio } from "./botin.ts";
 import {
@@ -31,7 +31,7 @@ import {
 import { capaEquipo, equipoInicial, normalizarEquipo, valorDesguace, type ObjetoEquipo } from "./equipo.ts";
 import type { Meta } from "./meta.ts";
 import { BASE_PORTADOR, STATS, bloque, capaNivel, escalarCapa, type Bloque, type Stat } from "./stats.ts";
-import { RANURAS, ranurasDePieza, type EfectoUnico, type Ranura } from "./tipos.ts";
+import { RANURAS, ranurasDePieza, type EfectoUnico, type Ranura, type Reliquia } from "./tipos.ts";
 
 /** Ranura del mazo de almas: 0 Forma, 1-3 Habilidades, 4 Definitiva. */
 export type RanuraCarta = RanuraAlma;
@@ -136,6 +136,7 @@ export interface DatosPartida {
   readonly corazones?: number;
   readonly subarma?: IdSubarma | null;
   readonly runas?: readonly [IdRuna | null, IdRuna | null];
+  readonly nivelesRuna?: readonly [number, number];
   /** Personaje persistente (pueblo): piso más hondo desde el que se puede empezar y misiones. */
   readonly pisoDesbloqueado?: number;
   readonly seguro?: readonly (Pila | null)[];
@@ -180,6 +181,8 @@ export class Partida {
   readonly misiones = new RegistroMisiones(mision, MAX_MISIONES_ACTIVAS);
   /** Dos ranuras de runa (pasivas equipables). */
   runas: [IdRuna | null, IdRuna | null] = [null, null];
+  /** Rareza de cada runa engarzada (0 Común … 3 Legendaria). */
+  nivelesRuna: [number, number] = [0, 0];
   segundaVidaUsada = false;
   readonly puntos = new PuntosHabilidad(HABILIDADES_PORTADOR);
   readonly talentos = new Set<IdTalento>();
@@ -233,6 +236,13 @@ export class Partida {
     const sumar = (k: ClaveEfecto, v: number | undefined): void => {
       if (v !== undefined && v !== 0) total[k] = (total[k] ?? 0) + v;
     };
+    // Runas nuevas (efectos de golpe y de combate, escalados por su rareza).
+    sumar("golpeRayo", 0.1 * this.potenciaRuna("tormenta"));
+    sumar("golpeVeneno", 0.14 * this.potenciaRuna("ponzona"));
+    sumar("hpPct", 0.07 * this.potenciaRuna("fortaleza"));
+    sumar("velocidad", 0.07 * this.potenciaRuna("presteza"));
+    sumar("enfriamiento", 0.07 * this.potenciaRuna("sabio"));
+    sumar("critDanio", 0.22 * this.potenciaRuna("verdugo"));
     for (const r of RANURAS) {
       const o = this.equipo[r];
       if (o === null) continue;
@@ -275,11 +285,16 @@ export class Partida {
     return { ranura: r, carta, def, escala, potencia, costo, cd, cantidad: (def.cantidad ?? 1) + (def.forma === "aura" || def.forma === "embestida" || def.forma === "salto" || def.forma === "onda" || def.forma === "nova" ? 0 : cantidadExtra(carta.nivel)) };
   }
 
+  /** Al llegar a un piso nuevo: la Lágrima del Pozo deja la Definitiva al 40 %. */
+  alEmpezarPiso(): void {
+    if (this.tieneReliquia("lagrimaPozo") && this.almas[4] !== null) this.cargaDefinitiva = Math.max(this.cargaDefinitiva, 40);
+  }
+
   /** Suma carga a la Definitiva (golpes, daño recibido). Devuelve true si se llenó en este momento. */
   ganarCarga(n: number): boolean {
     if (this.almas[4] === null) return false;
     const antes = this.cargaDefinitiva;
-    this.cargaDefinitiva = Math.min(CARGA_DEFINITIVA, this.cargaDefinitiva + n * (1 + this.efectoAlma("carga")));
+    this.cargaDefinitiva = Math.min(CARGA_DEFINITIVA, this.cargaDefinitiva + n * (1 + this.efectoAlma("carga") + (this.tieneReliquia("lagrimaPozo") ? 0.2 : 0)));
     return antes < CARGA_DEFINITIVA && this.cargaDefinitiva >= CARGA_DEFINITIVA;
   }
 
@@ -359,8 +374,9 @@ export class Partida {
     m.tecnicaCosto += e.tecnicaCosto ?? 0;
     m.eterGolpe += Math.round(e.eterGolpe ?? 0);
     if (this.tieneTalento("sedSangre")) m.robo += 0.05;
-    if (this.tieneRuna("vampiro")) m.robo += 0.04;
-    if (this.tieneRuna("eco")) m.tecnicaCosto += 0.15;
+    m.robo += 0.04 * this.potenciaRuna("vampiro");
+    m.tecnicaCosto += 0.15 * this.potenciaRuna("eco");
+    if (this.tieneReliquia("botasCefiro")) m.agilidad += 0.12;
     for (const b of this.bonosConjunto()) {
       m.velocidad += b.velocidad ?? 0;
       m.robo += b.robo ?? 0;
@@ -389,6 +405,17 @@ export class Partida {
     return this.runas[0] === r || this.runas[1] === r;
   }
 
+  /** Multiplicador del efecto de una runa engarzada según su rareza (0 si no está). */
+  potenciaRuna(r: IdRuna): number {
+    if (this.runas[0] === r) return MULT_RUNA[this.nivelesRuna[0]] ?? 1;
+    if (this.runas[1] === r) return MULT_RUNA[this.nivelesRuna[1]] ?? 1;
+    return 0;
+  }
+
+  tieneReliquia(r: Reliquia): boolean {
+    return this.meta.tieneReliquia(r);
+  }
+
   /** Engarza una runa de la mochila en una ranura; la que estaba vuelve a la mochila. */
   engarzarRuna(pos: Posicion, ranura: 0 | 1): Resultado<IdRuna, "casilla-vacia" | "no-es-runa" | "repetida"> {
     const pila = this.mochila.en(pos);
@@ -396,10 +423,12 @@ export class Partida {
     const def = runaDeObjeto(pila.objeto);
     if (def === undefined) return fallo("no-es-runa");
     if (this.runas[1 - ranura] === def.id) return fallo("repetida");
-    this.mochila.sacarDe(pos);
+    this.mochila.sacarDe(pos, 1);
     const anterior = this.runas[ranura];
+    const nivelAnterior = this.nivelesRuna[ranura];
     this.runas[ranura] = def.id;
-    if (anterior !== null) this.mochila.ponerEn(pos, { objeto: RUNAS.find((r) => r.id === anterior)!.objeto, cantidad: 1 });
+    this.nivelesRuna[ranura] = def.nivel;
+    if (anterior !== null) this.mochila.agregar(objetoRuna(anterior, nivelAnterior), 1);
     this.ajustarRecursos();
     return exito(def.id);
   }
@@ -407,8 +436,9 @@ export class Partida {
   quitarRuna(ranura: 0 | 1): Resultado<void, "vacia" | "sin-espacio"> {
     const r = this.runas[ranura];
     if (r === null) return fallo("vacia");
-    if (!this.mochila.agregar(RUNAS.find((x) => x.id === r)!.objeto, 1).ok) return fallo("sin-espacio");
+    if (!this.mochila.agregar(objetoRuna(r, this.nivelesRuna[ranura]), 1).ok) return fallo("sin-espacio");
     this.runas[ranura] = null;
+    this.nivelesRuna[ranura] = 0;
     this.ajustarRecursos();
     return exito(undefined);
   }
@@ -496,7 +526,7 @@ export class Partida {
         mp: this.sumaRasgo("eterMax"),
         suerte: this.sumaRasgo("suerte"),
       },
-      Runas: { regen: this.tieneRuna("calma") ? 8 : 0, suerte: this.tieneRuna("coleccionista") ? 30 : 0 },
+      Runas: { regen: Math.round(8 * this.potenciaRuna("calma")), suerte: Math.round(30 * this.potenciaRuna("coleccionista")) },
       Conjuntos: { critico: this.bonoConjuntoActivo("critico"), hp: this.bonoConjuntoActivo("hp") },
       Equipo: capaEquipo(RANURAS.map((r) => this.equipo[r])),
     };
@@ -508,15 +538,15 @@ export class Partida {
     if (this.forma?.rasgo === "colosal") b.hp = Math.round(b.hp * 1.15);
     const hpPct = this.efectoAlma("hpPct");
     if (hpPct > 0) b.hp = Math.round(b.hp * (1 + hpPct));
-    const defensaPct = (this.tieneRuna("acero") ? 0.2 : 0) + this.bonoConjuntoActivo("defensaPct") + this.efectoAlma("defensaPct");
+    const defensaPct = 0.2 * this.potenciaRuna("acero") + this.bonoConjuntoActivo("defensaPct") + this.efectoAlma("defensaPct");
     if (defensaPct > 0) b.defensa = Math.round(b.defensa * (1 + defensaPct));
     return b;
   }
 
   /** Multiplicador de daño infligido y recibido por efectos únicos. */
   multiplicadorDanio(): number {
-    const furia = this.tieneRuna("furia") && this.hp < this.stats().hp * 0.4 ? 1.3 : 1;
-    return (this.tiene("vidrio") ? 1.6 : 1) * furia * (1 + this.bonoConjuntoActivo("danio") + this.efectoAlma("danio"));
+    const furia = this.tieneRuna("furia") && this.hp < this.stats().hp * 0.4 ? 1 + 0.3 * this.potenciaRuna("furia") : 1;
+    return (this.tiene("vidrio") ? 1.6 : 1) * furia * (1 + this.bonoConjuntoActivo("danio") + this.efectoAlma("danio") + 0.05 * this.potenciaRuna("brasa"));
   }
 
   multiplicadorRecibido(): number {
@@ -537,7 +567,7 @@ export class Partida {
     const suerte = this.stats().suerte;
     return {
       suerte: (corona ? 1.5 : 1) * (1 + suerte / 100),
-      codicia: (1 + 0.12 * this.meta.nivelMejora("codicia")) * (corona ? 1.6 : 1) * (this.tieneRuna("avaro") ? 1.35 : 1)
+      codicia: (1 + 0.12 * this.meta.nivelMejora("codicia")) * (corona ? 1.6 : 1) * (1 + 0.35 * this.potenciaRuna("avaro")) * (this.tieneReliquia("manoAvaro") ? 1.25 : 1)
         * (1 + this.sumaRasgo("codicia")) * (1 + suerte / 400),
       fortuna: suerte,
     };
@@ -603,6 +633,7 @@ export class Partida {
   bajarPiso(): void {
     this.piso++;
     this.segundaVidaUsada = false;
+    this.alEmpezarPiso();
   }
 
   // ---------------- Botín ----------------
@@ -778,7 +809,7 @@ export class Partida {
 
   usarPocion(): boolean {
     if (this.hp >= this.stats().hp || !this.mochila.quitar(OBJ_POCION, 1).ok) return false;
-    this.curar(Math.round(this.stats().hp * 0.45 * (1 + this.sumaRasgo("curaPocion"))));
+    this.curar(Math.round(this.stats().hp * 0.45 * (1 + this.sumaRasgo("curaPocion") + (this.tieneReliquia("corazonEco") ? 0.25 : 0))));
     return true;
   }
 
@@ -823,6 +854,9 @@ export class Partida {
     this.piso = Math.max(1, Math.min(piso, this.pisoDesbloqueado));
     this.segundaVidaUsada = false;
     this.cargaDefinitiva = 0;
+    this.alEmpezarPiso();
+    // Corazón del Eco: una poción extra al bajar.
+    if (this.tieneReliquia("corazonEco")) this.mochila.agregar(OBJ_POCION, 1);
     this.curarTodo();
   }
 
@@ -936,7 +970,7 @@ export class Partida {
       forma: this.forma, resonancias: [this.almas[1], this.almas[2]], almas: [...this.almas], hp: this.hp, mp: this.mp,
       enemigos: this.enemigos, jefes: this.jefes, ecosVencidos: this.ecosVencidos,
       segundaVidaUsada: this.segundaVidaUsada, contadorCorazon: this.contadorCorazon,
-      puntos, talentos: [...this.talentos], corazones: this.corazones, subarma: this.subarma, runas: [this.runas[0], this.runas[1]],
+      puntos, talentos: [...this.talentos], corazones: this.corazones, subarma: this.subarma, runas: [this.runas[0], this.runas[1]], nivelesRuna: [this.nivelesRuna[0], this.nivelesRuna[1]],
       pisoDesbloqueado: this.pisoDesbloqueado, misiones: this.misiones.exportar(), seguro: volcar(this.seguro),
     };
   }
@@ -973,6 +1007,7 @@ export class Partida {
     p.corazones = d.corazones ?? CORAZONES_INICIALES;
     p.subarma = d.subarma ?? null;
     p.runas = d.runas !== undefined ? [d.runas[0], d.runas[1]] : [null, null];
+    p.nivelesRuna = d.nivelesRuna !== undefined ? [d.nivelesRuna[0], d.nivelesRuna[1]] : [0, 0];
     p.pisoDesbloqueado = Math.max(1, d.pisoDesbloqueado ?? 1);
     // Misiones: se descartan las de versiones viejas del tablón (ids que ya no existen).
     if (d.misiones !== undefined) {

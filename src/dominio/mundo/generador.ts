@@ -11,7 +11,7 @@
 import { elegirPorPeso, elegirUno, entero, type Azar } from "minialu";
 import { DELTA, OPUESTA, RELIQUIA_DE_BARRERA, type Barrera, type Dir, type Reliquia } from "../tipos.ts";
 
-export type TipoSala = "inicio" | "normal" | "altar" | "tesoro" | "reliquia" | "eco" | "mercader" | "jefe";
+export type TipoSala = "inicio" | "normal" | "altar" | "tesoro" | "reliquia" | "eco" | "mercader" | "jefe" | "arena" | "boveda";
 
 export interface SalaMapa {
   readonly id: number;
@@ -197,6 +197,17 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
   if (tesoro !== undefined) tesoro.tipo = "tesoro";
   const mercader = tomar(salas.filter((s) => dist[s.id] >= 2));
   if (mercader !== undefined) mercader.tipo = "mercader";
+  // Arenas (oleadas con la sala sellada): una desde el piso 2 y una más cada 8 pisos.
+  const arenas = op.piso >= 2 ? 1 + Math.floor(op.piso / 8) : 0;
+  for (let k = 0; k < arenas; k++) {
+    const a = tomar(salas.filter((s) => dist[s.id] >= 2));
+    if (a !== undefined) a.tipo = "arena";
+  }
+  // Bóveda (cofre de alto nivel custodiado por élites): desde el piso 3, en una hoja lejana si se puede.
+  if (op.piso >= 3) {
+    const b = tomar(hojas.filter((s) => dist[s.id] >= 3)) ?? tomar(salas.filter((s) => dist[s.id] >= 3));
+    if (b !== undefined) b.tipo = "boveda";
+  }
 
   // Extracción (estilo Tarkov): 1~2 salas normales lejos del inicio. Una a media distancia y otra al fondo.
   const extracciones: number[] = [];

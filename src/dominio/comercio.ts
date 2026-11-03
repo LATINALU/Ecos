@@ -73,7 +73,8 @@ export function valorVenta(p: Partida, pos: Posicion): number {
   if (pila === null) return 0;
   const eq = equipoDe(pila);
   if (eq !== undefined) return Math.max(5, Math.round(precioEquipo(eq) * 0.3));
-  if (runaDeObjeto(pila.objeto) !== undefined) return 120;
+  const ru = runaDeObjeto(pila.objeto);
+  if (ru !== undefined) return Math.round(120 * (1 + ru.nivel * 1.6));
   const def = apilable(pila.objeto);
   if (def === undefined) return 0;
   return precioDeVenta({ precio: Math.max(def.precio, PRECIO_MATERIAL) * 3, vendible: true, maxPila: 1 }, pila.cantidad);

@@ -3,7 +3,9 @@
 // se aplica de verdad y se cobran las esquirlas.
 
 import { exito, fallo, tirar, type Resultado } from "minialu";
-import { MAT_FRAGMENTO, OBJ_CARTA, apilable } from "../contenido/objetos.ts";
+import {
+  COSTO_FUSION_RUNA, MAT_FRAGMENTO, NOMBRES_RAREZA_RUNA, OBJ_CARTA, RAREZA_RUNA_MAX, apilable, objetoRuna, runaDeObjeto,
+} from "../contenido/objetos.ts";
 import { EXITO_REFINADO, REFINADO_MAX, costoRefinado, type Receta } from "../contenido/recetas.ts";
 import { RAREZA_CARTA_JEFE, cartaAleatoria, nombreCarta } from "./cartas.ts";
 import { generarEquipo, refinar, type ObjetoEquipo } from "./equipo.ts";
@@ -80,4 +82,22 @@ export function refinarEquipado(p: Partida, ranura: Ranura): Resultado<ObjetoEqu
   p.equipo[ranura] = nuevo;
   p.registrarMision("refinar");
   return exito(nuevo);
+}
+
+/**
+ * Fusión de runas en el Yunque: tres runas iguales de la misma rareza se funden en una de la rareza siguiente
+ * (Común → Rara → Épica → Legendaria). Cuesta esquirlas.
+ */
+export function fusionarRunas(p: Partida, objeto: number): Resultado<string, "no-es-runa" | "faltan-runas" | "al-maximo" | "sin-fondos"> {
+  const ru = runaDeObjeto(objeto);
+  if (ru === undefined) return fallo("no-es-runa");
+  if (ru.nivel >= RAREZA_RUNA_MAX) return fallo("al-maximo");
+  if (p.mochila.contar(objeto) < 3) return fallo("faltan-runas");
+  const costo = COSTO_FUSION_RUNA[ru.nivel];
+  if (p.esquirlas < costo) return fallo("sin-fondos");
+  p.billetera.debitar("esquirlas", costo);
+  p.mochila.quitar(objeto, 3);
+  const nueva = objetoRuna(ru.id, ru.nivel + 1);
+  p.mochila.agregar(nueva, 1);
+  return exito(`${ru.nombre} · ${NOMBRES_RAREZA_RUNA[ru.nivel + 1]}`);
 }

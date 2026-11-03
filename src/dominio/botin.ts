@@ -8,7 +8,8 @@ import { entero, probabilidadReal, tirarDrop, type Azar, type EntradaDrop } from
 import { ORDEN_SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
 import { conjuntoDelPiso } from "../contenido/conjuntos.ts";
 import { ACCESORIOS, ARMADURAS, type TipoPieza } from "./tipos.ts";
-import { MAT_FRAGMENTO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
+import { objetoRuna } from "../contenido/objetos.ts";
+import { MAT_FRAGMENTO, OBJ_DADO_BASE, PRECIO_DADO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
 import { RAREZA_CARTA_JEFE, RAREZA_CARTA_PISO, cartaAleatoria, type Carta } from "./cartas.ts";
 import { crearUnico, generarEquipo, type ObjetoEquipo, type Rareza } from "./equipo.ts";
 
@@ -75,17 +76,32 @@ function resolverFicha(azar: Azar, piso: number, ficha: number, minima: Rareza =
     case FICHA_ARMADURA:
       return { tipo: "equipo", equipo: generarEquipo(azar, piso, minima, CLASES_ARMADURA, undefined, fortuna) };
     case FICHA_CARTA:
+      // En el Pozo Profundo las cartas salen mejores (cada piso más hondo cuenta como 12 de suerte).
+      fortuna += Math.max(0, piso - 10) * 12;
       // Élites y cofres: tabla de cartas de un piso más hondo; guardianes, la de jefes.
       return { tipo: "carta", carta: cartaAleatoria(azar, minima >= 2 ? RAREZA_CARTA_JEFE[indicePiso(piso)] : RAREZA_CARTA_PISO[indicePiso(piso + (minima > 0 ? 2 : 0))], fortuna) };
     case FICHA_UNICO:
       return { tipo: "equipo", equipo: crearUnico(azar, piso) };
     case FICHA_RUNA:
-      return { tipo: "objeto", objeto: RUNAS[entero(azar, RUNAS.length)].objeto, cantidad: 1 };
+      return { tipo: "objeto", objeto: objetoRuna(RUNAS[entero(azar, RUNAS.length)].id, tirarRarezaRuna(azar, piso, minima)), cantidad: 1 };
     case FICHA_CONJUNTO:
-      return { tipo: "equipo", equipo: generarEquipo(azar, piso, 3, ARMADURAS, conjuntoDelPiso(piso).id) };
+      return { tipo: "equipo", equipo: generarEquipo(azar, piso, Math.max(3, minima) as Rareza, ARMADURAS, conjuntoDelPiso(piso).id) };
     default:
       return { tipo: "objeto", objeto: ficha, cantidad: 1 };
   }
+}
+
+/** Rareza de una runa que cae: mejor cuanto más hondo y cuanto mejor la fuente (élite, cofre, guardián). */
+export function tirarRarezaRuna(azar: Azar, piso: number, minima = 0): number {
+  const b = piso * 1.6 + minima * 8;
+  const pesos = [Math.max(8, 72 - b), 22 + b * 0.5, 6 + b * 0.32, 1 + b * 0.12];
+  const total = pesos.reduce((a, x) => a + x, 0);
+  let r = azar.siguiente() * total;
+  for (let k = 0; k < pesos.length; k++) {
+    r -= pesos[k];
+    if (r <= 0) return k;
+  }
+  return 0;
 }
 
 function indicePiso(piso: number): number {
@@ -138,14 +154,28 @@ export function botinEnemigo(azar: Azar, piso: number, categoria: Categoria, mod
   return premios;
 }
 
-export function botinCofre(azar: Azar, piso: number, mod: ModificadoresBotin = SIN_MODIFICADORES): Premio[] {
-  const [ficha] = tirarDrop(azar, TABLA_COFRE, "ponderado");
-  return [
-    esquirlas(azar, piso, "elite", mod),
-    resolverFicha(azar, piso, ficha, MINIMA.cofre, mod.fortuna ?? 0),
-    { tipo: "objeto", objeto: entero(azar, 2) === 0 ? OBJ_POCION : OBJ_ETER, cantidad: 1 },
-    { tipo: "objeto", objeto: materialDelPiso(piso), cantidad: 2 },
-  ];
+/**
+ * Cofres por rareza: madera (1 premio, Poco común+), plata (2, Raro+), oro (3, Épico+, una carta de jefe) y
+ * mítico (4, Legendario+, 40 % de un Mítico con nombre y un Dado del Destino).
+ */
+export function botinCofre(azar: Azar, piso: number, mod: ModificadoresBotin = SIN_MODIFICADORES, nivel = 0): Premio[] {
+  const n = Math.max(0, Math.min(3, nivel));
+  const minima = ([1, 2, 3, 4] as const)[n];
+  const f = mod.fortuna ?? 0;
+  const premios: Premio[] = [esquirlas(azar, piso, "elite", { ...mod, codicia: mod.codicia * (1 + n * 0.8) })];
+  for (let k = 0; k <= n; k++) {
+    const [ficha] = tirarDrop(azar, TABLA_COFRE, "ponderado");
+    premios.push(resolverFicha(azar, piso, ficha, minima, f));
+  }
+  if (n >= 2) premios.push(resolverFicha(azar, piso, FICHA_CARTA, MINIMA.jefe, f));
+  if (n >= 3) {
+    if (azar.siguiente() < 0.4) premios.push(resolverFicha(azar, piso, FICHA_UNICO));
+    premios.push({ tipo: "objeto", objeto: OBJ_DADO_BASE + Math.min(PRECIO_DADO.length - 1, Math.floor(piso / 4)), cantidad: 1 });
+  }
+  premios.push({ tipo: "objeto", objeto: entero(azar, 2) === 0 ? OBJ_POCION : OBJ_ETER, cantidad: 1 + Math.floor(n / 2) });
+  premios.push({ tipo: "objeto", objeto: materialDelPiso(piso), cantidad: 2 + n * 2 });
+  if (n >= 1) premios.push({ tipo: "objeto", objeto: MAT_FRAGMENTO, cantidad: n });
+  return premios;
 }
 
 /** Vela rota (estilo Castlevania): casi siempre corazones; a veces una subarma o esquirlas. */

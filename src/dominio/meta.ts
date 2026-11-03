@@ -3,7 +3,7 @@
 
 import { Billetera, exito, fallo, type ErrorPago, type Resultado } from "minialu";
 import { registrarEco, type Eco } from "./eco.ts";
-import { RELIQUIAS, type Reliquia } from "./tipos.ts";
+import { RELIQUIAS, type Reliquia, PISOS_RELIQUIA } from "./tipos.ts";
 
 export type IdMejora = "vigor" | "frascos" | "afinidad" | "codicia" | "memoria";
 
@@ -94,7 +94,7 @@ export class Meta {
   /** La reliquia que el Pozo ofrece en un piso: la primera que falta, una por piso. */
   reliquiaParaPiso(piso: number): Reliquia | undefined {
     const faltan = RELIQUIAS.filter((r) => !this.reliquias.has(r));
-    return piso === 1 || piso === 2 || piso === 3 ? faltan[0] : undefined;
+    return PISOS_RELIQUIA.includes(piso) ? faltan[0] : undefined;
   }
 
   nivelMejora(id: IdMejora): number {

@@ -41,6 +41,36 @@ Requiere la carpeta hermana `Desktop\minialu` (alias `minialu` en `vite.config.t
 | Santuario | Mejoras permanentes pagadas con esencia | `Billetera` |
 | Ecos | Al morir: Eco con tu legado; uno por piso, máximo 3 | — |
 
+## Reliquias y runas
+
+- **8 reliquias** permanentes que aparecen a lo largo de la partida (pisos 1, 2, 3, 5, 8, 12, 16 y 20): Embestida del
+  Errante, Alas de Ceniza, Garra Ígnea y las nuevas **Botas del Céfiro** (+12 % de movimiento, paso atrás más rápido),
+  **Corazón del Eco** (pociones +25 % y una extra por descenso), **Ojo del Abismo** (mapa del piso revelado),
+  **Mano del Avaro** (+25 % de esquirlas y sin cofres de madera) y **Lágrima del Pozo** (Definitiva al 40 % en cada
+  piso y +20 % de carga).
+- **16 runas** (6 nuevas: Tormenta, Ponzoñosa, Fortaleza, Presteza, Sabio y Verdugo) en **4 rarezas** — Común, Rara,
+  Épica y Legendaria — que multiplican el efecto (×1 · ×1,5 · ×2,2 · ×3,2). Caen más raras cuanto más hondo; tres
+  iguales se funden en el Yunque en una de la rareza siguiente (150 / 600 / 2.400 esquirlas).
+
+## El Pozo Profundo: 24 pisos
+
+- **24 zonas**: las 10 originales y 14 nuevas (Pantano de los Ahogados, Cascadas del Olvido, Colmena Carmesí,
+  Desierto Sepultado, Fragua de Obsidiana, Bosque Otoñal Hueco, Templo Sumergido, Mina de Cristal Negro, Osario de
+  Gigantes, Jardín de Esporas Gris, Torre del Reloj Caído, Tormenta Eterna, Abismo de Cristal Vivo y Umbral del
+  Recuerdo), cada una con paleta, fondo, partículas, nombres de criaturas y guardián propios. El **Corazón del Pozo**
+  pasa a ser el piso 24. Fondos nuevos: cascadas, colmena, obsidiana y raíces gigantes; partículas: lluvia,
+  luciérnagas, hojas y arena.
+- **Enemigos nuevos** que reemplazan a parte de los originales al bajar: **Embestidor** (avisa y carga; se aturde si
+  choca contra una pared), **Kamikaze** (corre, prende la mecha y explota), **Lanzador** (tiros en parábola que pasan
+  por encima de las coberturas) y **Espectro** (atraviesa paredes y se teletransporta a tu espalda).
+- **Élites con afijos** (1 a 3 según la profundidad): Veloz, Blindado, Vampiro, Regenerador, Explosivo y Furioso.
+- **Salas**: de 9 por piso al principio a 20 en lo hondo, mapas más grandes desde el piso 11, más monstruos por sala.
+  **Arenas** (la sala se sella y llegan 2 a 5 oleadas; premio: cofre) y **Bóvedas** (cofre de oro o mítico custodiado
+  por élites).
+- **Cofres por rareza**: madera, plata, oro y mítico, con más premios y rareza mínima creciente (el mítico puede traer
+  un Mítico con nombre y un Dado del Destino). Cofres extra al azar en las salas.
+- Desarrollo: `?auto=espada&piso=14&tiposala=arena` (o `boveda`, `tesoro`).
+
 ## Rarezas, drops y fusión
 
 | Rareza | Color | Qué trae |

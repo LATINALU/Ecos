@@ -2,8 +2,11 @@
 // Implementa el Contexto que usan las entidades para interactuar con el mundo.
 
 import { hd } from "../motor/texto-hd.ts";
-import { AzarSistema, type Azar } from "minialu";
-import { PISOS_TOTALES, SALAS_POR_PISO, bioma, type Bioma } from "../contenido/biomas.ts";
+import { AzarSistema, entero, type Azar } from "minialu";
+import {
+  ORIGEN_CONDUCTA, PISOS_TOTALES, SALAS_POR_PISO, bioma, cantidadAfijosElite, probElite,
+  type AfijoElite, type Bioma, type ConductaBase, type ConductaEnemigo, type ConductaNueva,
+} from "../contenido/biomas.ts";
 import { botinCofre, botinEnemigo, botinVela, type Premio } from "../dominio/botin.ts";
 import { crearEco, premiosEco, type Eco } from "../dominio/eco.ts";
 import type { Meta } from "../dominio/meta.ts";
@@ -29,7 +32,7 @@ import { Enemigo } from "./entidades/enemigo.ts";
 import { EcoRival, ElQueRecuerda, Guardian, MadreMicelio } from "./entidades/jefes.ts";
 import { JefeConfigurable } from "./entidades/jefe-configurable.ts";
 import { CARGA_COMPLETA, Jugador } from "./entidades/jugador.ts";
-import { BotinSuelo, Interactuable, colorPremio, premioDestacado } from "./entidades/objetos.ts";
+import { BotinSuelo, COLOR_COFRE, Interactuable, NOMBRE_COFRE, colorPremio, premioDestacado } from "./entidades/objetos.ts";
 import { Proyectil } from "./entidades/proyectil.ts";
 import { MedidorCombo, type AccionEstilo } from "./medidor-combo.ts";
 import { Iluminacion, dibujarBarreras, dibujarVineta, fondoBioma, prerenderSala, primerPlano, type Luz } from "./render.ts";
@@ -66,6 +69,10 @@ interface EstadoSala {
   faroUsado: boolean;
   velasRotas: Set<number>;
   botin: { premio: Premio; x: number; y: number }[];
+  /** Claves de los cofres abiertos de la sala (los de plantilla y los extra). */
+  cofres?: number[];
+  /** Arena: -1 = completada. */
+  arena?: number;
 }
 
 type EstadoSalaPlano = Omit<EstadoSala, "muertos" | "velasRotas"> & { muertos: number[]; velasRotas?: number[] };
@@ -350,7 +357,7 @@ export class Juego implements Contexto {
     if (a.eter !== undefined) this.partida.recuperarEter(a.eter + mods.eterGolpe + this.combo.bonoEter);
     if (g.critico && this.partida.tiene("ojo")) this.partida.recuperarEter(4);
     // Críticos que aturden (Runa de Escarcha, conjunto Escarcha Eterna) y golpes que ralentizan (conjunto).
-    const aturdeCrit = Math.max(this.partida.tieneRuna("escarcha") ? 0.8 : 0, this.partida.bonoConjuntoActivo("aturdeCrit"));
+    const aturdeCrit = Math.max(Math.min(2, 0.8 * this.partida.potenciaRuna("escarcha")), this.partida.bonoConjuntoActivo("aturdeCrit"));
     if (g.critico && aturdeCrit > 0 && !c.pesado) c.aturdido = Math.max(c.aturdido, aturdeCrit);
     if (this.partida.bonoConjuntoActivo("ralentiza") > 0 && a.tipo === "golpe") c.lento = Math.max(c.lento, 1.5);
     // Lluvia de Acero: cada crítico lanza una daga gratis.
@@ -535,8 +542,9 @@ export class Juego implements Contexto {
     this.mapa = generarPiso(this.partida.azar, {
       piso,
       cantidadSalas: SALAS_POR_PISO[piso - 1] ?? 12,
-      ancho: 7,
-      alto: 5,
+      // El Pozo Profundo (piso 11+) tiene mapas más grandes.
+      ancho: piso > 10 ? 9 : 7,
+      alto: piso > 10 ? 6 : 5,
       reliquiasPoseidas: this.meta.listaReliquias(),
       reliquiaAColocar: this.meta.reliquiaParaPiso(piso),
       hayEco: this.meta.ecoDelPiso(piso) !== undefined,
@@ -557,7 +565,7 @@ export class Juego implements Contexto {
   estadoDe(id: number): EstadoSala {
     let e = this.estados.get(id);
     if (e === undefined) {
-      e = { visitada: false, muertos: new Set(), cofreAbierto: false, jefeVencido: false, reliquiaTomada: false, faroUsado: false, velasRotas: new Set(), botin: [] };
+      e = { visitada: false, muertos: new Set(), cofreAbierto: false, jefeVencido: false, reliquiaTomada: false, faroUsado: false, velasRotas: new Set(), botin: [], cofres: [] };
       this.estados.set(id, e);
     }
     return e;
@@ -603,9 +611,7 @@ export class Juego implements Contexto {
       const y = (sp.ty + 1) * TILE;
       if (ENEMIGOS_SPAWN.has(sp.tipo)) {
         if (estado.muertos.has(i)) return;
-        const elite = this.partida.azar.siguiente() < 0.1 + this.partida.piso * 0.03;
-        const e = new Enemigo(sp.tipo as "caminante", this.partida.piso, this.bioma, x - 7, y, elite);
-        e.x = x - e.w / 2;
+        const e = this.crearEnemigo(sp.tipo as ConductaBase, x, y);
         if (sp.tipo === "volador") e.y = sp.ty * TILE;
         e.idSpawn = i;
         this.criaturas.push(e);
@@ -613,9 +619,7 @@ export class Juego implements Contexto {
       }
       switch (sp.tipo) {
         case "cofre": {
-          const c = new Interactuable("cofre", x, y);
-          c.usado = estado.cofreAbierto;
-          this.interactuables.push(c);
+          this.ponerCofre(x, y, i, sm.tipo === "tesoro" ? Math.max(2, this.tirarNivelCofre()) : this.tirarNivelCofre(), estado);
           break;
         }
         case "altar":
@@ -664,6 +668,7 @@ export class Juego implements Contexto {
 
     this.zonaExtraccion = (this.mapa.extracciones ?? []).includes(id) ? this.ubicarExtraccion() : null;
     this.cargaExtraccion = 0;
+    this.poblarSala(sm, estado, densidad);
 
     this.cadena = ap.arr !== undefined || ap.aba !== undefined
       ? { x: ANCHO_SALA / 2, arriba: ap.arr !== undefined ? -60 : 14 * TILE, abajo: ap.aba !== undefined ? ALTO_SALA + 60 : 14 * TILE }
@@ -679,6 +684,155 @@ export class Juego implements Contexto {
   }
 
   /** Velas rompibles (Castlevania): sobre el piso o las plataformas, deterministas por sala. */
+  // ---------------- Población de las salas: enemigos, élites, cofres, arenas y bóvedas ----------------
+
+  /** Crea un monstruo: al bajar, parte de las conductas originales pasan a las nuevas; las élites traen afijos. */
+  private crearEnemigo(base: ConductaBase, x: number, y: number, forzarElite = false): Enemigo {
+    const piso = this.partida.piso;
+    const azar = this.partida.azar;
+    let conducta: ConductaEnemigo = base;
+    for (const [nueva, o] of Object.entries(ORIGEN_CONDUCTA) as [ConductaNueva, (typeof ORIGEN_CONDUCTA)[ConductaNueva]][]) {
+      if (o.de === base && piso >= o.desde && azar.siguiente() < o.prob + (piso - o.desde) * 0.01) conducta = nueva;
+    }
+    const elite = forzarElite || azar.siguiente() < probElite(piso);
+    const afijos: AfijoElite[] = [];
+    if (elite) {
+      const pool: AfijoElite[] = ["veloz", "blindado", "vampiro", "regenerador", "explosivo", "furioso"];
+      for (let k = 0; k < cantidadAfijosElite(piso) && pool.length > 0; k++) afijos.push(pool.splice(entero(azar, pool.length), 1)[0]);
+    }
+    const e = new Enemigo(conducta, piso, this.bioma, x - 7, y, elite, afijos);
+    e.x = x - e.w / 2;
+    return e;
+  }
+
+  /** Lugares de suelo firme (centro de baldosa, x en píxeles; y = pies) lejos de las puertas. */
+  private posicionesSuelo(): { x: number; y: number }[] {
+    const t = this.sala.tiles;
+    const en = (tx: number, ty: number): number => (tx < 0 || ty < 0 || tx >= COLS || ty >= FILAS ? T_ROCA : t[indice(tx, ty)]);
+    const libre = (tx: number, ty: number): boolean => !esSolido(en(tx, ty)) && en(tx, ty) !== T_PINCHOS;
+    const lugares: { x: number; y: number }[] = [];
+    for (let ty = 3; ty < FILAS - 2; ty++) {
+      for (let tx = 5; tx < COLS - 5; tx++) {
+        const suelo = en(tx, ty + 1);
+        if ((suelo === T_ROCA || suelo === 2) && libre(tx, ty) && libre(tx, ty - 1)) lugares.push({ x: tx * TILE + TILE / 2, y: (ty + 1) * TILE });
+      }
+    }
+    return lugares;
+  }
+
+  /** Rareza del cofre: madera, plata, oro o mítico (mejor cuanto más hondo). */
+  private tirarNivelCofre(): number {
+    const piso = this.partida.piso;
+    const r = this.partida.azar.siguiente();
+    // Mano del Avaro: no hay cofres de madera.
+    const minimo = this.meta.tieneReliquia("manoAvaro") ? 1 : 0;
+    if (r < 0.01 + piso * 0.004) return 3;
+    if (r < 0.09 + piso * 0.016) return 2;
+    if (r < 0.35 + piso * 0.02) return 1;
+    return minimo;
+  }
+
+  private ponerCofre(x: number, y: number, clave: number, nivel: number, estado: EstadoSala): void {
+    const c = new Interactuable("cofre", x, y);
+    c.nivel = Math.max(0, Math.min(3, nivel));
+    c.clave = clave;
+    c.usado = (estado.cofres ?? []).includes(clave) || (clave < 1000 && estado.cofreAbierto && (estado.cofres ?? []).length === 0);
+    this.interactuables.push(c);
+  }
+
+  /** Más enemigos cuanto más hondo, cofres extra, Arenas (oleadas) y Bóvedas (cofre custodiado). */
+  private poblarSala(sm: SalaMapa, estado: EstadoSala, densidad: number): void {
+    if (sm.tipo === "inicio" || sm.tipo === "jefe" || sm.tipo === "mercader" || sm.tipo === "altar") return;
+    // El azar de la sala es determinista (misma sala, mismo contenido al volver).
+    const azar = new AzarSemilla(sm.semilla + this.partida.piso * 7919);
+    const lugares = this.posicionesSuelo();
+    const elegir = (): { x: number; y: number } | undefined => lugares.length === 0 ? undefined : lugares.splice(entero(azar, lugares.length), 1)[0];
+    const bases: readonly ConductaBase[] = ["caminante", "saltador", "volador", "torreta", "escudero"];
+    // Densidad > 1: monstruos extra (no vuelven a aparecer si se mataron: usan claves 500+).
+    if (sm.tipo === "normal" || sm.tipo === "tesoro" || sm.tipo === "reliquia") {
+      const extra = Math.min(5, Math.floor(Math.max(0, densidad - 0.9) * 2.5));
+      for (let k = 0; k < extra; k++) {
+        const clave = 500 + k;
+        const l = elegir();
+        if (l === undefined || estado.muertos.has(clave)) continue;
+        const tipo = bases[entero(azar, bases.length)];
+        const e = this.crearEnemigo(tipo, l.x, l.y);
+        if (tipo === "volador") e.y = l.y - 3 * TILE;
+        e.idSpawn = clave;
+        this.criaturas.push(e);
+      }
+      // Cofre extra (madera o plata casi siempre).
+      if (azar.siguiente() < 0.14 + this.partida.piso * 0.006) {
+        const l = elegir();
+        if (l !== undefined) this.ponerCofre(l.x, l.y, 1000, Math.min(this.tirarNivelCofre(), 1 + (azar.siguiente() < 0.15 ? 1 : 0)), estado);
+      }
+    }
+    if (sm.tipo === "boveda") {
+      // Cofre de oro o mítico en el centro, custodiado por dos élites (tres en lo profundo).
+      const centro = this.ubicarExtraccion();
+      this.ponerCofre(centro.x + centro.w / 2, centro.y + centro.h, 2000, this.partida.piso >= 8 ? 3 : 2, estado);
+      const guardias = this.partida.piso >= 14 ? 3 : 2;
+      for (let k = 0; k < guardias; k++) {
+        const clave = 600 + k;
+        const l = elegir();
+        if (l === undefined || estado.muertos.has(clave)) continue;
+        const e = this.crearEnemigo(k % 2 === 0 ? "escudero" : "caminante", l.x, l.y, true);
+        e.idSpawn = clave;
+        this.criaturas.push(e);
+      }
+      if (!(estado.cofres ?? []).includes(2000)) this.mensaje("Una bóveda: sus guardianes no la entregarán sin pelear", "#ffe9a8");
+    }
+    if (sm.tipo === "arena" && estado.arena !== -1) {
+      this.arena = { oleada: 0, total: 2 + Math.floor(this.partida.piso / 6), estado };
+      this.siguienteOleada();
+    } else {
+      this.arena = null;
+    }
+  }
+
+  /** Arena: sella las puertas y lanza oleadas; al limpiar la última, abre y deja un cofre. */
+  private arena: { oleada: number; total: number; estado: EstadoSala } | null = null;
+
+  private siguienteOleada(): void {
+    const a = this.arena;
+    if (a === null) return;
+    a.oleada++;
+    const lugares = this.posicionesSuelo();
+    const n = 3 + Math.floor(this.partida.piso / 4) + a.oleada;
+    const bases: readonly ConductaBase[] = ["caminante", "saltador", "volador", "torreta", "escudero"];
+    for (let k = 0; k < n && lugares.length > 0; k++) {
+      const l = lugares.splice(entero(this.partida.azar, lugares.length), 1)[0];
+      const tipo = bases[entero(this.partida.azar, bases.length)];
+      const e = this.crearEnemigo(tipo, l.x, l.y, a.oleada === a.total && k === 0);
+      if (tipo === "volador") e.y = l.y - 3 * TILE;
+      this.criaturas.push(e);
+      this.fx.chispas(l.x, l.y - 8, "#ff6a3d", 10, { velocidad: 70, brillo: true });
+    }
+    this.sellarPuertas(true);
+    this.eventos.jefe(`Arena · oleada ${a.oleada}/${a.total}`, "Nadie sale hasta que caigan todos");
+    this.audio.reproducir("jefe");
+  }
+
+  private revisarArena(): void {
+    const a = this.arena;
+    if (a === null || this.terminado) return;
+    if (this.criaturas.some((c) => !c.muerto && !(c instanceof Vela))) return;
+    if (a.oleada < a.total) {
+      this.siguienteOleada();
+      return;
+    }
+    // Arena superada.
+    a.estado.arena = -1;
+    this.arena = null;
+    this.sellarPuertas(false);
+    const centro = this.ubicarExtraccion();
+    this.ponerCofre(centro.x + centro.w / 2, centro.y + centro.h, 3000, Math.max(1, Math.min(3, 1 + Math.floor(this.partida.piso / 8))), a.estado);
+    this.fx.destellar("#ff6a3d", 0.4);
+    this.eventos.jefe("¡Arena superada!", "Un cofre aparece en el centro");
+    this.audio.reproducir("unico");
+    this.guardarProgreso();
+  }
+
   /** Busca un tramo de suelo firme de 3 baldosas (sin pinchos ni pozo), lo más cerca posible del centro. */
   private ubicarExtraccion(): Rect {
     const t = this.sala.tiles;
@@ -907,7 +1061,9 @@ export class Juego implements Contexto {
     for (const c of this.criaturas) {
       c.actualizar(dt, this);
       if (!c.muerto && solapan(c, this.jugador) && c.danioContacto() > 0) {
+        const hpAntes = this.partida.hp;
         this.golpearJugador(c.danioContacto(), c.cx, 180, c.nombre);
+        if (c instanceof Enemigo && this.partida.hp < hpAntes) c.alGolpearJugador(hpAntes - this.partida.hp);
       }
     }
     for (const c of this.criaturas) if (c.muerto) this.procesarMuerte(c);
@@ -960,6 +1116,7 @@ export class Juego implements Contexto {
 
     this.actualizarBotin(dt);
     this.actualizarExtraccion(dt);
+    this.revisarArena();
     // Regeneración: cada 5 s cura lo que diga el stat.
     this.relojRegen += dt;
     if (this.relojRegen >= 5) {
@@ -1110,6 +1267,10 @@ export class Juego implements Contexto {
         case "chispas": this.fx.ambiente(x, y, "#ffc84a", -30 - Math.random() * 30, true); break;
         case "estrellas": this.fx.ambiente(x, y, Math.random() < 0.5 ? "#ffffff" : "#c9a7ff", 0, true); break;
         case "sangre": this.fx.ambiente(x, y, "#ff4d4d88", -4, true); break;
+        case "lluvia": this.fx.ambiente(x, -4, "#9fc8ff88", 90 + Math.random() * 40, false); break;
+        case "luciernagas": this.fx.ambiente(x, y, Math.random() < 0.5 ? "#e8ff7a" : "#9aff5a", -3 + Math.random() * 6, true); break;
+        case "hojas": this.fx.ambiente(x, -4, Math.random() < 0.5 ? "#c87a3a" : "#e8b23a", 12 + Math.random() * 8, false); break;
+        case "arena": this.fx.ambiente(x, y, "#e0c48a66", 2, false); break;
         default: this.fx.ambiente(x, y, "#c9b8ff55", 4, false);
       }
     }
@@ -1125,10 +1286,14 @@ export class Juego implements Contexto {
       case "cofre": {
         obj.usado = true;
         estado.cofreAbierto = true;
+        estado.cofres = [...(estado.cofres ?? []), obj.clave];
         this.avisarMision(this.partida.registrarMision("cofre", this.partida.piso));
-        this.audio.reproducir("cofre");
-        this.fx.chispas(obj.cx, obj.y, "#ffd23d", 30, { velocidad: 120, brillo: true });
-        this.soltar(botinCofre(this.partida.azar, this.partida.piso, this.partida.modificadoresBotin()), obj.cx, obj.y);
+        this.audio.reproducir(obj.nivel >= 2 ? "unico" : "cofre");
+        const color = COLOR_COFRE[obj.nivel];
+        this.fx.chispas(obj.cx, obj.y, color, 30 + obj.nivel * 20, { velocidad: 120 + obj.nivel * 30, brillo: true });
+        if (obj.nivel >= 2) this.fx.destellar(color, 0.3 + obj.nivel * 0.1);
+        if (obj.nivel >= 1) this.fx.texto(obj.cx, obj.y - 12, NOMBRE_COFRE[obj.nivel], color, true);
+        this.soltar(botinCofre(this.partida.azar, this.partida.piso, this.partida.modificadoresBotin(), obj.nivel), obj.cx, obj.y);
         break;
       }
       case "altar":
@@ -1212,6 +1377,8 @@ export class Juego implements Contexto {
     }
     this.audio.reproducir("muerte");
     this.sumarEstilo("muerte");
+    // Élite explosiva (o kamikaze que no llegó a explotar por sí mismo): estalla al morir, con aviso.
+    if (c instanceof Enemigo && c.tiene("explosivo") && !c.exploto) c.explotar(this, 1.2, 44, 0.6);
     this.fx.chispas(c.cx, c.cy, "#ffffff", c.esJefe ? 80 : 18, { velocidad: c.esJefe ? 220 : 120, vida: 0.7 });
     this.fx.chispas(c.cx, c.cy, this.bioma.acento, c.esJefe ? 60 : 10, { velocidad: 90, brillo: true, gravedad: -30 });
 
