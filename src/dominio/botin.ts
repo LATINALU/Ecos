@@ -7,7 +7,7 @@
 import { entero, probabilidadReal, tirarDrop, type Azar, type EntradaDrop } from "minialu";
 import { ORDEN_SUBARMAS, type IdSubarma } from "../contenido/subarmas.ts";
 import { conjuntoDelPiso } from "../contenido/conjuntos.ts";
-import { ARMADURAS } from "./tipos.ts";
+import { ACCESORIOS, ARMADURAS, type TipoPieza } from "./tipos.ts";
 import { MAT_FRAGMENTO, RUNAS, OBJ_ETER, OBJ_LAGRIMA, OBJ_POCION, OBJ_POLVO, materialDelPiso } from "../contenido/objetos.ts";
 import { RAREZA_CARTA_JEFE, RAREZA_CARTA_PISO, cartaAleatoria, type Carta } from "./cartas.ts";
 import { crearUnico, generarEquipo, type ObjetoEquipo, type Rareza } from "./equipo.ts";
@@ -17,6 +17,18 @@ export const FICHA_CARTA = 901;
 export const FICHA_UNICO = 902;
 export const FICHA_RUNA = 903;
 export const FICHA_CONJUNTO = 904;
+/** Pieza de armadura o accesorio (las armaduras ahora caen aparte de las armas). */
+export const FICHA_ARMADURA = 905;
+
+/** Clases de pieza de la ficha de equipo genérica: armas un poco más seguido que cada pieza suelta. */
+const CLASES_EQUIPO: readonly TipoPieza[] = ["arma", "arma", "arma", ...ARMADURAS, ...ACCESORIOS];
+const CLASES_ARMADURA: readonly TipoPieza[] = [...ARMADURAS, ...ARMADURAS, ...ACCESORIOS];
+
+/**
+ * Rareza mínima de lo que suelta cada fuente: los comunes cualquier cosa, las élites y los cofres Poco común o
+ * mejor, y los guardianes Raro o mejor (más una pieza garantizada Épica).
+ */
+const MINIMA: Readonly<Record<"comun" | "elite" | "cofre" | "jefe", Rareza>> = { comun: 0, elite: 1, cofre: 1, jefe: 2 };
 
 export type Premio =
   | { readonly tipo: "esquirlas"; readonly cantidad: number }
@@ -29,15 +41,16 @@ export type Premio =
 export type Categoria = "comun" | "elite" | "jefe" | "eco";
 
 export const TABLA_COMUN: readonly EntradaDrop[] = [
-  [OBJ_POCION, 0.05], [OBJ_ETER, 0.05], [OBJ_POLVO, 0.06], [FICHA_EQUIPO, 0.08], [FICHA_CARTA, 0.085], [FICHA_UNICO, 0.003],
+  [OBJ_POCION, 0.05], [OBJ_ETER, 0.05], [OBJ_POLVO, 0.06], [FICHA_EQUIPO, 0.07], [FICHA_ARMADURA, 0.06], [FICHA_CARTA, 0.09],
+  [FICHA_UNICO, 0.002],
 ];
 export const TABLA_ELITE: readonly EntradaDrop[] = [
-  [OBJ_POCION, 0.15], [OBJ_ETER, 0.12], [OBJ_POLVO, 0.25], [FICHA_EQUIPO, 0.35], [FICHA_CARTA, 0.3], [FICHA_UNICO, 0.02],
-  [FICHA_RUNA, 0.04], [FICHA_CONJUNTO, 0.06],
+  [OBJ_POCION, 0.15], [OBJ_ETER, 0.12], [OBJ_POLVO, 0.25], [FICHA_EQUIPO, 0.3], [FICHA_ARMADURA, 0.3], [FICHA_CARTA, 0.4],
+  [FICHA_UNICO, 0.02], [FICHA_RUNA, 0.04], [FICHA_CONJUNTO, 0.07],
 ];
 /** Cofre: pesos relativos (ponderado). */
 export const TABLA_COFRE: readonly EntradaDrop[] = [
-  [FICHA_EQUIPO, 46], [FICHA_CARTA, 30], [FICHA_UNICO, 8], [OBJ_LAGRIMA, 5], [FICHA_RUNA, 6], [FICHA_CONJUNTO, 9],
+  [FICHA_EQUIPO, 28], [FICHA_ARMADURA, 26], [FICHA_CARTA, 28], [FICHA_UNICO, 5], [OBJ_LAGRIMA, 4], [FICHA_RUNA, 6], [FICHA_CONJUNTO, 9],
 ];
 
 const ESQUIRLAS_BASE: Readonly<Record<Categoria, readonly [number, number]>> = {
@@ -49,22 +62,27 @@ export interface ModificadoresBotin {
   readonly suerte: number;
   /** Multiplicador de esquirlas. */
   readonly codicia: number;
+  /** Stat Suerte: inclina la rareza del equipo y puede subir una estrella a las cartas. */
+  readonly fortuna?: number;
 }
 
-export const SIN_MODIFICADORES: ModificadoresBotin = { suerte: 1, codicia: 1 };
+export const SIN_MODIFICADORES: ModificadoresBotin = { suerte: 1, codicia: 1, fortuna: 0 };
 
-function resolverFicha(azar: Azar, piso: number, ficha: number, minima: Rareza = 0): Premio {
+function resolverFicha(azar: Azar, piso: number, ficha: number, minima: Rareza = 0, fortuna = 0): Premio {
   switch (ficha) {
     case FICHA_EQUIPO:
-      return { tipo: "equipo", equipo: generarEquipo(azar, piso, minima) };
+      return { tipo: "equipo", equipo: generarEquipo(azar, piso, minima, CLASES_EQUIPO, undefined, fortuna) };
+    case FICHA_ARMADURA:
+      return { tipo: "equipo", equipo: generarEquipo(azar, piso, minima, CLASES_ARMADURA, undefined, fortuna) };
     case FICHA_CARTA:
-      return { tipo: "carta", carta: cartaAleatoria(azar, (minima > 0 ? RAREZA_CARTA_JEFE : RAREZA_CARTA_PISO)[indicePiso(piso)]) };
+      // Élites y cofres: tabla de cartas de un piso más hondo; guardianes, la de jefes.
+      return { tipo: "carta", carta: cartaAleatoria(azar, minima >= 2 ? RAREZA_CARTA_JEFE[indicePiso(piso)] : RAREZA_CARTA_PISO[indicePiso(piso + (minima > 0 ? 2 : 0))], fortuna) };
     case FICHA_UNICO:
       return { tipo: "equipo", equipo: crearUnico(azar, piso) };
     case FICHA_RUNA:
       return { tipo: "objeto", objeto: RUNAS[entero(azar, RUNAS.length)].objeto, cantidad: 1 };
     case FICHA_CONJUNTO:
-      return { tipo: "equipo", equipo: generarEquipo(azar, piso, 2, ARMADURAS, conjuntoDelPiso(piso).id) };
+      return { tipo: "equipo", equipo: generarEquipo(azar, piso, 3, ARMADURAS, conjuntoDelPiso(piso).id) };
     default:
       return { tipo: "objeto", objeto: ficha, cantidad: 1 };
   }
@@ -97,9 +115,12 @@ function agruparObjetos(ids: readonly number[]): Premio[] {
 export function botinEnemigo(azar: Azar, piso: number, categoria: Categoria, mod: ModificadoresBotin = SIN_MODIFICADORES): Premio[] {
   const premios: Premio[] = [esquirlas(azar, piso, categoria, mod)];
   if (categoria === "jefe") {
-    premios.push(resolverFicha(azar, piso, FICHA_UNICO));
-    premios.push(resolverFicha(azar, piso, FICHA_CARTA, 2));
-    premios.push({ tipo: "equipo", equipo: generarEquipo(azar, piso, 2) });
+    // Un Mítico con nombre (35 %) o una pieza Legendaria o mejor; una pieza Épica o mejor; dos cartas de jefe.
+    const f = mod.fortuna ?? 0;
+    premios.push(azar.siguiente() < 0.35 ? resolverFicha(azar, piso, FICHA_UNICO) : { tipo: "equipo", equipo: generarEquipo(azar, piso, 4, CLASES_EQUIPO, undefined, f) });
+    premios.push({ tipo: "equipo", equipo: generarEquipo(azar, piso, 3, CLASES_ARMADURA, undefined, f) });
+    premios.push(resolverFicha(azar, piso, FICHA_CARTA, MINIMA.jefe, f));
+    premios.push(resolverFicha(azar, piso, FICHA_CARTA, MINIMA.jefe, f));
     premios.push({ tipo: "objeto", objeto: OBJ_POCION, cantidad: 2 });
     premios.push({ tipo: "objeto", objeto: OBJ_POLVO, cantidad: 2 + entero(azar, 3) });
     premios.push({ tipo: "objeto", objeto: materialDelPiso(piso), cantidad: 5 });
@@ -111,7 +132,7 @@ export function botinEnemigo(azar: Azar, piso: number, categoria: Categoria, mod
   }
   const tabla = categoria === "comun" ? TABLA_COMUN : TABLA_ELITE;
   for (const ficha of tirarDrop(azar, tabla, "cada-uno", mod.suerte)) {
-    premios.push(resolverFicha(azar, piso, ficha, categoria === "elite" ? 1 : 0));
+    premios.push(resolverFicha(azar, piso, ficha, categoria === "elite" ? MINIMA.elite : MINIMA.comun, mod.fortuna ?? 0));
   }
   premios.push(...agruparObjetos(tirarDrop(azar, tablaMateriales(piso, categoria === "comun" ? "comun" : "elite"), "cada-uno", mod.suerte)));
   return premios;
@@ -121,7 +142,7 @@ export function botinCofre(azar: Azar, piso: number, mod: ModificadoresBotin = S
   const [ficha] = tirarDrop(azar, TABLA_COFRE, "ponderado");
   return [
     esquirlas(azar, piso, "elite", mod),
-    resolverFicha(azar, piso, ficha, 1),
+    resolverFicha(azar, piso, ficha, MINIMA.cofre, mod.fortuna ?? 0),
     { tipo: "objeto", objeto: entero(azar, 2) === 0 ? OBJ_POCION : OBJ_ETER, cantidad: 1 },
     { tipo: "objeto", objeto: materialDelPiso(piso), cantidad: 2 },
   ];

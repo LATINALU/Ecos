@@ -2,8 +2,10 @@
 // golpe ascendente (↑ + golpe), patada que rompe guardias, pisotón con rebote, Embestida, Doble Salto,
 // talentos (salto de pared, corte final, golpe de éter...) y la técnica de la Forma equipada.
 
+import { ejecutarHabilidad } from "../habilidades.ts";
+import { CARGA_DEFINITIVA } from "../../dominio/partida.ts";
 import { ELEMENTOS } from "../../contenido/elementos.ts";
-import { INFO_TECNICA, alma, type Tecnica } from "../../contenido/almas.ts";
+import { alma } from "../../contenido/almas.ts";
 import type { DefEstilo } from "../../contenido/armas.ts";
 import { TILE } from "../../dominio/mundo/sala.ts";
 import type { Reliquia } from "../../dominio/tipos.ts";
@@ -34,7 +36,7 @@ const DURACION_BARRIDA = 0.4;
 type TipoAccion = "golpe" | "giro" | "ascendente" | "patada" | "pisoton" | "zarpazo" | "tajo" | "terremoto" | "lanzar" | "estocada" | "cargado";
 
 /** Acciones que se pueden guardar en el búfer de entrada. */
-type Pedido = "golpe" | "patada" | "tecnica";
+type Pedido = "golpe" | "patada" | "h1" | "h2" | "h3" | "h4";
 
 /** Tiempo de carga para el ataque cargado (mantener el golpe). */
 export const CARGA_COMPLETA = 0.45;
@@ -74,7 +76,20 @@ export class Jugador implements Cuerpo {
   private recargaEmbestida = 0;
   private separacionEmbestida = 0;
   private golpeadosEmbestida = new Set<Criatura>();
-  private cdTecnica = 0;
+  /** Enfriamiento de las habilidades I, II, III y la Definitiva. */
+  private readonly cdHab = [0, 0, 0, 0];
+  /** Ataque de la habilidad en curso (embestida, garras, caída). */
+  private ataqueAccion: AtaqueJugador | null = null;
+  private colorAccion = "#e0c48a";
+  private golpesAccion = 3;
+  /** Radio del estallido al caer (Definitivas de salto). */
+  radioCaida = 0;
+  /** Potenciadores de las auras. */
+  buffDanio = 0;
+  buffEscudo = 0;
+  buffRobo = 0;
+  buffVelocidad = 0;
+  private tBuff = 0;
   private atravesando = 0;
   private regenEter = 0;
   /** Pared tocada en el aire (-1 izq, 1 der) y por cuánto tiempo sigue valiendo para saltar. */
@@ -191,7 +206,11 @@ export class Jugador implements Cuerpo {
       if (this.tBuffer <= 0) this.buffer = null;
     }
     this.invuln = Math.max(0, this.invuln - dt);
-    this.cdTecnica = Math.max(0, this.cdTecnica - dt);
+    for (let k = 0; k < 4; k++) this.cdHab[k] = Math.max(0, this.cdHab[k] - dt);
+    if (this.tBuff > 0) {
+      this.tBuff -= dt;
+      if (this.tBuff <= 0) this.aplicarBuff({}, 0);
+    }
     this.cdAtras = Math.max(0, this.cdAtras - dt);
     this.cdSubarma = Math.max(0, this.cdSubarma - dt);
     for (const f of this.fantasmas) f.vida -= dt;
@@ -354,8 +373,8 @@ export class Jugador implements Cuerpo {
       const a = this.accion;
       if ((a.tipo === "golpe" || a.tipo === "giro") && e.recien("golpe")) this.comboEnCola = true;
       // Lo que se aprieta durante un ataque queda en el búfer (golpe → patada → técnica, en cualquier orden).
-      const pedido: Pedido | null = e.recien("patada") ? "patada" : e.recien("tecnica") ? "tecnica"
-        : e.recien("golpe") && a.tipo !== "golpe" && a.tipo !== "giro" ? "golpe" : null;
+      const pedido: Pedido | null = e.recien("patada") ? "patada" : this.pedidoHabilidad(e)
+        ?? (e.recien("golpe") && a.tipo !== "golpe" && a.tipo !== "giro" ? "golpe" : null);
       if (pedido !== null) {
         this.buffer = pedido;
         this.tBuffer = 0.22;
@@ -456,7 +475,10 @@ export class Jugador implements Cuerpo {
   private leerAcciones(ctx: Contexto, e: Entrada): void {
     if (e.recien("golpe")) this.ejecutar("golpe", ctx, e);
     else if (e.recien("patada")) this.ejecutar("patada", ctx, e);
-    else if (e.recien("tecnica")) this.ejecutar("tecnica", ctx, e);
+    else {
+      const h = this.pedidoHabilidad(e);
+      if (h !== null) this.ejecutar(h, ctx, e);
+    }
   }
 
   /** ¿Ya pasó la parte activa del ataque? Entonces se puede cancelar en otro (fluidez de combo). */
@@ -497,7 +519,7 @@ export class Jugador implements Cuerpo {
         ctx.audio.reproducir("patada");
       }
     } else {
-      this.usarTecnica(ctx);
+      this.usarHabilidad(ctx, pedido === "h1" ? 1 : pedido === "h2" ? 2 : pedido === "h3" ? 3 : 4);
     }
   }
 
@@ -506,115 +528,105 @@ export class Jugador implements Cuerpo {
     this.comboEnCola = false;
   }
 
-  // ---------------- Técnicas ----------------
+  // ---------------- Habilidades del mazo de almas ----------------
 
-  tecnicaActual(ctx: Contexto): Tecnica | null {
-    const f = ctx.partida.forma;
-    return f === null ? null : alma(f.personaje).tecnica;
+  /** Qué habilidad se pidió en este paso (L/U/O = 1/2/3, P = Definitiva). */
+  private pedidoHabilidad(e: Entrada): Pedido | null {
+    return e.recien("hab1") ? "h1" : e.recien("hab2") ? "h2" : e.recien("hab3") ? "h3" : e.recien("definitiva") ? "h4" : null;
   }
 
-  /** Stat Técnica × estilo × pasiva Horno. */
-  private potenciaTecnica(ctx: Contexto, tec: Tecnica): number {
+  /** Segundos de enfriamiento restantes de cada habilidad (0 = lista). */
+  enfriamiento(r: 1 | 2 | 3 | 4): number {
+    return this.cdHab[r - 1];
+  }
+
+  private usarHabilidad(ctx: Contexto, r: 1 | 2 | 3 | 4): void {
     const p = ctx.partida;
-    return p.stats().tecnica * INFO_TECNICA[tec].mult * p.estilo().tecnica * (p.pasiva() === "horno" ? 1.25 : 1) * (1 + p.combate().tecnicaDanio);
+    const h = p.habilidad(r);
+    if (h === null) {
+      ctx.mensaje(r === 4 ? "Sin Definitiva: pon una carta en la 5.ª ranura del mazo (I → Cartas)" : `Ranura vacía: pon una carta de alma en «Habilidad ${["I", "II", "III"][r - 1]}» (I → Cartas)`, "#aaaaaa");
+      return;
+    }
+    if (this.cdHab[r - 1] > 0) return;
+    if (r === 4) {
+      if (p.cargaDefinitiva < CARGA_DEFINITIVA) {
+        ctx.fx.texto(this.cx, this.y - 4, `Definitiva ${Math.floor(p.cargaDefinitiva)} %`, "#ffd27a");
+        ctx.audio.reproducir("fallo");
+        return;
+      }
+      p.cargaDefinitiva = 0;
+    } else {
+      if (p.mp < h.costo) {
+        ctx.fx.texto(this.cx, this.y - 4, "Sin éter", "#4dc3ff");
+        ctx.audio.reproducir("fallo");
+        return;
+      }
+      p.mp -= h.costo;
+      if (p.tieneTalento("ecoResonante") && Math.random() < 0.2) {
+        p.recuperarEter(h.costo);
+        ctx.fx.texto(this.cx, this.y - 8, "¡Eco!", "#c9a7ff");
+      }
+    }
+    this.cdHab[r - 1] = h.cd;
+    p.registrarMision(r === 4 ? "definitiva" : "habilidad");
+    ctx.audio.reproducir(r === 4 ? "unico" : "tecnica");
+    ejecutarHabilidad(this, ctx, h, r === 4);
   }
 
-  private usarTecnica(ctx: Contexto): void {
-    const tec = this.tecnicaActual(ctx);
-    if (tec === null) {
-      ctx.mensaje("Sin Forma: equipa una Carta de Alma (I)", "#aaaaaa");
-      return;
+  /** Arranca una acción de cuerpo (embestida, garras, caída) con el ataque de la habilidad. */
+  iniciarAccionHabilidad(tipo: "tajo" | "zarpazo" | "terremoto", duracion: number, ataque: AtaqueJugador, color: string, golpes = 3): void {
+    this.iniciar(tipo, duracion, 0);
+    this.ataqueAccion = ataque;
+    this.colorAccion = color;
+    this.golpesAccion = golpes;
+    if (tipo === "tajo") {
+      this.vy = 0;
+      this.vx = this.dir * 340;
+    } else if (tipo === "terremoto" && !this.enSuelo) {
+      this.vy = 380;
+    } else if (tipo === "zarpazo") {
+      this.vx = this.dir * 120;
     }
-    const costo = ctx.partida.costoTecnica(INFO_TECNICA[tec].costo);
-    if (this.cdTecnica > 0) return;
-    if (ctx.partida.mp < costo) {
-      ctx.fx.texto(this.cx, this.y - 4, "Sin éter", "#4dc3ff");
-      ctx.audio.reproducir("fallo");
-      return;
-    }
-    ctx.partida.mp -= costo;
-    if (ctx.partida.tieneTalento("ecoResonante") && Math.random() < 0.2) {
-      ctx.partida.recuperarEter(costo);
-      ctx.fx.texto(this.cx, this.y - 8, "¡Eco!", "#c9a7ff");
-    }
-    this.cdTecnica = 0.35;
-    ctx.audio.reproducir("tecnica");
-    const potencia = this.potenciaTecnica(ctx, tec);
-    const quema = this.reliquias.has("garraIgnea") || ctx.partida.tieneRuna("brasa");
-    const color = alma(ctx.partida.forma!.personaje).colorSec;
-    switch (tec) {
-      case "orbe":
-        this.iniciar("lanzar", 0.25, 0);
-        ctx.agregarProyectil(new Proyectil({
-          tipo: "orbe", x: this.cx + this.dir * 8, y: this.cy - 2, vx: this.dir * 230, vy: 0, w: 10, h: 10, vida: 2.2,
-          explota: 30, color: "#ff7a3d",
-          ataqueJugador: { potencia, tipo: "tecnica", empuje: 200, quema: true },
-        }));
-        break;
-      case "lanza":
-        this.iniciar("lanzar", 0.25, 0);
-        ctx.agregarProyectil(new Proyectil({
-          tipo: "lanza", x: this.cx + this.dir * 10, y: this.cy - 2, vx: this.dir * 330, vy: 0, w: 18, h: 5, vida: 1.6,
-          atraviesa: true, color: "#bff3ff",
-          ataqueJugador: { potencia, tipo: "tecnica", empuje: 80, ralentiza: true, quema },
-        }));
-        break;
-      case "tajo":
-        this.iniciar("tajo", 0.26, 0);
-        this.vy = 0;
-        this.vx = this.dir * 340;
-        ctx.fx.destellar(color, 0.2);
-        break;
-      case "terremoto":
-        this.iniciar("terremoto", this.enSuelo ? 0.3 : 1.2, 0);
-        if (!this.enSuelo) this.vy = 380;
-        break;
-      case "zarpazo":
-        this.iniciar("zarpazo", 0.42, 0);
-        this.vx = this.dir * 120;
-        break;
-      case "rayo": {
-        this.iniciar("lanzar", 0.3, 0);
-        // Enemigo más cercano a menos de 200 px; si no hay, cae delante.
-        const objetivo = ctx.criaturas
-          .filter((c) => !c.muerto && !("esObjeto" in c) && Math.abs(c.cx - this.cx) < 200 && Math.abs(c.cy - this.cy) < 140)
-          .sort((a, b) => Math.hypot(a.cx - this.cx, a.cy - this.cy) - Math.hypot(b.cx - this.cx, b.cy - this.cy))[0];
-        const x = objetivo?.cx ?? this.cx + this.dir * 60;
-        const pie = objetivo !== undefined ? objetivo.y + objetivo.h : this.y + this.h;
-        ctx.fx.destellar("#9fe8ff", 0.35);
-        ctx.fx.sacudir(5);
-        ctx.audio.reproducir("explosion");
-        for (let yy = 0; yy < pie; yy += 6) {
-          ctx.fx.chispas(x + (Math.random() - 0.5) * 6, yy, "#bff3ff", 1, { velocidad: 20, vida: 0.25, gravedad: 0, brillo: true });
-        }
-        ctx.fx.chispas(x, pie, "#ffffff", 24, { velocidad: 140, brillo: true });
-        ctx.golpearArea({ x: x - 14, y: pie - 40, w: 28, h: 42 }, { potencia, tipo: "tecnica", empuje: 60, aturde: 0.8 }, this.dir, new Set());
-        break;
-      }
-      case "remolino":
-        this.iniciar("lanzar", 0.2, 0);
-        for (let i = 0; i < 3; i++) {
-          ctx.agregarProyectil(new Proyectil({
-            tipo: "hoja", x: this.cx, y: this.cy, vx: 0, vy: 0, w: 10, h: 10, vida: 4, atraviesa: true, atraviesaParedes: true,
-            color, orbita: { radio: 24, fase: (i / 3) * Math.PI * 2, velocidad: 7, rehit: 0.45 },
-            ataqueJugador: { potencia, tipo: "tecnica", empuje: 60, quema },
-          }));
-        }
-        break;
-    }
+  }
+
+  /** Potenciadores temporales de las auras (se renuevan, no se apilan). */
+  aplicarBuff(b: { danio?: number; escudo?: number; robo?: number; velocidad?: number }, duracion: number): void {
+    this.buffDanio = b.danio ?? 0;
+    this.buffEscudo = b.escudo ?? 0;
+    this.buffRobo = b.robo ?? 0;
+    this.buffVelocidad = b.velocidad ?? 0;
+    this.tBuff = duracion;
+  }
+
+  /** Pose breve de lanzamiento (habilidades a distancia). */
+  poseLanzar(duracion: number): void {
+    this.iniciar("lanzar", duracion, 0);
+  }
+
+  get buffActivo(): boolean {
+    return this.tBuff > 0;
   }
 
   private ondasTerremoto(ctx: Contexto): void {
-    const potencia = this.potenciaTecnica(ctx, "terremoto");
+    const ataque: AtaqueJugador = this.ataqueAccion ?? { potencia: ctx.partida.stats().tecnica, tipo: "tecnica", empuje: 160 };
+    const color = this.colorAccion;
     ctx.fx.sacudir(6);
     ctx.audio.reproducir("explosion");
-    ctx.fx.chispas(this.cx, this.y + this.h, "#e0c48a", 24, { velocidad: 150, vida: 0.5 });
+    ctx.fx.chispas(this.cx, this.y + this.h, color, 24, { velocidad: 150, vida: 0.5 });
     for (const d of [-1, 1]) {
       ctx.agregarProyectil(new Proyectil({
         tipo: "onda", x: this.cx + d * 10, y: this.y + this.h - 8, vx: d * 230, vy: 0, w: 8, h: 14, vida: 1.4, rastrero: true,
-        atraviesa: true, color: "#e0c48a",
-        ataqueJugador: { potencia, tipo: "tecnica", empuje: 160, quema: this.reliquias.has("garraIgnea") },
+        atraviesa: true, color,
+        ataqueJugador: { ...ataque, quema: ataque.quema === true || this.reliquias.has("garraIgnea") },
       }));
+    }
+    // Las Definitivas de salto (Juicio de Raíz) además estallan donde caen.
+    if (this.radioCaida > 0) {
+      const r = this.radioCaida;
+      ctx.fx.destellar(color, 0.5);
+      ctx.fx.chispas(this.cx, this.y + this.h, color, 50, { velocidad: 220, brillo: true });
+      ctx.golpearArea({ x: this.cx - r, y: this.y + this.h - r * 0.6, w: r * 2, h: r * 0.6 + 6 }, ataque, this.dir, new Set());
+      this.radioCaida = 0;
     }
   }
 
@@ -695,7 +707,7 @@ export class Jugador implements Cuerpo {
   private actualizarAccion(dt: number, ctx: Contexto): void {
     const a = this.accion!;
     const cuerpoACuerpo = a.tipo === "golpe" || a.tipo === "giro" || a.tipo === "patada" || a.tipo === "ascendente";
-    a.t += dt * (cuerpoACuerpo || a.tipo === "cargado" ? 1 + ctx.partida.combate().velocidad + (ctx.combo?.bonoVelocidad ?? 0) : 1);
+    a.t += dt * (cuerpoACuerpo || a.tipo === "cargado" ? 1 + ctx.partida.combate().velocidad + this.buffVelocidad + (ctx.combo?.bonoVelocidad ?? 0) : 1);
     const p = ctx.partida;
     const s = p.stats();
     const quema = this.reliquias.has("garraIgnea") || ctx.partida.tieneRuna("brasa");
@@ -722,7 +734,7 @@ export class Jugador implements Cuerpo {
       case "patada": {
         if (a.t >= 0.12 && a.t <= 0.22) {
           const r = { x: this.dir > 0 ? this.x + this.w - 2 : this.x - 24, y: this.y + 6, w: 26, h: 14 };
-          const aturde = p.pasiva() === "raiz" ? 0.5 : 0;
+          const aturde = p.efectoAlma("golpeAturde") > 0 ? 0.5 : 0;
           this.zonaActiva = r;
           ctx.golpearArea(r, { potencia: s.patada, tipo: "patada", empuje: 250, rompeGuardia: true, quema, eter: 4, aturde, cuerpoACuerpo: true }, this.dir, a.golpeados);
           if (this.reliquias.has("garraIgnea")) ctx.tocarBarreras(r, "fuego");
@@ -772,7 +784,7 @@ export class Jugador implements Cuerpo {
         this.vx = this.dir * 340;
         this.vy = 0;
         const r = { x: this.x - 6, y: this.y, w: this.w + 12, h: this.h };
-        ctx.golpearArea(r, { potencia: this.potenciaTecnica(ctx, "tajo"), tipo: "tecnica", empuje: 120, quema }, this.dir, a.golpeados);
+        if (this.ataqueAccion !== null) ctx.golpearArea(r, { ...this.ataqueAccion, quema: this.ataqueAccion.quema === true || quema }, this.dir, a.golpeados);
         this.dejarFantasma(dt);
         if (a.t >= a.duracion) {
           this.accion = null;
@@ -793,14 +805,15 @@ export class Jugador implements Cuerpo {
         break;
       case "zarpazo": {
         const golpe = Math.floor(a.t / 0.13);
-        if (golpe !== a.extra && golpe < 3) {
+        if (golpe !== a.extra && golpe < this.golpesAccion) {
           a.extra = golpe;
           a.golpeados.clear();
           ctx.audio.reproducir("golpe");
         }
-        if (golpe < 3) {
-          const r = { x: this.dir > 0 ? this.x + this.w - 2 : this.x - 22, y: this.y, w: 24, h: 20 };
-          ctx.golpearArea(r, { potencia: this.potenciaTecnica(ctx, "zarpazo"), tipo: "tecnica", empuje: 70, curaPct: 0.03, quema }, this.dir, a.golpeados);
+        if (golpe < this.golpesAccion && this.ataqueAccion !== null) {
+          const r = { x: this.dir > 0 ? this.x + this.w - 2 : this.x - 26, y: this.y - 4, w: 28, h: 26 };
+          ctx.golpearArea(r, { ...this.ataqueAccion, quema: this.ataqueAccion.quema === true || quema }, this.dir, a.golpeados);
+          if (Math.random() < 0.5) ctx.fx.chispas(r.x + r.w / 2, r.y + r.h / 2, this.colorAccion, 3, { velocidad: 90, brillo: true });
         }
         this.vx *= 0.9;
         if (a.t >= a.duracion) this.accion = null;
@@ -943,7 +956,7 @@ export class Jugador implements Cuerpo {
       if (e.recien("golpe")) {
         this.atras = 0;
         this.iniciarEstocada(ctx);
-      } else if (e.recien("patada") || e.recien("tecnica")) {
+      } else if (e.recien("patada") || this.pedidoHabilidad(e) !== null) {
         this.atras = 0;
         this.leerAcciones(ctx, e);
       } else if (e.recien("saltar") && this.enSuelo) {

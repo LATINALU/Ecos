@@ -2,9 +2,15 @@
 // mercader, mapa, pausa, reliquias, muerte y victoria. La lógica vive en el dominio; acá solo se muestra
 // y se llama a Partida/Meta, mostrando el Resultado (ok / código de error) que devuelven.
 
+import { pasivaMitica } from "../contenido/miticas.ts";
+import { MODIFICADORES_POR_RAREZA } from "../dominio/equipo.ts";
+import { cabeceraTienda, esencia, esquirlas, polvo as monedaPolvo, temaTienda, type IdTienda } from "./tienda.ts";
 import { ELEMENTOS, potenciaElemental } from "../contenido/elementos.ts";
 import type { Posicion } from "minialu";
-import { ALMAS, COLOR_FAMILIA, FAMILIAS, INFO_PASIVA, INFO_TECNICA, alma } from "../contenido/almas.ts";
+import { ALMAS, COLOR_FAMILIA, FAMILIAS, alma } from "../contenido/almas.ts";
+import {
+  NOMBRE_RANURA_ALMA, RANURAS_ALMA, TECLA_RANURA_ALMA, cantidadExtra, describirEfectos, escalaCarta, grimorio, type RanuraAlma,
+} from "../contenido/grimorio.ts";
 import { ESTILOS, ORDEN_ESTILOS } from "../contenido/armas.ts";
 import { EXITO_REFINADO, REFINADO_MAX, RECETAS, costoRefinado } from "../contenido/recetas.ts";
 import { CONJUNTOS, conjunto as defConjunto } from "../contenido/conjuntos.ts";
@@ -13,15 +19,15 @@ import { SENDAS, TALENTOS, type Senda } from "../contenido/talentos.ts";
 import { craftear, faltantes, puedeCraftear, refinarEquipado } from "../dominio/crafteo.ts";
 import { bioma, type Bioma } from "../contenido/biomas.ts";
 import {
-  COLORES_RAREZA, CONSUMIBLES, MAT_FRAGMENTO, MATERIALES, NOMBRES_RAREZA, OBJ_LAGRIMA, OBJ_POLVO, RASGOS_EQUIPO, apilable, unico, type EstiloArma,
+  BASES, COLORES_RAREZA, CONSUMIBLES, MAT_FRAGMENTO, MATERIALES, PRECIO_DADO, dadoParaNivel, NOMBRES_RAREZA, OBJ_LAGRIMA, OBJ_POLVO, RASGOS_EQUIPO, apilable, unico, type EstiloArma,
 } from "../contenido/objetos.ts";
-import { COSTO_FUSION, MEJORAS_MAX, NIVEL_MAX_CARTA, PROB_FUSION, RASGOS_CARTA, estrellas, nombreCarta, type Carta } from "../dominio/cartas.ts";
+import { COSTO_FUSION, MEJORAS_MAX, NIVEL_MAX_CARTA, PROB_FUSION, RASGOS_CARTA, estrellas, nombreCarta, textoEstrellas, type Carta } from "../dominio/cartas.ts";
 import type { Eco } from "../dominio/eco.ts";
 import { valorDesguace, type ObjetoEquipo } from "../dominio/equipo.ts";
 import { MEJORAS_SANTUARIO, type Meta } from "../dominio/meta.ts";
 import type { OpcionesInicio, Partida, RanuraCarta, ResumenPartida } from "../dominio/partida.ts";
 import type { ResumenRanura } from "../infra/repositorio.ts";
-import type { Banco } from "../dominio/banco.ts";
+import { CASILLAS_PESTANA_BANCO, PESTANAS_BANCO, type Banco } from "../dominio/banco.ts";
 import {
   comprarAlArmero, comprarEnPueblo, precioPueblo, valorCarta, valorVenta, vender, venderCarta, type ArticuloArmero,
   kitRecluta, tieneArma,
@@ -100,9 +106,37 @@ function formatoStats(stats: Readonly<Record<string, number>>): HTMLElement {
 }
 
 /** Grilla de casillas de un inventario (banco, contenedor seguro). */
-function grillaInventario(inv: Inventario, alClic: (pos: Posicion) => void): HTMLElement {
+const NOMBRE_LINEA: Readonly<Record<string, string>> = {
+  exploracion: "Exploración", combate: "Combate", alma: "Alma", guardian: "Guardián", encargo: "Encargo repetible",
+};
+
+/** Orden del tablón: primero lo de la zona más baja, los encargos repetibles al final. */
+function m2(m: { id: number; repetible?: boolean }): number {
+  return (m.repetible === true ? 100 : 0) + Math.floor(m.id / 1000);
+}
+
+/** Qué hace una carta en cada ranura del mazo (pasivas y habilidades, ya escaladas por su nivel). */
+function grimorioCarta(c: Carta, resaltar?: RanuraAlma): HTMLElement {
+  const g = grimorio(c.personaje);
+  const escala = escalaCarta(c);
+  return h("div", { class: "grimorio" },
+    h("div", { class: "sub" }, `Poder de la carta: ×${escala.toFixed(2).replace(".", ",")}${cantidadExtra(c.nivel) > 0 ? ` · +${cantidadExtra(c.nivel)} proyectiles/rayos` : ""}`),
+    ...RANURAS_ALMA.map((r) => {
+      const pas = g.pasivas[r];
+      const hab = r === 0 ? null : g.habilidades[r - 1];
+      return h("div", { class: `fila-grimorio${resaltar === r ? " activa" : ""}` },
+        h("b", {}, NOMBRE_RANURA_ALMA[r] + (TECLA_RANURA_ALMA[r] !== "" ? ` (${TECLA_RANURA_ALMA[r]})` : "")),
+        hab !== null ? h("div", { class: "hab", style: `color:${hab.color}` },
+          `✦ ${hab.nombre}`, h("span", { class: "sub" },
+            ` — ${hab.descripcion} ${r === 4 ? "(carga 100 %)" : `(${hab.costo} éter · ${hab.cd} s)`} · poder ×${(hab.mult * escala).toFixed(1).replace(".", ",")}`)) : null,
+        h("div", { class: "pasiva" }, `${r === 0 ? "Ataques básicos" : "Pasiva"}: `, h("b", {}, pas.nombre), ` — ${describirEfectos(pas.efectos, escala)}`));
+    }));
+}
+
+function grillaInventario(inv: Inventario, alClic: (pos: Posicion) => void, pestana?: number): HTMLElement {
   const g = h("div", { class: "grilla" });
   for (const pos of inv.posiciones()) {
+    if (pestana !== undefined && pos.pestana !== pestana) continue;
     const pila = inv.en(pos);
     const eq = pila !== null ? equipoDe(pila) : undefined;
     const cons = pila !== null ? apilable(pila.objeto) : undefined;
@@ -129,7 +163,8 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
     : null;
   return h("div", { class: "ficha" },
     h("div", { class: "nombre", style: `color:${COLORES_RAREZA[o.rareza]}` }, o.nombre),
-    h("div", { class: "sub" }, `${NOMBRES_RAREZA[o.rareza]} · ${NOMBRE_PIEZA[o.ranura]} · Nv ${o.nivel}`),
+    h("div", { class: `sub rareza-${o.rareza}` }, h("b", { style: `color:${COLORES_RAREZA[o.rareza]}` }, NOMBRES_RAREZA[o.rareza]),
+      ` · ${NOMBRE_PIEZA[o.ranura]} · Nv ${o.nivel} · ${MODIFICADORES_POR_RAREZA[o.rareza]} modificador${MODIFICADORES_POR_RAREZA[o.rareza] === 1 ? "" : "es"}`),
     formatoStats(o.stats),
     o.elemento !== undefined ? (() => {
       const e = ELEMENTOS[o.elemento];
@@ -139,8 +174,14 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
     o.calidad !== undefined ? h("div", { class: o.calidad >= 1.1 ? "sube" : o.calidad < 0.9 ? "baja" : "sub" }, `Calidad de forja: ${Math.round(o.calidad * 100)} %`) : null,
     ...Object.entries(o.rasgos ?? {}).map(([id, v]) => {
       const def = RASGOS_EQUIPO.find((r) => r.id === id);
-      return def === undefined || v === undefined ? null : h("div", { class: "rasgo" }, `◈ ${def.nombre} ${def.formato(v)}`);
+      if (def === undefined || v === undefined) return null;
+      const deBase = (BASES.find((b) => b.id === o.base)?.rasgos as Record<string, number> | undefined)?.[id] !== undefined;
+      const firma = def.firma?.includes(o.ranura) === true;
+      return h("div", { class: `rasgo${deBase ? " de-base" : ""}${firma ? " firma" : ""}` },
+        `${firma ? "◆" : "◈"} ${def.nombre} ${def.formato(v)}${deBase ? " (propio de la pieza)" : firma ? " · firma" : ""}`);
     }),
+    o.pasiva !== undefined ? h("div", { class: "pasiva-mitica" },
+      h("b", {}, `✦ Pasiva mítica · ${pasivaMitica(o.pasiva).nombre}`), h("div", {}, describirEfectos(pasivaMitica(o.pasiva).efectos))) : null,
     u !== undefined ? h("div", { class: "efecto" }, `✦ ${u.descripcion}`) : null,
     u !== undefined ? h("div", { class: "cita" }, `«${u.cita}»`) : null,
     o.conjunto !== undefined ? (() => {
@@ -156,15 +197,14 @@ function fichaEquipo(o: ObjetoEquipo, comparar?: ObjetoEquipo | null): HTMLEleme
 
 function fichaCarta(c: Carta): HTMLElement {
   const a = alma(c.personaje);
-  const t = INFO_TECNICA[a.tecnica];
+  const g = grimorio(c.personaje);
   return h("div", { class: "ficha" },
     h("div", { class: "nombre", style: `color:${a.colorSec}` }, nombreCarta(c)),
     h("div", { class: "sub" }, h("span", { style: `color:${COLOR_FAMILIA[c.tipo]}` }, FAMILIAS[c.tipo]), ` · ${estrellas(c)} · mejoras ${c.mejoras}/${MEJORAS_MAX}`),
     formatoStats(c.stats),
     c.brillante === true ? h("div", { class: "brillo" }, "✧ Resplandeciente: +20 % a todos sus stats") : null,
     c.rasgo !== undefined ? h("div", { class: "rasgo" }, `◈ Rasgo ${RASGOS_CARTA[c.rasgo].nombre}: ${RASGOS_CARTA[c.rasgo].descripcion} (solo como Forma)`) : null,
-    h("div", { class: "efecto" }, `Técnica: ${t.nombre} (${t.costo} éter, ${Math.round(t.mult * 100)} % de Técnica${t.impactos > 1 ? ` ×${t.impactos}` : ""}) — ${t.descripcion}`),
-    h("div", { class: "pasiva" }, `Pasiva · ${INFO_PASIVA[a.pasiva].nombre}: ${INFO_PASIVA[a.pasiva].descripcion}`),
+    h("div", { class: "efecto" }, `Habilidades: ${g.habilidades.slice(0, 3).map((x) => x.nombre).join(" · ")} · Definitiva: ${g.habilidades[3].nombre}`),
     h("div", { class: "cita" }, `«${a.lore}»`));
 }
 
@@ -180,6 +220,7 @@ function miniCarta(c: Carta | null, etiqueta: string, sel: boolean, onclick: () 
 }
 
 export class Interfaz {
+  private pestanaBanco = 0;
   private readonly panel: HTMLElement;
   private readonly toasts: HTMLElement;
   private readonly banner: HTMLElement;
@@ -228,9 +269,17 @@ export class Interfaz {
     this.alCerrar = null;
   }
 
+  /** Abre un panel con la estética de tienda de RPG (marco temático y cabecera con el comerciante). */
+  private abrirTienda(nombre: string, id: IdTienda, ...contenido: (Node | null)[]): void {
+    this.abrir(nombre, ...contenido);
+    this.panel.classList.add("tienda");
+    this.panel.style.setProperty("--tema", temaTienda(id));
+  }
+
   private abrir(nombre: string, ...contenido: (Node | null)[]): void {
     limpiar(this.panel);
     this.panel.className = `panel panel-${nombre}`;
+    this.panel.style.removeProperty("--tema");
     for (const c of contenido) if (c !== null) this.panel.append(c);
     this.abiertoActual = nombre;
   }
@@ -324,17 +373,18 @@ export class Interfaz {
       ...vistas.map((a) => h("button", {
         class: `alma${almaId === a.id ? " sel" : ""}`, style: `--c1:${a.color};--c2:${a.colorSec}`, title: a.lore,
         onclick: () => this.mostrarPreparacion(ranura, estilo, a.id, nombreActual()),
-      }, h("span", { class: "retrato" }), h("b", {}, a.nombre), h("small", {}, INFO_TECNICA[a.tecnica].nombre), h("small", { class: "pasiva" }, INFO_PASIVA[a.pasiva].nombre))));
+      }, h("span", { class: "retrato" }), h("b", {}, a.nombre), h("small", {}, grimorio(a.id).habilidades[0].nombre), h("small", { class: "pasiva" }, grimorio(a.id).pasivas[0].nombre))));
     const elegida = almaId !== null ? alma(almaId) : null;
     this.abrir("preparacion",
       h("h2", {}, `Nuevo Portador · Partida ${ranura + 1}`),
       h("label", { class: "campo" }, "Nombre ", campo),
       h("h3", {}, "Arma inicial — define tu combo"),
       armas,
-      h("h3", {}, "Alma inicial — tu Forma, su técnica y su pasiva"),
+      h("h3", {}, "Alma inicial — tu Forma (pasiva de ataques básicos) y tu primera habilidad (L)"),
       vistas.length === 0 ? h("p", { class: "sub" }, "Todavía no conoces ningún alma: la primera será al azar. Las almas que encuentres quedarán disponibles aquí.") : null,
       almas,
-      elegida !== null ? h("p", { class: "sub" }, `${elegida.nombre}: ${INFO_TECNICA[elegida.tecnica].descripcion} · ${INFO_PASIVA[elegida.pasiva].descripcion}`) : null,
+      elegida !== null ? h("p", { class: "sub" }, `${elegida.nombre} · Ataques básicos: ${grimorio(elegida.id).pasivas[0].nombre} (${describirEfectos(grimorio(elegida.id).pasivas[0].efectos)}) · `
+        + `Habilidad I: ${grimorio(elegida.id).habilidades[0].nombre} — ${grimorio(elegida.id).habilidades[0].descripcion}`) : null,
       h("div", { class: "menu fila" },
         h("button", { onclick: () => this.mostrarPartidas() }, "Volver"),
         h("button", {
@@ -376,10 +426,10 @@ export class Interfaz {
             },
           }, `${costo} ✧`));
     });
-    this.abrir("santuario",
-      h("h2", {}, "Santuario"),
+    this.abrirTienda("santuario", "santuario", this.botonCerrar(),
+      cabeceraTienda("santuario", [esencia(m.esencia)]),
       h("p", { class: "sub" }, "La esencia de cada descenso fortalece al próximo Portador."),
-      h("div", { class: "esencia" }, `${m.esencia} ✧ esencia`),
+      h("h3", {}, "Bendiciones permanentes"),
       ...filas,
       h("button", { class: "principal", onclick: () => this.cerrar() }, "Volver al pueblo"));
   }
@@ -399,7 +449,7 @@ export class Interfaz {
       h("h3", {}, "Almas conocidas"),
       h("div", { class: "almas" }, ...ALMAS.map((a) => m.almaVista(a.id)
         ? h("div", { class: "alma", style: `--c1:${a.color};--c2:${a.colorSec}`, title: a.lore },
-          h("span", { class: "retrato" }), h("b", {}, a.nombre), h("small", {}, a.titulo), h("small", {}, INFO_TECNICA[a.tecnica].nombre))
+          h("span", { class: "retrato" }), h("b", {}, a.nombre), h("small", {}, a.titulo), h("small", {}, grimorio(a.id).habilidades[3].nombre))
         : h("div", { class: "alma oculta" }, h("span", { class: "retrato" }), h("b", {}, "???")))),
       h("button", { class: "principal", onclick: () => this.cerrar() }, "Volver al pueblo"));
   }
@@ -519,9 +569,9 @@ export class Interfaz {
   }
 
   private vistaCartas(juego: ConPartida, p: Partida, sel?: Posicion | Ranura | RanuraCarta): HTMLElement {
-    const ranuras: [RanuraCarta, string][] = [["forma", "Forma"], [0, "Resonancia I"], [1, "Resonancia II"]];
-    const slots = h("div", { class: "slots-cartas" }, ...ranuras.map(([r, txt]) =>
-      miniCarta(p.cartaEn(r), txt, sel === r, () => this.abrirInventario(juego, "cartas", r))));
+    const slots = h("div", { class: "slots-cartas mazo-almas" }, ...RANURAS_ALMA.map((r) =>
+      miniCarta(p.cartaEn(r), `${NOMBRE_RANURA_ALMA[r]}${TECLA_RANURA_ALMA[r] !== "" ? ` · ${TECLA_RANURA_ALMA[r]}` : ""}`, sel === r,
+        () => this.abrirInventario(juego, "cartas", r))));
     const mazo = h("div", { class: "grilla cartas" });
     for (const pos of p.mazo.posiciones()) {
       const pila = p.mazo.en(pos);
@@ -531,11 +581,16 @@ export class Interfaz {
       else mazo.append(miniCarta(c, "", esSel, () => this.abrirInventario(juego, "cartas", pos)));
     }
     let detalle: HTMLElement = h("div", { class: "detalle sub" },
-      "La Forma te da el 100 % de sus stats y su técnica. Cada Resonancia aporta el 35 % (50 % si es de la misma familia que tu Forma).");
-    if (sel === "forma" || sel === 0 || sel === 1) {
+      h("p", {}, "Mazo de almas: cada carta hace algo distinto según la ranura donde la pongas."),
+      h("p", {}, "Forma: tu aspecto, el 100 % de sus stats y una pasiva para tus ataques básicos. "
+        + "Habilidades I, II y III (L, U, O): una habilidad activa y una pasiva cada una. "
+        + "Definitiva (P): un ataque devastador que se carga peleando, y otra pasiva."),
+      h("p", {}, "El resto de las ranuras aporta un 30~40 % de los stats de la carta (+15 % si es de la familia de tu Forma). "
+        + "Todo escala con las estrellas y las mejoras de la carta."));
+    if (typeof sel === "number") {
       const c = p.cartaEn(sel);
       if (c !== null) {
-        detalle = h("div", { class: "detalle" }, fichaCarta(c),
+        detalle = h("div", { class: "detalle" }, fichaCarta(c), grimorioCarta(c, sel),
           h("button", {
             onclick: () => {
               const r = p.retirarCarta(sel);
@@ -543,6 +598,8 @@ export class Interfaz {
               this.abrirInventario(juego, "cartas");
             },
           }, "Retirar al mazo"));
+      } else {
+        detalle = h("div", { class: "detalle sub" }, `Ranura «${NOMBRE_RANURA_ALMA[sel]}» vacía: elige una carta del mazo y pulsa el botón de esta ranura.`);
       }
     } else if (typeof sel === "object") {
       const pila = p.mazo.en(sel);
@@ -554,13 +611,12 @@ export class Interfaz {
           this.abrirInventario(juego, "cartas", r);
         };
         detalle = h("div", { class: "detalle" }, fichaCarta(c),
-          h("div", { class: "botones" },
-            h("button", { class: "principal", onclick: () => asignar("forma") }, "Usar como Forma"),
-            h("button", { onclick: () => asignar(0) }, "Resonancia I"),
-            h("button", { onclick: () => asignar(1) }, "Resonancia II")));
+          h("div", { class: "botones" }, ...RANURAS_ALMA.map((r) =>
+            h("button", { class: r === 0 ? "principal" : "", onclick: () => asignar(r) }, NOMBRE_RANURA_ALMA[r]))),
+          grimorioCarta(c));
       }
     }
-    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Equipadas"), slots, h("h3", {}, "Mazo"), mazo), detalle);
+    return h("div", { class: "vista" }, h("div", { class: "col" }, h("h3", {}, "Mazo de almas (5 ranuras)"), slots, h("h3", {}, "Cartas"), mazo), detalle);
   }
 
   private vistaHabilidades(juego: ConPartida, p: Partida): HTMLElement {
@@ -654,11 +710,16 @@ export class Interfaz {
     const pot = p.potencias();
     const mods = p.combate();
     const estilo = p.estilo();
-    const pasiva = p.pasiva();
+    const efectosAlma = p.efectosAlma();
     const danio = h("div", { class: "danios" },
       h("div", {}, h("small", {}, `Golpe (${estilo.nombre})`), h("b", {}, `${pot.golpe}`), h("small", {}, `combo completo ${pot.combo}`)),
       h("div", {}, h("small", {}, "Patada"), h("b", {}, `${pot.patada}`), h("small", {}, "rompe guardias")),
-      h("div", {}, h("small", {}, pot.tecnicaNombre ?? "Técnica"), h("b", {}, pot.tecnicaNombre === null ? "—" : `${pot.tecnica}`), h("small", {}, pot.tecnicaNombre === null ? "sin Forma" : `${pot.costoTecnica} éter`)),
+      ...([1, 2, 3, 4] as const).map((r) => {
+        const hab = p.habilidad(r);
+        return h("div", {}, h("small", {}, `${NOMBRE_RANURA_ALMA[r]} (${TECLA_RANURA_ALMA[r]})`),
+          h("b", { style: hab !== null ? `color:${hab.def.color}` : "" }, hab === null ? "—" : `${Math.round(hab.potencia * p.multiplicadorDanio())}`),
+          h("small", {}, hab === null ? "ranura vacía" : `${hab.def.nombre}${r === 4 ? "" : ` · ${hab.costo} éter`}`));
+      }),
       h("div", {}, h("small", {}, "Crítico"), h("b", {}, `${total.critico} %`), h("small", {}, `×${(1.75 + mods.critDanio).toFixed(2).replace(".", ",")} de daño`)));
     const filaMod = (nombre: string, v: number, sufijo = " %"): HTMLElement | null =>
       v === 0 ? null : h("span", { class: "stat" }, `${nombre} `, h("b", {}, `+${sufijo === " %" ? Math.round(v * 100) : v}${sufijo}`));
@@ -671,7 +732,17 @@ export class Interfaz {
       h("h3", {}, `Daño por ataque (antes de la defensa enemiga) · ${estilo.nombre}`),
       danio,
       modsUi,
-      pasiva !== null ? h("div", { class: "pasiva" }, `Pasiva de tu Forma · ${INFO_PASIVA[pasiva].nombre}: ${INFO_PASIVA[pasiva].descripcion}`) : null,
+      Object.keys(efectosAlma).length > 0
+        ? h("div", { class: "pasiva" }, `Pasivas de alma, míticas y modificadores del equipo: ${describirEfectos(efectosAlma)}`) : null,
+      (() => {
+        const suerte = total.suerte;
+        const b = p.modificadoresBotin();
+        return h("div", { class: "suerte-info" },
+          h("b", {}, `Suerte ${suerte}`),
+          ` · botín ×${b.suerte.toFixed(2).replace(".", ",")} · rarezas altas +${Math.round(suerte * 0.35)} % por escalón`
+          + ` · ${Math.round(Math.min(0.4, suerte / 500) * 100)} % de que una carta suba una estrella`
+          + ` · esquirlas ×${b.codicia.toFixed(2).replace(".", ",")}`);
+      })(),
       h("h3", {}, "Desglose de stats"),
       tabla,
       total.hp !== sinVidrio ? h("div", { class: "sub" }, `Sangre de Vidrio reduce tu vida de ${sinVidrio} a ${total.hp}.`) : null,
@@ -715,20 +786,25 @@ export class Interfaz {
       })));
 
     const sel = elegidas.map((pos) => cartasMazo.find((c) => c.pos.casilla === pos.casilla)?.carta).filter((c): c is Carta => c !== undefined);
-    let info: HTMLElement = h("p", { class: "sub" }, "Elige tres cartas de la misma familia y estrellas.");
+    let info: HTMLElement = h("p", { class: "sub" }, "Elige tres cartas con la misma cantidad de estrellas (de cualquier alma): sale una de las tres.");
     let fusionar: HTMLElement | null = null;
     if (sel.length > 0) {
       const n = sel[0].nivel;
-      const compatibles = sel.every((c) => c.nivel === n && c.tipo === sel[0].tipo);
+      const compatibles = sel.every((c) => c.nivel === n);
+      const dado = dadoParaNivel(n);
+      const dados = dado !== undefined ? p.mochila.contar(dado) : 0;
       const costo = COSTO_FUSION[n] ?? 0;
       const prob = n >= NIVEL_MAX_CARTA ? 0 : lagrima ? 1 : PROB_FUSION[n];
       info = h("div", {},
-        h("p", {}, `Elegidas ${sel.length}/3 · ${FAMILIAS[sel[0].tipo]} ${"★".repeat(n + 1)}`),
-        !compatibles ? h("p", { class: "baja" }, "No coinciden en familia o estrellas.") : null,
+        h("p", {}, `Elegidas ${sel.length}/3 · ${textoEstrellas(n)} → ${textoEstrellas(Math.min(n + 1, NIVEL_MAX_CARTA))}`),
+        !compatibles ? h("p", { class: "baja" }, "No tienen la misma cantidad de estrellas.") : null,
         h("p", {}, `Costo: ${costo} ◆ (tienes ${p.esquirlas}) · Probabilidad de subir: ${Math.round(prob * 100)} %`),
         h("label", { class: "check" },
           h("input", { type: "checkbox", checked: lagrima, onclick: () => this.abrirAltar(juego, elegidas, !lagrima) }),
-          ` Usar Lágrima de Eco (tienes ${p.mochila.contar(OBJ_LAGRIMA)}): éxito seguro`));
+          dado !== undefined
+            ? ` Asegurar con Dado del Destino ${n + 2}★ (tienes ${dados}; si no, Lágrima de Eco: ${p.mochila.contar(OBJ_LAGRIMA)})`
+            : ` Asegurar con Lágrima de Eco (tienes ${p.mochila.contar(OBJ_LAGRIMA)})`),
+        dado !== undefined && dados === 0 ? h("p", { class: "sub" }, `Los Dados del Destino se compran en el Bazar del Pozo (${n + 2}★: ${PRECIO_DADO[n - 2]} ◆).`) : null);
       if (sel.length === 3) {
         fusionar = h("button", {
           class: "principal",
@@ -752,7 +828,7 @@ export class Interfaz {
     // Mejora con Polvo de Eco
     const polvo = p.mochila.contar(OBJ_POLVO);
     const mejorables: [RanuraCarta | Posicion, Carta][] = [];
-    for (const r of ["forma", 0, 1] as const) {
+    for (const r of RANURAS_ALMA) {
       const c = p.cartaEn(r);
       if (c !== null) mejorables.push([r, c]);
     }
@@ -770,10 +846,11 @@ export class Interfaz {
           }
           this.abrirAltar(juego, elegidas, lagrima);
         },
-      }, `${obj === "forma" ? "Forma" : obj === 0 ? "Res. I" : "Res. II"}: ${alma(c.personaje).nombre} ${estrellas(c)} (${c.mejoras}/${MEJORAS_MAX})`)));
+      }, `${typeof obj === "number" ? NOMBRE_RANURA_ALMA[obj] : "Mazo"}: ${alma(c.personaje).nombre} ${estrellas(c)} (${c.mejoras}/${MEJORAS_MAX})`)));
 
-    this.abrir("altar", this.botonCerrar(),
-      h("h2", {}, "Altar de las Almas"),
+    const enPueblo = !("mapa" in juego);
+    this.abrirTienda("altar", enPueblo ? "altar" : "altarPozo", this.botonCerrar(),
+      cabeceraTienda(enPueblo ? "altar" : "altarPozo", [esquirlas(p.esquirlas), monedaPolvo(polvo)]),
       h("div", { class: "vista" },
         h("div", { class: "col" }, h("h3", {}, "Fusión: tres almas, una sola voz"), grilla),
         h("div", { class: "detalle" }, info, fusionar, mensaje ?? null,
@@ -837,11 +914,11 @@ export class Interfaz {
           },
         }, `Refinar (+${nivel}→+${nivel + 1})`));
     });
-    this.abrir("yunque", this.botonCerrar(),
-      h("h2", {}, "Yunque del Faro"),
-      h("p", { class: "cita" }, "«Todo lo que se rompe aquí abajo puede volver a ser útil.»"),
+    const enPueblo = !("mapa" in juego);
+    this.abrirTienda("yunque", enPueblo ? "herrero" : "yunqueFaro", this.botonCerrar(),
+      cabeceraTienda(enPueblo ? "herrero" : "yunqueFaro", [esquirlas(p.esquirlas)]),
+      h("h3", {}, "Materiales"),
       materiales,
-      h("div", { class: "esencia" }, `◆ ${p.esquirlas} esquirlas`),
       resultado ?? null,
       h("h3", {}, "Recetas"), ...recetas,
       h("h3", {}, "Refinar equipo puesto"), ...refinar);
@@ -882,10 +959,8 @@ export class Interfaz {
           },
         }, `+${valorDesguace(eq)} ◆`)));
     }
-    this.abrir("mercader", this.botonCerrar(),
-      h("h2", {}, "Mercader del Pozo"),
-      h("p", { class: "cita" }, "«Abajo todo se paga. Arriba también, pero allá lo olvidan.»"),
-      h("div", { class: "esencia" }, `◆ ${p.esquirlas} esquirlas`),
+    this.abrirTienda("mercader", "mercaderPozo", this.botonCerrar(),
+      cabeceraTienda("mercaderPozo", [esquirlas(p.esquirlas)]),
       h("h3", {}, "Comprar"), ...venta,
       h("h3", {}, "Desguazar equipo"), desguace.length > 0 ? h("div", {}, ...desguace) : h("p", { class: "sub" }, "No llevas equipo para desguazar."));
   }
@@ -927,10 +1002,16 @@ export class Interfaz {
             }, "Entregar")
             : h("button", { onclick: () => { p.misiones.abandonar(a.id); refrescar(); } }, "Abandonar")));
     };
-    const disponibles = MISIONES.filter((m) => p.misiones.puedeAceptar(m.id, p.nivel()).ok).slice(0, 6);
-    this.abrir("taberna", this.botonCerrar(),
-      h("h2", {}, "Taberna «El Último Eco»"),
-      h("p", { class: "cita" }, "«Los que vuelven pagan la ronda. Los que no, la deben.» — Ilse"),
+    // Se pueden aceptar aunque estén las 3 activas ocupadas (el botón queda deshabilitado): se listan igual.
+    const libre = (id: number): boolean => {
+      const r = p.misiones.puedeAceptar(id, p.nivel());
+      return r.ok || r.error === "demasiadas";
+    };
+    const disponibles = MISIONES.filter((m) => libre(m.id)).sort((a, b) => (m2(a) - m2(b)) || a.id - b.id).slice(0, 8);
+    const entregadas = MISIONES.filter((m) => m.repetible !== true && p.misiones.exportar().entregadas.includes(m.id)).length;
+    const totalUnicas = MISIONES.filter((m) => m.repetible !== true).length;
+    this.abrirTienda("taberna", "taberna", this.botonCerrar(),
+      cabeceraTienda("taberna", [esquirlas(p.esquirlas)]),
       aviso ?? null,
       h("div", { class: "vista" },
         h("div", { class: "col" },
@@ -938,11 +1019,13 @@ export class Interfaz {
           activas.length === 0 ? h("p", { class: "sub" }, "Ninguna. Elige del tablón.") : null,
           ...activas.map(filaActiva)),
         h("div", { class: "col" },
-          h("h3", {}, "Tablón"),
+          h("h3", {}, `Tablón · ${entregadas}/${totalUnicas} misiones cumplidas · ${MISIONES.length} en total`),
           disponibles.length === 0 ? h("p", { class: "sub" }, "No hay encargos nuevos por ahora.") : null,
           ...disponibles.map((m) => h("div", { class: "mision" },
             h("b", {}, INFO_MISIONES[m.id]?.titulo ?? `Misión ${m.id}`),
+            h("small", { class: "etiqueta-mision" }, `Zona ${INFO_MISIONES[m.id]?.zona ?? "?"} · ${NOMBRE_LINEA[INFO_MISIONES[m.id]?.linea ?? "encargo"]}`),
             h("div", { class: "sub" }, INFO_MISIONES[m.id]?.descripcion ?? ""),
+            h("div", { class: "sub" }, (INFO_MISIONES[m.id]?.objetivos ?? []).join(" · ")),
             h("div", { class: "sub" }, `Recompensa: ${recompensa(m.id)}`),
             h("button", {
               disabled: activas.length >= MAX_MISIONES_ACTIVAS,
@@ -1015,10 +1098,8 @@ export class Interfaz {
       }
       cuerpo = filas.length > 0 ? h("div", {}, ...filas) : h("p", { class: "sub" }, "No llevas nada para vender.");
     }
-    this.abrir("bazar", this.botonCerrar(),
-      h("h2", {}, "Bazar del Pozo"),
-      h("p", { class: "cita" }, "«Todo se compra, todo se vende. Hasta los recuerdos.» — Tobías"),
-      h("div", { class: "esencia" }, `◆ ${p.esquirlas} esquirlas`),
+    this.abrirTienda("bazar", "mercader", this.botonCerrar(),
+      cabeceraTienda("mercader", [esquirlas(p.esquirlas)]),
       tabs, cuerpo);
   }
 
@@ -1026,10 +1107,8 @@ export class Interfaz {
   abrirArmeria(juego: ConPartida, mensaje?: HTMLElement): void {
     const p = juego.partida;
     const stock = this.acciones.stockArmero();
-    this.abrir("armeria", this.botonCerrar(),
-      h("h2", {}, "Armería Hierro Viejo"),
-      h("p", { class: "cita" }, "«Cuanto más hondo bajes, mejor el acero que te traigo.» — Brunhild"),
-      h("div", { class: "esencia" }, `◆ ${p.esquirlas} esquirlas`),
+    this.abrirTienda("armeria", "armero", this.botonCerrar(),
+      cabeceraTienda("armero", [esquirlas(p.esquirlas)]),
       mensaje ?? null,
       tieneArma(p) ? null : h("div", { class: "kit-recluta" },
         h("p", {}, h("b", {}, "Kit de recluta"), " — «¿Te dejó el Pozo con las manos vacías? Toma, que no se diga.»"),
@@ -1058,10 +1137,15 @@ export class Interfaz {
   }
 
   /** Bóveda de los Caídos: banco (minialu/Inventario + transferir) y esquirlas a salvo. */
-  abrirBanco(juego: ConPartida): void {
+  abrirBanco(juego: ConPartida, pestana = this.pestanaBanco): void {
+    this.pestanaBanco = pestana;
     const p = juego.partida;
     const banco = this.acciones.banco();
     const refrescar = (): void => this.abrirBanco(juego);
+    const ocupadas = (t: number): number => [...banco.inventario.posiciones()].filter((q) => q.pestana === t && banco.inventario.en(q) !== null).length;
+    const pestanas = h("div", { class: "tabs" }, ...Array.from({ length: PESTANAS_BANCO }, (_, t) =>
+      h("button", { class: t === pestana ? "tab on" : "tab", onclick: () => this.abrirBanco(juego, t) },
+        `Bóveda ${["I", "II", "III", "IV"][t]} · ${ocupadas(t)}/${CASILLAS_PESTANA_BANCO}`)));
     const grilla = grillaInventario;
     const mover = (r: { ok: boolean; error?: string }): void => {
       this.audio.reproducir(r.ok ? "recoger" : "fallo");
@@ -1070,19 +1154,23 @@ export class Interfaz {
       refrescar();
     };
     const boton = (txt: string, f: () => { ok: boolean }): HTMLElement => h("button", { onclick: () => mover(f()) }, txt);
-    this.abrir("banco", this.botonCerrar(),
-      h("h2", {}, "Bóveda de los Caídos"),
-      h("p", { class: "cita" }, "«Lo que dejes aquí no lo reclama el Pozo.» — Custodio Vael"),
-      h("div", { class: "botones" },
-        h("span", { class: "esencia" }, `Llevas ◆ ${p.esquirlas}`),
-        boton("Depositar 100", () => banco.depositarEsquirlas(p, 100)),
-        boton("Depositar todo", () => banco.depositarEsquirlas(p, p.esquirlas)),
-        h("span", { class: "esencia" }, `En la bóveda ◆ ${banco.esquirlas}`),
-        boton("Retirar 100", () => banco.retirarEsquirlas(p, 100)),
-        boton("Retirar todo", () => banco.retirarEsquirlas(p, banco.esquirlas))),
+    this.abrirTienda("banco", "banco", this.botonCerrar(),
+      cabeceraTienda("banco", [esquirlas(p.esquirlas)]),
+      h("div", { class: "caja-fuerte" },
+        h("div", { class: "cofre-moneda" },
+          h("small", {}, "En tu bolsa"), h("b", {}, `◆ ${p.esquirlas.toLocaleString("es")}`),
+          h("div", { class: "botones" },
+            boton("Depositar 100", () => banco.depositarEsquirlas(p, 100)),
+            boton("Depositar todo", () => banco.depositarEsquirlas(p, p.esquirlas)))),
+        h("div", { class: "cofre-moneda boveda" },
+          h("small", {}, "En la bóveda (a salvo)"), h("b", {}, `◆ ${banco.esquirlas.toLocaleString("es")}`),
+          h("div", { class: "botones" },
+            boton("Retirar 100", () => banco.retirarEsquirlas(p, 100)),
+            boton("Retirar todo", () => banco.retirarEsquirlas(p, banco.esquirlas))))),
       h("div", { class: "vista" },
         h("div", { class: "col" }, h("h3", {}, "Mochila (clic para guardar)"), grilla(p.mochila, (pos) => mover(banco.depositar(p, pos)))),
-        h("div", { class: "col" }, h("h3", {}, `Bóveda (clic para retirar)`), grilla(banco.inventario, (pos) => mover(banco.retirar(p, pos))))));
+        h("div", { class: "col" }, h("h3", {}, `Bóveda (clic para retirar)`), pestanas,
+          grilla(banco.inventario, (pos) => mover(banco.retirar(p, pos)), pestana))));
   }
 
   /** El Pozo: elegir desde qué piso bajar (hasta el más hondo con guardián vencido + 1). */
@@ -1095,8 +1183,8 @@ export class Interfaz {
       this.abrirPozo(juego);
     };
     const pisos = Array.from({ length: p.pisoDesbloqueado }, (_, k) => k + 1);
-    this.abrir("pozo", this.botonCerrar(),
-      h("h2", {}, "El Pozo"),
+    this.abrirTienda("pozo", "pozo", this.botonCerrar(),
+      cabeceraTienda("pozo", [esquirlas(p.esquirlas)], "Abajo, todo recuerda."),
       h("p", { class: "sub" }, "Bajas con todo lo que llevas. Para volver con tu botín hay que EXTRAER: aguanta 5 s en una zona de "
         + "extracción (verde en el mapa) o toma el portal del guardián. Si caes, pierdes TODO lo que llevas encima (equipo, mochila "
         + "y esquirlas); tu Eco lo guarda en ese piso."),

@@ -36,15 +36,15 @@ describe("equipo con calidad y rasgos", () => {
       expect(rasgos.length).toBeGreaterThanOrEqual(2);
       for (const [id, v] of rasgos) {
         const def = RASGOS_EQUIPO.find((r) => r.id === id)!;
-        if (def.en !== undefined) expect(def.en).toContain(e.ranura);
         // Las bases con rasgo propio (Estoque, Armadura de Placas...) lo suman: no aplica el rango del azar.
         if (BASES.find((b) => b.id === e.base)?.rasgos?.[id as keyof NonNullable<(typeof BASES)[number]["rasgos"]>] !== undefined) continue;
+        expect(def.en).toContain(e.ranura);
         expect(v).toBeGreaterThanOrEqual(def.min);
         expect(v).toBeLessThanOrEqual(def.max * 1.5);
       }
     }
     expect(conRasgos).toBe(400);
-    expect(Object.keys(crearUnico(azar, 1).rasgos ?? {}).length).toBe(1);
+    expect(Object.keys(crearUnico(azar, 1).rasgos ?? {}).length).toBe(4);
   });
 });
 
@@ -81,14 +81,15 @@ describe("cartas con rasgos y resplandecientes", () => {
 });
 
 describe("modificadores de combate", () => {
-  it("suma rasgos del equipo, rasgo de la Forma y pasiva", () => {
-    const p = new Partida(Meta.nueva(), 1, { alma: 9 }); // Morrigan: pasiva Vendaval
+  it("suma rasgos del equipo, rasgo de la Forma y la pasiva de la ranura Forma", () => {
+    const p = new Partida(Meta.nueva(), 1, { alma: 9 }); // Morrigan en Forma: Plumas Afiladas (+5 % vel. a 1★)
     p.equipo.arma = { ...p.equipo.arma!, rasgos: { alcance: 0.2, velocidad: 0.1 } };
     p.forma = { ...p.forma!, rasgo: "furiosa" };
+    p.almas[1] = null; // solo la Forma (el personaje nuevo también trae su alma como Habilidad I)
     const m = p.combate();
     expect(m.alcance).toBeCloseTo(0.2);
-    expect(m.velocidad).toBeCloseTo(0.3);
-    expect(m.agilidad).toBeCloseTo(0.08);
+    const escala = 1 + p.forma!.nivel * 0.16 + (p.forma!.brillante === true ? 0.1 : 0);
+    expect(m.velocidad).toBeCloseTo(0.1 + 0.05 * escala);
     expect(m.tecnicaDanio).toBeCloseTo(0.2);
   });
 });

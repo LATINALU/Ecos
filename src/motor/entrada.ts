@@ -1,7 +1,7 @@
 // Teclado → acciones. "recien" = se apretó en este paso de simulación (se consume al final del paso).
 
 export type Accion =
-  | "izq" | "der" | "arr" | "aba" | "saltar" | "golpe" | "patada" | "tecnica" | "embestida"
+  | "izq" | "der" | "arr" | "aba" | "saltar" | "golpe" | "patada" | "hab1" | "hab2" | "hab3" | "definitiva" | "embestida"
   | "interactuar" | "pocion" | "eter" | "inventario" | "mapa" | "pausa";
 
 const TECLAS: Readonly<Record<string, Accion>> = {
@@ -12,7 +12,10 @@ const TECLAS: Readonly<Record<string, Accion>> = {
   Space: "saltar", KeyZ: "saltar",
   KeyJ: "golpe", KeyX: "golpe",
   KeyK: "patada", KeyC: "patada",
-  KeyL: "tecnica", KeyV: "tecnica",
+  KeyL: "hab1", KeyV: "hab1",
+  KeyU: "hab2", KeyB: "hab2",
+  KeyO: "hab3", KeyN: "hab3",
+  KeyP: "definitiva", KeyF: "definitiva",
   ShiftLeft: "embestida", ShiftRight: "embestida",
   KeyE: "interactuar",
   KeyQ: "pocion",
@@ -28,7 +31,8 @@ export const AYUDA_CONTROLES: ReadonlyArray<readonly [string, string]> = [
   ["J  ·  X", "Golpe (combo según el arma). Mantener y soltar: ataque cargado"],
   ["J tras esquivar", "Estocada: golpe durante el paso atrás o la embestida"],
   ["K  ·  C", "Patada: rompe guardias; en el aire con ↓ es un pisotón"],
-  ["L  ·  V", "Técnica de tu Forma (gasta éter)"],
+  ["L · U · O  (V · B · N)", "Habilidades I, II y III del mazo de almas (gastan éter)"],
+  ["P  ·  F", "Definitiva (se carga golpeando y recibiendo daño)"],
   ["↓", "Agacharse (los proyectiles altos pasan por encima; golpe bajo)"],
   ["↓ + Salto", "Deslizarse con una patada baja (en una plataforma: bajar)"],
   ["Shift (quieto)", "Paso atrás invulnerable. Justo antes de un golpe: ¡esquiva perfecta!"],

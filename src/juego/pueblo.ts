@@ -4,6 +4,7 @@
 //   Altar (cartas) · Fragua (yunque) · Santuario (esencia y memorial) · el Pozo (bajar).
 // Implementa Contexto para que el Jugador funcione igual que abajo (sin enemigos).
 
+import { hd } from "../motor/texto-hd.ts";
 import { BIOMAS, type Bioma } from "../contenido/biomas.ts";
 import { ROCA } from "../contenido/atlas.ts";
 import { ALTO_SALA, ANCHO_SALA, FILAS, TILE } from "../dominio/mundo/sala.ts";
@@ -212,10 +213,7 @@ export class Pueblo implements Contexto {
       g.fillRect(n.x - 46, y + 4, 92, 13);
       g.fillStyle = "#c9a76a";
       g.fillRect(n.x - 45, y + 5, 90, 11);
-      g.fillStyle = "#2a1a10";
-      g.font = "bold 7px monospace";
-      g.textAlign = "center";
-      g.fillText(n.edificio.replace(/«|»/g, "").slice(0, 24), n.x, y + 13);
+      hd.texto(g, n.edificio.replace(/«|»/g, "").slice(0, 24), n.x, y + 13, { color: "#ffe9c0", alinear: "center", tam: 7 });
     }
     // Faroles entre edificios
     for (let i = 0; i < NPCS.length - 1; i++) {
@@ -262,10 +260,7 @@ export class Pueblo implements Contexto {
     // cartel
     g.fillStyle = "#c9a76a";
     g.fillRect(x - 22, SUELO - 90, 44, 11);
-    g.fillStyle = "#2a1a10";
-    g.font = "bold 7px monospace";
-    g.textAlign = "center";
-    g.fillText("EL POZO", x, SUELO - 82);
+    hd.texto(g, "EL POZO", x, SUELO - 82, { color: "#ffe9c0", alinear: "center", tam: 7 });
   }
 
   dibujar(g: CanvasRenderingContext2D): void {
@@ -349,12 +344,8 @@ export class Pueblo implements Contexto {
       const y = SUELO - 130;
       g.fillStyle = "#000000cc";
       g.fillRect(x, y, w, 24);
-      g.fillStyle = "#ffe9a8";
-      g.textAlign = "left";
-      g.fillText(texto, x + 5, y + 10);
-      g.fillStyle = "#c9c0d8";
-      g.font = "italic 7px monospace";
-      g.fillText(linea, x + 5, y + 20);
+      hd.texto(g, texto, x + 5, y + 10, { color: "#ffe9a8" });
+      hd.texto(g, linea, x + 5, y + 20, { color: "#c9c0d8", tam: 7, negrita: false });
     }
     this.fx.dibujarTextos(g);
     g.restore();

@@ -25,7 +25,7 @@ export function colorPremio(p: Premio): string {
 /** ¿Merece haz de luz y fanfarria? */
 export function premioDestacado(p: Premio): 0 | 1 | 2 {
   if (p.tipo === "equipo") return p.equipo.rareza >= 4 ? 2 : p.equipo.rareza >= 2 ? 1 : 0;
-  if (p.tipo === "carta") return p.carta.nivel >= 4 ? 2 : p.carta.nivel >= 2 ? 1 : 0;
+  if (p.tipo === "carta") return p.carta.nivel >= 5 ? 2 : p.carta.nivel >= 3 ? 1 : 0;
   return 0;
 }
 

@@ -32,6 +32,13 @@ body { display: grid; place-items: center; }
   background: #000;
 }
 
+#lienzo-texto {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
 #capa-ui {
   position: absolute;
   inset: 0;
@@ -324,3 +331,16 @@ input.nombre-portador { font: inherit; color: var(--texto); background: #0c0916;
 .pisos button { display: flex; flex-direction: column; align-items: center; gap: 0.2em; }
 .stock { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6em; }
 .stock .detalle { display: flex; flex-direction: column; justify-content: space-between; }
+.etiqueta-mision { color: var(--acento); font-size: 0.75em; letter-spacing: 0.05em; text-transform: uppercase; }
+/* ---------- Mazo de almas (grimorio) ---------- */
+.mazo-almas { grid-template-columns: repeat(5, 1fr); }
+.grimorio { margin-top: 0.6em; display: flex; flex-direction: column; gap: 0.35em; }
+.fila-grimorio { border-left: 2px solid var(--borde); padding: 0.15em 0.6em; }
+.fila-grimorio.activa { border-left-color: var(--oro); background: #ffd27a14; }
+.fila-grimorio .hab { font-size: 0.95em; }
+.pasiva-mitica { margin: 0.4em 0; padding: 0.35em 0.6em; border: 1px solid #ff4d6d; border-radius: 4px; background: linear-gradient(90deg, #ff4d6d22, transparent); color: #ffd0d8; box-shadow: 0 0 12px #ff4d6d33; }
+.pasiva-mitica b { color: #ff8aa0; }
+.suerte-info { margin: 0.3em 0; color: #7dff9a; font-size: 0.92em; }
+.suerte-info b { color: #b6ffb0; }
+.rasgo.firma { color: #ffe27a; }
+.rasgo.de-base { color: #a8c8d8; font-style: italic; }

@@ -13,7 +13,8 @@ describe("arma y alma inicial", () => {
     expect(p.estilo().id).toBe("pesada");
     expect(estiloDe(p.equipo.arma?.base)).toBe("pesada");
     expect(p.forma?.personaje).toBe(6);
-    expect(p.pasiva()).toBe("hambre");
+    // La pasiva de ataques básicos de Ulva (Colmillos) cura con cada golpe.
+    expect(p.efectoAlma("golpeCura")).toBeGreaterThan(0);
   });
 });
 

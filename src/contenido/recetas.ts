@@ -25,9 +25,9 @@ export const RECETAS: readonly Receta[] = [
   { id: "pocion2", nombre: "Poción de Vida (escoria)", ingredientes: [[MAT_ESCORIA, 2]], esquirlas: 0, resultado: { tipo: "objeto", objeto: OBJ_POCION, cantidad: 1 } },
   { id: "polvo", nombre: "Polvo de Eco", ingredientes: [[MAT_FRAGMENTO, 1], [MAT_HUESO, 2]], esquirlas: 10, resultado: { tipo: "objeto", objeto: OBJ_POLVO, cantidad: 1 } },
   { id: "lagrima", nombre: "Lágrima de Eco", ingredientes: [[MAT_FRAGMENTO, 4], [MAT_ESPORA, 3]], esquirlas: 60, resultado: { tipo: "objeto", objeto: OBJ_LAGRIMA, cantidad: 1 } },
-  { id: "arma", nombre: "Forjar arma (Rara o mejor)", ingredientes: [[MAT_HUESO, 6], [MAT_FRAGMENTO, 1]], esquirlas: 40, resultado: { tipo: "equipo", ranura: "arma", minima: 1 } },
-  { id: "armadura", nombre: "Forjar pieza de armadura (Rara o mejor)", ingredientes: [[MAT_ESPORA, 6], [MAT_FRAGMENTO, 1]], esquirlas: 40, resultado: { tipo: "equipo", ranura: ARMADURAS, minima: 1 } },
-  { id: "amuleto", nombre: "Forjar joya: anillo, aretes o collar (Rara o mejor)", ingredientes: [[MAT_HUESO, 3], [MAT_ESPORA, 3], [MAT_FRAGMENTO, 1]], esquirlas: 40, resultado: { tipo: "equipo", ranura: JOYAS, minima: 1 } },
+  { id: "arma", nombre: "Forjar arma (Rara o mejor)", ingredientes: [[MAT_HUESO, 6], [MAT_FRAGMENTO, 1]], esquirlas: 40, resultado: { tipo: "equipo", ranura: "arma", minima: 3 } },
+  { id: "armadura", nombre: "Forjar pieza de armadura (Rara o mejor)", ingredientes: [[MAT_ESPORA, 6], [MAT_FRAGMENTO, 1]], esquirlas: 40, resultado: { tipo: "equipo", ranura: ARMADURAS, minima: 2 } },
+  { id: "amuleto", nombre: "Forjar joya: anillo, aretes o collar (Rara o mejor)", ingredientes: [[MAT_HUESO, 3], [MAT_ESPORA, 3], [MAT_FRAGMENTO, 1]], esquirlas: 40, resultado: { tipo: "equipo", ranura: JOYAS, minima: 2 } },
   { id: "epico", nombre: "Forjar arma Épica", ingredientes: [[MAT_ESCORIA, 6], [MAT_FRAGMENTO, 3]], esquirlas: 150, resultado: { tipo: "equipo", ranura: "arma", minima: 2 } },
   { id: "carta", nombre: "Invocar Carta de Alma", ingredientes: [[MAT_FRAGMENTO, 3], [MAT_HUESO, 2], [MAT_ESPORA, 2]], esquirlas: 30, resultado: { tipo: "carta" } },
 ];

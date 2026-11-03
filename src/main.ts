@@ -3,6 +3,8 @@
 // El personaje (Partida) es persistente por ranura: baja con todo, vuelve con todo; al caer pierde un 25 %
 // de las esquirlas que lleva. El banco y la Meta (reliquias, esencia, ecos) también son de la ranura.
 
+import { crearCarta } from "./dominio/cartas.ts";
+import { hd } from "./motor/texto-hd.ts";
 import { AzarSistema } from "minialu";
 import { Banco } from "./dominio/banco.ts";
 import { generarStockArmero, type ArticuloArmero } from "./dominio/comercio.ts";
@@ -32,6 +34,11 @@ const capaUi = document.getElementById("capa-ui") as HTMLDivElement;
 const marco = document.getElementById("marco") as HTMLDivElement;
 const g = lienzo.getContext("2d")!;
 g.imageSmoothingEnabled = false;
+// Capa de texto nítido (alta resolución) encima del juego pixelado.
+const lienzoTexto = document.createElement("canvas");
+lienzoTexto.id = "lienzo-texto";
+lienzo.after(lienzoTexto);
+hd.conectar(lienzoTexto, ANCHO);
 
 migrarGuardadoViejo();
 
@@ -224,6 +231,7 @@ function ajustar(): void {
   marco.style.height = `${hh}px`;
   lienzo.style.width = `${w}px`;
   lienzo.style.height = `${hh}px`;
+  hd.redimensionar(w, hh);
   marco.style.setProperty("--escala", String(escala));
 }
 window.addEventListener("resize", ajustar);
@@ -332,6 +340,7 @@ function cuadro(ahora: number): void {
   } else {
     dibujarTitulo(reloj, dt);
   }
+  hd.pintar();
   requestAnimationFrame(cuadro);
 }
 
@@ -358,6 +367,11 @@ void sprites.cargar().then(() => {
   banco = new Banco();
   partida = new Partida(meta, (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0, { estilo });
   partida.pisoDesbloqueado = PISOS_TOTALES;
+  // &mazo=a,b,c,d,e → mazo de almas completo (ids de alma) a 4★; &mazo solo → al azar. &cargada → Definitiva llena.
+  if (q.has("mazo")) {
+    const ids = (q.get("mazo") ?? "").split(",").filter((x) => x !== "").map(Number);
+    for (let r = 0; r < 5; r++) partida.almas[r] = crearCarta(partida.azar, ids[r] ?? Math.floor(Math.random() * 12), 3);
+  }
   if (q.has("pueblo")) {
     entrarPueblo("inicio");
     // &panel=taberna|mercader|armero|banco|altar|herrero|santuario|pozo abre ese servicio (capturas).
@@ -366,11 +380,15 @@ void sprites.cargar().then(() => {
       partida.billetera.acreditar("esquirlas", 5000);
       eventosPueblo.abrirServicio(panel as "taberna");
     }
-    if (q.has("inventario") && pueblo !== null) ui.abrirInventario(pueblo);
+    if (q.has("inventario") && pueblo !== null) {
+      const tab = (q.get("tab") ?? "equipo") as "equipo" | "cartas" | "habilidades" | "stats";
+      ui.abrirInventario(pueblo, tab, tab === "cartas" ? 1 : undefined);
+    }
     return;
   }
 
   descender(Number(q.get("piso") ?? 1));
+  if (q.has("cargada") && partida !== null) partida.cargaDefinitiva = 100;
   if (q.has("sala")) juego?.depurarIr(Number(q.get("piso") ?? 1), Number(q.get("sala") ?? 0));
   if (q.has("jefe") && juego !== null) juego.depurarIr(Number(q.get("piso") ?? 1), juego.mapa.jefe);
   if (q.has("extraccion") && juego !== null) {

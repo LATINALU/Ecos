@@ -1,5 +1,6 @@
 // Catálogo de objetos. Un único lugar de verdad (lección de la tienda de MiniFighter): ids, pilas, precios.
 
+import type { ClaveEfecto } from "./grimorio.ts";
 import type { EfectoUnico, TipoPieza } from "../dominio/tipos.ts";
 import type { Stat } from "../dominio/stats.ts";
 
@@ -9,6 +10,8 @@ export const OBJ_POCION = 1;
 export const OBJ_ETER = 2;
 export const OBJ_POLVO = 3;
 export const OBJ_LAGRIMA = 4;
+/** Dados del Destino (4★ a 12★): ids 30 a 38. */
+export const OBJ_DADO_BASE = 30;
 
 export interface DefConsumible {
   readonly id: number;
@@ -19,12 +22,31 @@ export interface DefConsumible {
   readonly descripcion: string;
 }
 
+/** Precios de los dados, de 4★ a 12★ (la carta máxima). */
+export const PRECIO_DADO: readonly number[] = [20, 50, 100, 300, 800, 2000, 5000, 12000, 30000];
+const COLOR_DADO: readonly string[] = ["#9fe8ff", "#7dff9a", "#ffd27a", "#ff9a4d", "#ff4d6d", "#ff6ad5", "#c9a7ff", "#7fe3ff", "#ffffff"];
+
 export const CONSUMIBLES: readonly DefConsumible[] = [
   { id: OBJ_POCION, nombre: "Poción de Vida", maxPila: 5, precio: 60, color: "#ff4d6d", descripcion: "Restaura el 45 % de la vida. Tecla Q." },
   { id: OBJ_ETER, nombre: "Frasco de Éter", maxPila: 5, precio: 45, color: "#4dc3ff", descripcion: "Restaura el 70 % del éter. Tecla R." },
   { id: OBJ_POLVO, nombre: "Polvo de Eco", maxPila: 30, precio: 80, color: "#c9a7ff", descripcion: "Mejora una carta de alma (+1~+5 a todo, hasta 5 veces). Se usa en el Altar." },
-  { id: OBJ_LAGRIMA, nombre: "Lágrima de Eco", maxPila: 5, precio: 400, color: "#ffffff", descripcion: "La próxima fusión en el Altar sube de estrella con seguridad." },
+  { id: OBJ_LAGRIMA, nombre: "Lágrima de Eco", maxPila: 5, precio: 400, color: "#ffffff", descripcion: "La próxima fusión en el Altar sube de estrella con seguridad (cualquier estrella)." },
+  // Dados del Destino: fusión 100 % segura de tres cartas para llegar a esa estrella.
+  ...PRECIO_DADO.map((_, k) => k + 4).map((estrellas, k) => ({
+    id: OBJ_DADO_BASE + k,
+    nombre: `Dado del Destino ${estrellas}★`,
+    maxPila: 10,
+    precio: PRECIO_DADO[k],
+    color: COLOR_DADO[k],
+    descripcion: `Fusión 100 % segura: tres cartas de ${estrellas - 1}★ dan una de ${estrellas}★.`,
+  })),
 ];
+
+/** Dado que asegura la fusión de cartas de este nivel (0 = 1★): el de la estrella siguiente. */
+export function dadoParaNivel(nivelEntrada: number): number | undefined {
+  const k = nivelEntrada - 2;
+  return k >= 0 && k < PRECIO_DADO.length ? OBJ_DADO_BASE + k : undefined;
+}
 
 // ---------------- Materiales (crafteo en el Yunque) ----------------
 
@@ -126,58 +148,98 @@ export interface DefAfijo {
   readonly stat: Stat;
   readonly porNivel: number;
   readonly nombre: string;
+  /** Piezas donde puede salir: la armadura sube vida y defensa; el arma, golpe y técnica; las joyas, suerte y crítico. */
+  readonly en: readonly TipoPieza[];
 }
 
+/** Stats al azar ("afijos"): cada pieza suma uno o más según su rareza, de los que tienen sentido en su ranura. */
 export const AFIJOS: readonly DefAfijo[] = [
-  { stat: "hp", porNivel: 6, nombre: "del Oso" },
-  { stat: "mp", porNivel: 2.5, nombre: "del Búho" },
-  { stat: "golpe", porNivel: 1.6, nombre: "Cruel" },
-  { stat: "patada", porNivel: 1.8, nombre: "Pesado" },
-  { stat: "tecnica", porNivel: 1.8, nombre: "Arcano" },
-  { stat: "defensa", porNivel: 1, nombre: "Pétreo" },
-  { stat: "critico", porNivel: 0.7, nombre: "Preciso" },
-  { stat: "suerte", porNivel: 0.9, nombre: "de la Fortuna" },
-  { stat: "regen", porNivel: 0.3, nombre: "del Troll" },
+  { stat: "hp", porNivel: 6, nombre: "del Oso", en: ["casco", "hombros", "pecho", "cinturon", "pantalones", "botas", "capa", "collar"] },
+  { stat: "mp", porNivel: 2.5, nombre: "del Búho", en: ["casco", "aretes", "collar", "capa", "arma"] },
+  { stat: "golpe", porNivel: 1.6, nombre: "Cruel", en: ["arma", "anillo", "hombros"] },
+  { stat: "patada", porNivel: 1.8, nombre: "Pesado", en: ["arma", "botas", "pantalones"] },
+  { stat: "tecnica", porNivel: 1.8, nombre: "Arcano", en: ["arma", "aretes", "collar", "casco", "anillo"] },
+  { stat: "defensa", porNivel: 1, nombre: "Pétreo", en: ["casco", "hombros", "pecho", "cinturon", "pantalones", "botas", "capa"] },
+  { stat: "critico", porNivel: 0.7, nombre: "Preciso", en: ["arma", "anillo", "aretes", "casco"] },
+  { stat: "suerte", porNivel: 0.9, nombre: "de la Fortuna", en: ["anillo", "collar", "aretes", "cinturon", "capa"] },
+  { stat: "regen", porNivel: 0.3, nombre: "del Troll", en: ["pecho", "cinturon", "pantalones", "collar"] },
 ];
 
-// ---------------- Rasgos de equipo (RNG extra) ----------------
+// ---------------- Modificadores de equipo (RNG extra) ----------------
+//
+// Cada una de las 12 piezas tiene su propio grupo de modificadores, pensado para su papel:
+//   · Arma: ofensivos (alcance, golpe doble, elemento, velocidad, crítico, daño, éter por golpe).
+//   · Armadura (casco, hombros, pecho, cinturón, pantalones, botas): defensivos (vida, defensa, daño recibido,
+//     espinas, regeneración), cada pieza con su toque (el casco piensa, las botas corren, el cinturón administra).
+//   · Accesorios (capa, anillos, aretes, collar): únicos (robo de vida, enfriamiento, carga de Definitiva,
+//     suerte, esquiva, ahorro de éter...).
+// Cada pieza con modificadores trae siempre al menos uno de FIRMA (`firma`), exclusivo o típico de su ranura.
+// `efecto` conecta el modificador con el sistema de pasivas (contenido/grimorio.ts): el combate ya lo aplica.
 
-/** Rasgos al azar que cambian cómo se juega, no solo los números. */
 export type IdRasgoEquipo =
   | "alcance" | "velocidad" | "critDanio" | "eterGolpe" | "agilidad" | "robo" | "eterMax"
-  | "esquiva" | "resistencia" | "tecnicaDanio" | "elemental";
+  | "esquiva" | "resistencia" | "tecnicaDanio" | "elemental"
+  | "vidaPct" | "defensaPct" | "espinas" | "regen"
+  | "golpeExtra" | "critico" | "danio" | "enfriamiento" | "carga" | "tecnicaCosto" | "suerte" | "codicia" | "curaPocion";
 
 export interface DefRasgoEquipo {
   readonly id: IdRasgoEquipo;
   readonly nombre: string;
-  /** Rango del valor (fracción, salvo eterGolpe que son puntos). */
+  /** Rango del valor (fracción, salvo los `entero`). */
   readonly min: number;
   readonly max: number;
-  /** Clases de pieza donde puede salir (sin dato: en cualquiera). */
-  readonly en?: readonly TipoPieza[];
-  /** Rasgo "único" de accesorio: los accesorios siempre traen al menos uno de los suyos. */
-  readonly unicoDe?: readonly TipoPieza[];
+  /** Clases de pieza donde puede salir. */
+  readonly en: readonly TipoPieza[];
+  /** Piezas donde es modificador de FIRMA: toda pieza con modificadores trae al menos uno de los suyos. */
+  readonly firma?: readonly TipoPieza[];
+  /** Efecto del sistema de pasivas al que suma (si no, lo lee su sistema propio: alcance, elemento, suerte...). */
+  readonly efecto?: ClaveEfecto;
+  /** Valor entero (puntos), no fracción. */
+  readonly entero?: boolean;
   readonly formato: (v: number) => string;
 }
 
 const pct = (v: number): string => `${v >= 0 ? "+" : ""}${Math.round(v * 100)} %`;
+const pts = (v: number): string => `+${Math.round(v)}`;
+const ARMADURA: readonly TipoPieza[] = ["casco", "hombros", "pecho", "cinturon", "pantalones", "botas"];
 
 export const RASGOS_EQUIPO: readonly DefRasgoEquipo[] = [
-  { id: "alcance", nombre: "Alcance", min: 0.08, max: 0.35, en: ["arma"], formato: pct },
-  { id: "velocidad", nombre: "Velocidad de ataque", min: 0.05, max: 0.22, formato: pct },
-  { id: "critDanio", nombre: "Daño crítico", min: 0.15, max: 0.6, formato: pct },
-  { id: "eterGolpe", nombre: "Éter por golpe", min: 1, max: 3, en: ["arma", "aretes"], unicoDe: ["aretes"], formato: (v) => `+${Math.round(v)}` },
-  { id: "elemental", nombre: "Daño elemental", min: 0.1, max: 0.35, en: ["arma", "anillo"], unicoDe: ["anillo"], formato: pct },
-  { id: "agilidad", nombre: "Velocidad de movimiento", min: 0.04, max: 0.12, formato: pct },
-  { id: "robo", nombre: "Robo de vida", min: 0.01, max: 0.04, en: ["anillo", "collar"], unicoDe: ["anillo", "collar"], formato: pct },
-  { id: "eterMax", nombre: "Éter máximo", min: 8, max: 25, en: ["aretes", "collar"], unicoDe: ["aretes", "collar"], formato: (v) => `+${Math.round(v)}` },
-  { id: "esquiva", nombre: "Esquiva", min: 0.03, max: 0.1, en: ["capa"], unicoDe: ["capa"], formato: pct },
-  { id: "resistencia", nombre: "Daño recibido", min: 0.03, max: 0.1, en: ["capa", "collar"], unicoDe: ["capa", "collar"], formato: (v) => `−${Math.round(v * 100)} %` },
-  { id: "tecnicaDanio", nombre: "Daño de técnica", min: 0.06, max: 0.2, en: ["aretes", "anillo"], unicoDe: ["aretes"], formato: pct },
+  // ---- Ofensivos (arma y algunos accesorios)
+  { id: "alcance", nombre: "Alcance", min: 0.08, max: 0.3, en: ["arma"], firma: ["arma"], formato: pct },
+  { id: "golpeExtra", nombre: "Golpe doble", min: 0.03, max: 0.09, en: ["arma"], firma: ["arma"], efecto: "golpeExtra", formato: pct },
+  { id: "elemental", nombre: "Daño elemental", min: 0.1, max: 0.35, en: ["arma", "anillo"], firma: ["arma"], formato: pct },
+  { id: "velocidad", nombre: "Velocidad de ataque", min: 0.04, max: 0.18, en: ["arma", "hombros", "anillo", "capa"], firma: ["hombros"], efecto: "velocidad", formato: pct },
+  { id: "critDanio", nombre: "Daño crítico", min: 0.12, max: 0.5, en: ["arma", "anillo", "aretes"], firma: ["anillo"], efecto: "critDanio", formato: pct },
+  { id: "critico", nombre: "Crítico", min: 2, max: 8, en: ["arma", "casco", "anillo", "aretes"], firma: ["casco"], efecto: "critico", entero: true, formato: (v) => `+${Math.round(v)} %` },
+  { id: "danio", nombre: "Daño", min: 0.03, max: 0.08, en: ["arma", "anillo", "collar"], efecto: "danio", formato: pct },
+  { id: "eterGolpe", nombre: "Éter por golpe", min: 1, max: 3, en: ["arma", "aretes"], firma: ["aretes"], efecto: "eterGolpe", entero: true, formato: pts },
+  // ---- Defensivos (armadura)
+  { id: "vidaPct", nombre: "Vida máxima", min: 0.03, max: 0.09, en: [...ARMADURA, "capa"], firma: ["pecho"], efecto: "hpPct", formato: pct },
+  { id: "defensaPct", nombre: "Defensa", min: 0.04, max: 0.12, en: ARMADURA, firma: ["pantalones", "casco"], efecto: "defensaPct", formato: pct },
+  { id: "resistencia", nombre: "Daño recibido", min: 0.03, max: 0.08, en: ["hombros", "pecho", "pantalones", "capa", "collar"], firma: ["capa", "pecho"], efecto: "recibido", formato: (v) => `−${Math.round(v * 100)} %` },
+  { id: "espinas", nombre: "Daño devuelto", min: 0.05, max: 0.15, en: ["hombros", "pecho", "cinturon"], firma: ["hombros"], efecto: "espinas", formato: pct },
+  { id: "regen", nombre: "Regeneración", min: 2, max: 6, en: ["casco", "pecho", "cinturon", "pantalones", "botas", "collar"], firma: ["pantalones"], efecto: "regen", entero: true, formato: pts },
+  { id: "agilidad", nombre: "Velocidad de movimiento", min: 0.03, max: 0.1, en: ["botas", "pantalones", "capa"], firma: ["botas"], efecto: "agilidad", formato: pct },
+  { id: "esquiva", nombre: "Esquiva", min: 0.02, max: 0.07, en: ["botas", "capa"], firma: ["capa", "botas"], efecto: "esquiva", formato: pct },
+  // ---- Únicos de accesorio y de ranura
+  { id: "robo", nombre: "Robo de vida", min: 0.01, max: 0.035, en: ["anillo", "collar"], firma: ["anillo", "collar"], efecto: "robo", formato: pct },
+  { id: "enfriamiento", nombre: "Enfriamiento de habilidades", min: 0.04, max: 0.12, en: ["aretes", "casco", "anillo"], firma: ["aretes"], efecto: "enfriamiento", formato: (v) => `−${Math.round(v * 100)} %` },
+  { id: "carga", nombre: "Carga de Definitiva", min: 0.06, max: 0.18, en: ["aretes", "collar", "casco"], firma: ["aretes"], efecto: "carga", formato: pct },
+  { id: "tecnicaDanio", nombre: "Daño de habilidades", min: 0.05, max: 0.18, en: ["aretes", "casco", "collar", "anillo"], firma: ["collar"], efecto: "tecnicaDanio", formato: pct },
+  { id: "tecnicaCosto", nombre: "Ahorro de éter", min: 0.04, max: 0.12, en: ["aretes", "collar", "casco"], efecto: "tecnicaCosto", formato: pct },
+  { id: "eterMax", nombre: "Éter máximo", min: 8, max: 25, en: ["casco", "aretes", "collar"], firma: ["casco"], entero: true, formato: pts },
+  { id: "suerte", nombre: "Suerte", min: 6, max: 20, en: ["anillo", "collar", "cinturon", "capa"], firma: ["anillo"], entero: true, formato: pts },
+  { id: "codicia", nombre: "Esquirlas encontradas", min: 0.05, max: 0.15, en: ["cinturon", "anillo"], firma: ["cinturon"], formato: pct },
+  { id: "curaPocion", nombre: "Curación de pociones", min: 0.1, max: 0.3, en: ["cinturon"], firma: ["cinturon"], formato: pct },
 ];
 
-export const NOMBRES_RAREZA = ["Común", "Raro", "Épico", "Legendario", "Único"] as const;
-export const COLORES_RAREZA = ["#c8c8c8", "#4da6ff", "#b46bff", "#ffb23d", "#ff4d4d"] as const;
+/** Modificadores de firma de una ranura (los que la hacen única). */
+export function firmasDe(tipo: TipoPieza): readonly DefRasgoEquipo[] {
+  return RASGOS_EQUIPO.filter((r) => r.firma?.includes(tipo));
+}
+
+export const NOMBRES_RAREZA = ["Común", "Poco común", "Raro", "Épico", "Legendario", "Mítico"] as const;
+export const COLORES_RAREZA = ["#c8c8c8", "#6fe36a", "#4da6ff", "#b46bff", "#ffb23d", "#ff4d6d"] as const;
 
 // ---------------- Únicos ----------------
 

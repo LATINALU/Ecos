@@ -5,6 +5,7 @@
 //   - La carta equipada como FORMA aporta el 100 % de sus stats y su técnica especial.
 //   - Dos RESONANCIAS aportan el 35 % (50 % si son de la misma familia que la forma: "sintonía").
 //   - Si la fusión falla, la carta resultante se "reforja": misma estrella, stats nuevos. Nunca se pierde todo.
+//   - Se fusionan tres cartas con la MISMA CANTIDAD DE ESTRELLAS, de cualquier alma o familia: sale una de las tres.
 
 import {
   elegirUno, entero, fusionar, generarStats, mejorar, tirarRareza,
@@ -47,24 +48,24 @@ export function probRasgoCarta(nivel: number): number {
 
 export const NIVEL_MAX_CARTA = ESCALA_ESTRELLA.length - 1;
 /** Probabilidad de subir de estrella al fusionar, por nivel de las cartas de entrada. */
-export const PROB_FUSION: readonly number[] = [1, 1, 0.85, 0.6, 0.4, 0.22];
+export const PROB_FUSION: readonly number[] = [1, 1, 0.85, 0.6, 0.4, 0.22, 0.12, 0.08, 0.05, 0.03, 0.02];
 /** Costo en esquirlas de fusionar, por nivel de entrada. */
-export const COSTO_FUSION: readonly number[] = [15, 40, 100, 240, 550, 1200];
+export const COSTO_FUSION: readonly number[] = [15, 40, 100, 240, 550, 1200, 2600, 5500, 11000, 22000, 45000];
 /** Mejoras máximas por carta (cada una usa un Polvo de Eco). */
 export const MEJORAS_MAX = 5;
 
 /** Rareza de las cartas que sueltan los monstruos, por piso (tabla acumulada de minialu). */
 export const RAREZA_CARTA_PISO: readonly TablaRareza[] = [
-  [[0, 0.7], [1, 0.25], [2, 0.05]],
-  [[0, 0.55], [1, 0.33], [2, 0.1], [3, 0.02]],
-  [[0, 0.42], [1, 0.38], [2, 0.15], [3, 0.05]],
-  [[0, 0.32], [1, 0.4], [2, 0.2], [3, 0.07], [4, 0.01]],
-  [[0, 0.24], [1, 0.38], [2, 0.26], [3, 0.1], [4, 0.02]],
-  [[0, 0.17], [1, 0.35], [2, 0.3], [3, 0.14], [4, 0.04]],
-  [[0, 0.1], [1, 0.32], [2, 0.33], [3, 0.18], [4, 0.06], [5, 0.01]],
-  [[0, 0.06], [1, 0.26], [2, 0.35], [3, 0.22], [4, 0.09], [5, 0.02]],
-  [[1, 0.24], [2, 0.36], [3, 0.26], [4, 0.11], [5, 0.03]],
-  [[1, 0.18], [2, 0.34], [3, 0.3], [4, 0.14], [5, 0.04]],
+  [[0, 0.68], [1, 0.26], [2, 0.06]],
+  [[0, 0.53], [1, 0.34], [2, 0.11], [3, 0.02]],
+  [[0, 0.4], [1, 0.38], [2, 0.16], [3, 0.06]],
+  [[0, 0.3], [1, 0.4], [2, 0.21], [3, 0.08], [4, 0.01]],
+  [[0, 0.22], [1, 0.38], [2, 0.27], [3, 0.11], [4, 0.02]],
+  [[0, 0.15], [1, 0.35], [2, 0.3], [3, 0.15], [4, 0.05]],
+  [[0, 0.09], [1, 0.31], [2, 0.33], [3, 0.19], [4, 0.07], [5, 0.01]],
+  [[0, 0.05], [1, 0.25], [2, 0.35], [3, 0.23], [4, 0.1], [5, 0.02]],
+  [[1, 0.22], [2, 0.35], [3, 0.27], [4, 0.12], [5, 0.035], [6, 0.005]],
+  [[1, 0.16], [2, 0.33], [3, 0.3], [4, 0.15], [5, 0.05], [6, 0.01]],
 ];
 /** Jefes y cofres sueltan cartas mejores. */
 export const RAREZA_CARTA_JEFE: readonly TablaRareza[] = [
@@ -76,8 +77,8 @@ export const RAREZA_CARTA_JEFE: readonly TablaRareza[] = [
   [[3, 0.4], [4, 0.42], [5, 0.18]],
   [[3, 0.3], [4, 0.45], [5, 0.22], [6, 0.03]],
   [[4, 0.5], [5, 0.42], [6, 0.08]],
-  [[4, 0.4], [5, 0.48], [6, 0.12]],
-  [[5, 0.75], [6, 0.25]],
+  [[4, 0.38], [5, 0.48], [6, 0.13], [7, 0.01]],
+  [[5, 0.72], [6, 0.25], [7, 0.03]],
 ];
 
 export function nuevoUid(azar: Azar): string {
@@ -124,8 +125,11 @@ export function crearCarta(azar: Azar, personaje: number, nivel: number): Carta 
   };
 }
 
-export function cartaAleatoria(azar: Azar, tabla: TablaRareza): Carta {
-  return crearCarta(azar, elegirUno(azar, ALMAS).id, tirarRareza(azar, tabla));
+/** Carta al azar de la tabla; la SUERTE (`fortuna`) puede subirla una estrella (hasta 40 % con 200 de suerte). */
+export function cartaAleatoria(azar: Azar, tabla: TablaRareza, fortuna = 0): Carta {
+  const nivel = tirarRareza(azar, tabla);
+  const sube = fortuna > 0 && azar.siguiente() < Math.min(0.4, fortuna / 500);
+  return crearCarta(azar, elegirUno(azar, ALMAS).id, Math.min(NIVEL_MAX_CARTA, nivel + (sube ? 1 : 0)));
 }
 
 export function fusionarCartas(
@@ -133,12 +137,14 @@ export function fusionarCartas(
   azar: Azar,
   suerte = false,
 ): Resultado<{ carta: Carta; subio: boolean }, ErrorFusion> {
-  return fusionar(cartas, {
+  // minialu exige el mismo "tipo": acá la regla es solo la misma estrella, así que se fusiona con tipo común
+  // y la carta nueva toma la familia de su alma. Si las almas difieren, sale una de las tres.
+  const sinFamilia = cartas.map((c) => ({ ...c, tipo: 0 })) as unknown as readonly [Carta, Carta, Carta];
+  return fusionar(sinFamilia, {
     azar,
     nivelMaximo: NIVEL_MAX_CARTA,
     probabilidad: (_tipo, nivel) => PROB_FUSION[nivel],
-    // Si las tres son de almas distintas, sale cualquier alma de esa familia.
-    personajesPosibles: (cs) => ALMAS.filter((a) => a.tipo === cs[0].tipo).map((a) => a.id),
+    personajesPosibles: (cs) => cs.map((c) => c.personaje),
     crear: (_tipo, nivel, personaje) => crearCarta(azar, personaje, nivel),
   }, suerte);
 }
@@ -165,8 +171,13 @@ export function capaResonancia(carta: Carta | null, forma: Carta | null, extra =
   return escalarCapa(carta.stats, (sintonia ? FACTOR_SINTONIA : FACTOR_RESONANCIA) + extra);
 }
 
+/** "★★★" hasta 6 estrellas; de 7★ en adelante, "★7" (no entra una fila de doce estrellas). */
+export function textoEstrellas(nivel: number): string {
+  return nivel < 6 ? "★".repeat(nivel + 1) : `★${nivel + 1}`;
+}
+
 export function estrellas(carta: Carta): string {
-  return "★".repeat(carta.nivel + 1);
+  return textoEstrellas(carta.nivel);
 }
 
 export function nombreCarta(carta: Carta): string {

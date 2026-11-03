@@ -28,9 +28,9 @@ Requiere la carpeta hermana `Desktop\minialu` (alias `minialu` en `vite.config.t
 
 | Sistema | Qué hace | De minialu |
 |---|---|---|
-| Cartas de Alma | 8 almas en 4 familias, 1★–7★. **Forma** (100 % de stats + técnica) y 2 **Resonancias** (35 %, 50 % si es la misma familia) | `generarStats`, `tirarRareza`, `fusionar`, `mejorar` |
+| Cartas de Alma | 12 almas en 4 familias, 1★–7★. **Mazo de 5 ranuras** (ver abajo) | `generarStats`, `tirarRareza`, `fusionar`, `mejorar` |
 | Altar | Fusión 3→1 con probabilidad por estrella, Lágrima de Eco = éxito seguro; mejora con Polvo de Eco | cartas |
-| Stats por capas | Base + nivel + Santuario + Forma + Resonancias + equipo, con desglose en el menú | `componerStats` |
+| Stats por capas | Base + nivel + Santuario + Forma + mazo de almas + equipo, con desglose en el menú | `componerStats` |
 | Botín | Monstruos "cada-uno", cofres "ponderado", jefes con único garantizado; haz de luz por rareza | `tirarDrop`, `probabilidadReal` |
 | Equipo | 5 rarezas con afijos al azar + **8 únicos** con efectos (Filo Gemelo, Sangre de Vidrio, Manto del Eco…) | — |
 | Inventario | Mochila y mazo de 24 casillas, todo o nada | `Inventario` |
@@ -41,6 +41,63 @@ Requiere la carpeta hermana `Desktop\minialu` (alias `minialu` en `vite.config.t
 | Santuario | Mejoras permanentes pagadas con esencia | `Billetera` |
 | Ecos | Al morir: Eco con tu legado; uno por piso, máximo 3 | — |
 
+## Rarezas, drops y fusión
+
+| Rareza | Color | Qué trae |
+|---|---|---|
+| Común | gris | Solo stats |
+| Poco común | verde | 1 modificador |
+| Raro | azul | 2 modificadores |
+| Épico | violeta | 3 modificadores |
+| Legendario | naranja | 4 modificadores |
+| Mítico | rojo | 4 modificadores + **pasiva mítica** (16: Furia del Volcán, Verdugo, Eco Infinito, Muralla Viva…) |
+
+- Modificadores nuevos de armadura: vida %, defensa %, daño devuelto y regeneración. Los rasgos fijos de una base no
+  ocupan un modificador. Los únicos con nombre son Míticos. Los guardados viejos se migran (Único → Mítico).
+- **Drops**: las armaduras y accesorios caen aparte de las armas; élites y cofres sueltan Poco común o mejor y cartas
+  de pisos más hondos; los guardianes, una pieza Legendaria o un Mítico, otra Épica y dos cartas de jefe.
+- **Cartas hasta 12★**. La fusión acepta tres cartas con la **misma cantidad de estrellas** de cualquier alma o
+  familia (sale una de las tres). **Dados del Destino** en el Bazar aseguran la fusión: 4★ 20 · 5★ 50 · 6★ 100 ·
+  7★ 300 · 8★ 800 · 9★ 2.000 · 10★ 5.000 · 11★ 12.000 · 12★ 30.000 esquirlas (la Lágrima de Eco sirve para cualquiera).
+- **Modificadores por pieza** (25): el arma ofende (alcance, golpe doble, elemento, crítico, daño); la armadura
+  defiende (vida, defensa, daño recibido, espinas, regeneración); los accesorios traen lo único (robo de vida,
+  enfriamiento, carga de Definitiva, ahorro de éter, suerte, esquiva). El cinturón administra (curación de pociones,
+  esquirlas). Toda pieza con modificadores trae uno de **firma** de su ranura (◆ dorado en el cartel).
+- **Stats al azar en las 12 piezas**: cada stat varía ±15 % y suma afijos acordes a la ranura.
+- **Suerte**: multiplica la chance de botín, inclina la rareza (+35 % por escalón cada 100), puede subir una estrella a
+  las cartas (hasta 40 %) y suma esquirlas. Sale como modificador en anillos, collares, cinturones y capas.
+
+## Mazo de almas (rework de las cartas)
+
+Cada Carta de Alma hace algo **distinto según la ranura** donde la pongas. 12 almas × (5 pasivas + 4 habilidades) =
+**108 efectos**, y todo escala con las estrellas, las mejoras y el brillo de la carta (×1 a 1★ hasta ×2,3 a 7★ +5).
+
+| Ranura | Tecla | Qué da |
+|---|---|---|
+| **Forma** | — | Tu aspecto, el 100 % de los stats y una **pasiva de ataques básicos** (quemar, congelar, envenenar, rayo en cadena, aturdir, curar, golpe doble, crítico) |
+| **Habilidad I** | L (V) | Habilidad activa (éter + enfriamiento) y una pasiva |
+| **Habilidad II** | U (B) | Otra habilidad activa y otra pasiva |
+| **Habilidad III** | O (N) | Otra habilidad activa y otra pasiva |
+| **Definitiva** | P (F) | Ataque devastador que se **carga peleando** (golpes y daño recibido) y otra pasiva |
+
+- Las habilidades se arman con 11 formas: proyectil/abanico, bumerán, embestida, garras, ondas, salto, rayos, órbita,
+  nova, lluvia y auras (daño, escudo, robo de vida, velocidad). A 4★ y 6★ suman proyectiles, rayos u hojas.
+- Las ranuras que no son la Forma aportan un 30~40 % de los stats de la carta (+15 % si es de la familia de tu Forma).
+- El HUD muestra la barra de habilidades (L U O P) con enfriamiento, costo de éter y la carga de la Definitiva.
+- Los guardados viejos pasan Forma + Resonancia I + II a Forma + Habilidad I + II. Un personaje nuevo empieza con su
+  alma como Forma y como Habilidad I.
+- Desarrollo: `?auto=espada&mazo=4,8,5,9,7&cargada` (mazo completo a 4★ y Definitiva llena);
+  `?pueblo=espada&inventario&tab=cartas&mazo` abre el grimorio.
+
+## Interfaz
+
+- **Texto nítido**: el juego se dibuja a 480×270 en pixel art, pero todo el texto (HUD, números de daño, carteles)
+  se pinta en una capa aparte a la resolución real de la pantalla, con contorno.
+- **Banco**: 4 pestañas × 40 = 160 casillas.
+- **Tiendas con estética de RPG** (`ui/tienda.ts`, `ui/tiendas.css`): cada local tiene cabecera con el retrato
+  pixel-art del comerciante, cartel, globo de diálogo y bolsa de monedas; marco de madera y metal con color temático,
+  casillas biseladas, fichas de artículo y botones de placa. La Bóveda muestra dos cofres (bolsa y bóveda).
+
 ## Partidas y pueblo
 
 - **3 ranuras de partida**. Cada una tiene su personaje persistente (nivel, equipo, mochila, cartas, talentos,
@@ -48,10 +105,10 @@ Requiere la carpeta hermana `Desktop\minialu` (alias `minialu` en `vite.config.t
 - **Último Refugio**, el pueblo sobre el Pozo: una calle de dos pantallas que se recorre con el Portador.
   | Edificio | Comerciante | Qué hace |
   |---|---|---|
-  | Taberna «El Último Eco» | Ilse | Tablón de misiones (cadena de 15 + encargos repetibles) y memorial |
+  | Taberna «El Último Eco» | Ilse | Tablón de **120 misiones** (10 por zona en 3 líneas + guardián, y 20 encargos repetibles) y memorial |
   | Bazar del Pozo | Tobías | Comprar consumibles y materiales; vender objetos, runas y cartas |
   | Armería Hierro Viejo | Brunhild | 6 piezas al azar que cambian en cada vuelta; kit de recluta gratis si no tienes arma |
-  | Bóveda de los Caídos | Custodio Vael | Banco: 60 casillas y esquirlas a salvo de la muerte |
+  | Bóveda de los Caídos | Custodio Vael | Banco: 4 pestañas × 40 = 160 casillas y esquirlas a salvo de la muerte |
   | Altar de las Almas | Hermana Ceniza | Fusión y mejora de cartas |
   | Fragua del Pueblo | Dorn | Yunque: recetas y refinado |
   | Santuario | El Ermitaño | Mejoras permanentes con esencia |
@@ -214,4 +271,4 @@ src/
 ## Controles
 
 A/D moverse · ↓ agacharse · ↓+Salto barrida (en plataformas: bajar) · Shift quieto = paso atrás · Shift + dirección = embestida · ↑+K subarma (gasta ♥ de las velas) · Espacio saltar · J golpe (combo ×3) · K patada (rompe guardias; ↓ en el
-aire = pisotón con rebote) · L técnica · Shift embestida · E interactuar · Q/R pociones · I inventario/habilidades · M mapa · Esc pausa (guardar y salir). ↑ + J: golpe ascendente.
+aire = pisotón con rebote) · L/U/O habilidades · P definitiva · Shift embestida · E interactuar · Q/R pociones · I inventario/habilidades · M mapa · Esc pausa (guardar y salir). ↑ + J: golpe ascendente.

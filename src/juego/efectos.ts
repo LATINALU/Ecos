@@ -1,5 +1,7 @@
 // "Jugo" del combate: partículas, números de daño, sacudida de cámara, pausa de impacto y destellos.
 
+import { hd } from "../motor/texto-hd.ts";
+
 export interface Particula {
   x: number;
   y: number;
@@ -120,16 +122,8 @@ export class Efectos {
   }
 
   dibujarTextos(g: CanvasRenderingContext2D): void {
-    g.textAlign = "center";
     for (const t of this.textos) {
-      g.globalAlpha = Math.min(1, t.vida * 2.5);
-      g.font = t.grande ? "bold 11px monospace" : "bold 8px monospace";
-      g.fillStyle = "#000000";
-      g.fillText(t.texto, Math.round(t.x) + 1, Math.round(t.y) + 1);
-      g.fillStyle = t.color;
-      g.fillText(t.texto, Math.round(t.x), Math.round(t.y));
+      hd.texto(g, t.texto, t.x, t.y, { color: t.color, alinear: "center", tam: t.grande ? 11 : 8, alfa: Math.min(1, t.vida * 2.5) });
     }
-    g.globalAlpha = 1;
-    g.textAlign = "left";
   }
 }

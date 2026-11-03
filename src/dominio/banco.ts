@@ -1,4 +1,4 @@
-// Banco del pueblo ("Bóveda de los Caídos"), igual que el de MiniFighter: otro Inventario (60 casillas) y una
+// Banco del pueblo ("Bóveda de los Caídos"), igual que el de MiniFighter: otro Inventario (4 pestañas × 40 = 160 casillas) y una
 // Billetera. Mover objetos entre mochila y banco es minialu/transferir (todo o nada: si no entra, no se mueve).
 // Lo guardado en el banco no se pierde al morir.
 
@@ -6,7 +6,9 @@ import { Billetera, Inventario, exito, fallo, transferir, type Pila, type Posici
 import { maxPila } from "../contenido/objetos.ts";
 import { cargarEn, volcarInventario, type Partida } from "./partida.ts";
 
-export const TAM_BANCO = 60;
+export const PESTANAS_BANCO = 4;
+export const CASILLAS_PESTANA_BANCO = 40;
+export const TAM_BANCO = PESTANAS_BANCO * CASILLAS_PESTANA_BANCO;
 
 export interface DatosBanco {
   readonly pilas: readonly (Pila | null)[];
@@ -14,7 +16,7 @@ export interface DatosBanco {
 }
 
 export class Banco {
-  readonly inventario = new Inventario({ pestanas: 1, casillasPorPestana: TAM_BANCO, maxPila });
+  readonly inventario = new Inventario({ pestanas: PESTANAS_BANCO, casillasPorPestana: CASILLAS_PESTANA_BANCO, maxPila });
   readonly billetera = new Billetera({ esquirlas: 0 });
 
   static restaurar(d: DatosBanco | null | undefined): Banco {

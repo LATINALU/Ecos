@@ -115,14 +115,14 @@ describe("equipo y botín", () => {
       expect(Object.values(e.stats).every((v) => v > 0)).toBe(true);
     }
     const u = crearUnico(azar, 2);
-    expect(u.rareza).toBe(4);
+    expect(u.rareza).toBe(5); // los únicos con nombre son Míticos
     expect(u.efecto).toBeDefined();
   });
 
   it("los jefes siempre sueltan un único y los cofres una recompensa principal", () => {
     const azar = new AzarSemilla(5);
     const jefe = botinEnemigo(azar, 2, "jefe");
-    expect(jefe.some((p) => p.tipo === "equipo" && p.equipo.rareza === 4)).toBe(true);
+    expect(jefe.some((p) => p.tipo === "equipo" && p.equipo.rareza >= 4)).toBe(true);
     const cofre = botinCofre(azar, 1);
     expect(cofre.length).toBe(4);
   });

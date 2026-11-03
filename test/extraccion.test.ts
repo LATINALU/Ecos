@@ -65,12 +65,12 @@ describe("armas elementales", () => {
 });
 
 describe("capa y accesorios", () => {
-  it("capa, anillos, aretes y collar siempre traen un rasgo único de su clase", () => {
+  it("capa, anillos, aretes y collar con modificadores traen uno propio de su clase", () => {
     const azar = new AzarSemilla(9);
     for (const tipo of ACCESORIOS) {
       for (let i = 0; i < 60; i++) {
-        const o = generarEquipo(azar, 4, 0, tipo);
-        const unicos = Object.keys(o.rasgos ?? {}).filter((id) => RASGOS_EQUIPO.find((r) => r.id === id)?.unicoDe?.includes(tipo));
+        const o = generarEquipo(azar, 4, 1, tipo); // desde Poco común (el Común solo trae stats)
+        const unicos = Object.keys(o.rasgos ?? {}).filter((id) => RASGOS_EQUIPO.find((r) => r.id === id)?.firma?.includes(tipo));
         expect(unicos.length, `${tipo}: ${JSON.stringify(o.rasgos)}`).toBeGreaterThanOrEqual(1);
       }
     }
@@ -82,7 +82,7 @@ describe("capa y accesorios", () => {
     expect(p.combate().esquiva).toBeCloseTo(0.08);
     expect(p.combate().resistencia).toBeCloseTo(0.1);
     p.equipo.collar = { ...generarEquipo(new AzarSemilla(3), 3, 0, "collar"), rasgos: { resistencia: 0.5 } };
-    expect(p.combate().resistencia).toBe(0.4);
+    expect(p.combate().resistencia).toBe(0.5);
   });
 });
 

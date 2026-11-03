@@ -1,0 +1,272 @@
+/* =====================================================================================================
+   TIENDAS CON ESTÉTICA DE RPG
+   Marco de madera y metal con gemas en las esquinas, cartel con el nombre del local, retrato del comerciante,
+   globo de diálogo, bolsa de monedas, casillas biseladas y fichas de artículo. --tema tiñe cada local.
+   ===================================================================================================== */
+.panel.tienda {
+  --tema: #ffd27a;
+  --madera: #24170f;
+  --madera-clara: #3a2618;
+  --metal: color-mix(in srgb, var(--tema) 55%, #6a5a40);
+  inset: 3% 5%;
+  padding: 0.9em 1.4em 1.4em;
+  border-radius: 10px;
+  border: 3px solid var(--metal);
+  background:
+    radial-gradient(ellipse at 50% -10%, color-mix(in srgb, var(--tema) 16%, transparent), transparent 55%),
+    repeating-linear-gradient(90deg, #ffffff05 0 2px, transparent 2px 7px),
+    repeating-linear-gradient(0deg, #00000022 0 1px, transparent 1px 23px),
+    linear-gradient(180deg, #1b120d, #120c09 60%, #0d0907);
+  box-shadow:
+    0 0 0 2px #000,
+    0 0 0 5px color-mix(in srgb, var(--metal) 40%, #1a120c),
+    0 0 0 6px #000,
+    0 24px 80px #000e,
+    inset 0 0 0 2px #00000080,
+    inset 0 0 60px #000a,
+    inset 0 0 120px color-mix(in srgb, var(--tema) 8%, transparent);
+  font-size: 0.98em;
+}
+
+/* Cabecera: retrato · cartel y diálogo · bolsa */
+.cabecera-tienda {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1em;
+  align-items: center;
+  padding: 0.6em 0.8em;
+  margin: 0 2.4em 0.9em 0;
+  background: linear-gradient(180deg, var(--madera-clara), var(--madera));
+  border: 2px solid #000;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 #ffffff14, inset 0 -3px 0 #0006, 0 0 0 1px var(--metal), 0 6px 16px #0008;
+}
+/* Clavos de metal en las esquinas del cartel */
+.cabecera-tienda::before, .cabecera-tienda::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff, var(--tema) 50%, #000 110%);
+  box-shadow: 0 0 6px var(--tema);
+}
+.cabecera-tienda::before { left: 5px; }
+.cabecera-tienda::after { right: 5px; }
+.marco-retrato {
+  padding: 4px;
+  background: linear-gradient(135deg, var(--metal), #2a1d12 50%, var(--metal));
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #000, 0 0 16px color-mix(in srgb, var(--tema) 35%, transparent);
+}
+canvas.retrato-npc { display: block; width: 5.4em; height: auto; image-rendering: pixelated; border-radius: 3px; border: 1px solid #000; }
+.letrero { display: flex; flex-direction: column; gap: 0.25em; min-width: 0; }
+.cartel { display: flex; align-items: center; gap: 0.5em; }
+.cartel h2 {
+  margin: 0;
+  font-size: 1.55em;
+  color: var(--tema);
+  letter-spacing: 0.08em;
+  text-shadow: 0 2px 0 #000, 0 0 14px color-mix(in srgb, var(--tema) 45%, transparent);
+}
+.icono-local {
+  display: grid;
+  place-items: center;
+  width: 1.7em;
+  height: 1.7em;
+  font-size: 1.05em;
+  color: #1a1008;
+  background: radial-gradient(circle at 35% 30%, #fff8, var(--tema) 60%);
+  border: 2px solid #000;
+  border-radius: 50%;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tema) 60%, transparent);
+}
+.npc { color: #e8d8b8; font-size: 0.9em; }
+.npc b { color: #fff3d6; }
+.npc span { color: #a08a6a; font-style: italic; }
+.globo {
+  position: relative;
+  align-self: flex-start;
+  max-width: 44em;
+  margin-left: 6px;
+  padding: 0.35em 0.8em;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 0.92em;
+  color: #2a1a0c;
+  background: linear-gradient(180deg, #f3e3c0, #d9c296);
+  border: 2px solid #000;
+  border-radius: 8px;
+  box-shadow: 0 3px 0 #0006;
+}
+.globo::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 8px;
+  border: 7px solid transparent;
+  border-right-color: #000;
+}
+
+/* Bolsa de monedas */
+.bolsa { display: flex; flex-direction: column; gap: 0.3em; align-items: stretch; }
+.moneda {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  min-width: 8.5em;
+  padding: 0.25em 0.7em;
+  background: linear-gradient(180deg, #120c08, #050302);
+  border: 1px solid #000;
+  border-radius: 99px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m) 40%, transparent), inset 0 2px 6px #000;
+}
+.moneda i { font-style: normal; color: var(--m); text-shadow: 0 0 8px var(--m); font-size: 1.1em; }
+.moneda b { color: #fff; font-variant-numeric: tabular-nums; }
+
+/* Títulos de sección: filetes de metal */
+.panel.tienda h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  color: color-mix(in srgb, var(--tema) 70%, #f3e3c0);
+  border-bottom: none;
+  margin: 1em 0 0.5em;
+  text-shadow: 0 1px 0 #000;
+}
+.panel.tienda h3::before, .panel.tienda h3::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--metal), transparent);
+}
+.panel.tienda h3::before { flex: 0 0 1.2em; }
+
+/* Botones: cuero y metal; el principal, placa del color del local */
+.panel.tienda button {
+  background: linear-gradient(180deg, #3a2a1c, #22170e);
+  border: 1px solid #000;
+  box-shadow: inset 0 1px 0 #ffffff1a, inset 0 -2px 0 #0007, 0 0 0 1px color-mix(in srgb, var(--metal) 55%, #000);
+  color: #f3e3c0;
+  border-radius: 4px;
+  text-shadow: 0 1px 0 #000;
+}
+.panel.tienda button:hover:not(:disabled) {
+  background: linear-gradient(180deg, #4e3824, #2c1e12);
+  box-shadow: inset 0 1px 0 #ffffff26, inset 0 -2px 0 #0007, 0 0 0 1px var(--tema), 0 0 12px color-mix(in srgb, var(--tema) 40%, transparent);
+}
+.panel.tienda button.principal {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tema) 85%, #fff), color-mix(in srgb, var(--tema) 70%, #000));
+  color: #1a1008;
+  font-weight: 600;
+  text-shadow: 0 1px 0 #fff6;
+  box-shadow: inset 0 1px 0 #fff8, inset 0 -3px 0 #0005, 0 0 0 1px #000, 0 0 14px color-mix(in srgb, var(--tema) 35%, transparent);
+}
+.panel.tienda button.principal:hover:not(:disabled) { filter: brightness(1.12); }
+.panel.tienda button.cerrar {
+  top: 0.9em;
+  right: 0.9em;
+  width: 2em;
+  height: 2em;
+  padding: 0;
+  border-radius: 50%;
+  font-weight: bold;
+  z-index: 4;
+}
+.panel.tienda .tab.on {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tema) 40%, #3a2a1c), #22170e);
+  color: #fff;
+  box-shadow: inset 0 1px 0 #ffffff26, 0 0 0 1px var(--tema);
+}
+
+/* Casillas de inventario biseladas */
+.panel.tienda .grilla {
+  gap: 0.35em;
+  padding: 0.5em;
+  background: #0a0705;
+  border: 1px solid #000;
+  border-radius: 6px;
+  box-shadow: inset 0 2px 10px #000, 0 0 0 1px #3a2a1c;
+}
+.panel.tienda .celda {
+  border: 1px solid #000;
+  border-radius: 4px;
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--c, #000) 30%, transparent), transparent 70%),
+    linear-gradient(145deg, #2a1d12, #120c08);
+  box-shadow: inset 0 1px 0 #ffffff12, inset 0 -2px 4px #0009, 0 0 0 1px color-mix(in srgb, var(--c, #3a2a1c) 55%, #000);
+}
+.panel.tienda .celda:hover:not(:disabled) {
+  box-shadow: inset 0 1px 0 #ffffff22, 0 0 0 1px var(--c, var(--tema)), 0 0 10px color-mix(in srgb, var(--c, var(--tema)) 55%, transparent);
+}
+.panel.tienda .celda.vacia { background: linear-gradient(145deg, #161009, #0b0805); opacity: 0.7; }
+.panel.tienda .celda small { color: #fff; text-shadow: 0 1px 0 #000, 0 0 3px #000; font-weight: bold; }
+
+/* Fichas de artículo, misiones, recetas y mejoras */
+.panel.tienda .articulo, .panel.tienda .receta, .panel.tienda .mejora {
+  padding: 0.45em 0.7em;
+  margin: 0.25em 0;
+  border: 1px solid #000;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #22170e, #170f0a);
+  box-shadow: inset 0 1px 0 #ffffff0d, 0 0 0 1px #3a2a1c;
+}
+.panel.tienda .articulo:hover, .panel.tienda .receta:hover, .panel.tienda .mejora:hover {
+  box-shadow: inset 0 1px 0 #ffffff14, 0 0 0 1px var(--metal);
+}
+.panel.tienda .detalle {
+  background: linear-gradient(180deg, #1d140d, #110b08);
+  border: 1px solid #000;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 #ffffff0d, 0 0 0 1px #3a2a1c, inset 0 0 30px #0006;
+}
+.panel.tienda .stock .detalle { border-top: 3px solid var(--metal); }
+.panel.tienda .mision {
+  border: 1px solid #000;
+  border-left: 4px solid var(--tema);
+  border-radius: 4px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--tema) 8%, transparent), transparent 40%),
+    linear-gradient(180deg, #22170e, #160f0a);
+  box-shadow: inset 0 1px 0 #ffffff0d, 0 0 0 1px #3a2a1c;
+}
+.panel.tienda .mision.completa { border-left-color: #7dff9a; box-shadow: 0 0 0 1px #7dff9a66, 0 0 14px #7dff9a33; }
+.panel.tienda .barra { height: 0.5em; border-radius: 99px; background: #050302; box-shadow: inset 0 1px 3px #000, 0 0 0 1px #3a2a1c; overflow: hidden; }
+.panel.tienda .barra i { background: linear-gradient(90deg, color-mix(in srgb, var(--tema) 70%, #000), var(--tema)); }
+.panel.tienda .ficha .nombre { text-shadow: 0 1px 0 #000; }
+.panel.tienda .sub { color: #a8957a; }
+.panel.tienda .cita { color: #c9b48a; }
+.panel.tienda .esencia { color: var(--tema); }
+.panel.tienda .resultado { border-radius: 6px; background: #1a120c; }
+
+/* Banco: dos cofres de monedas */
+.caja-fuerte { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8em; margin: 0.4em 0; }
+.cofre-moneda {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+  padding: 0.6em;
+  border: 1px solid #000;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #2a1d12, #150e09);
+  box-shadow: inset 0 1px 0 #ffffff12, 0 0 0 1px #3a2a1c;
+}
+.cofre-moneda small { color: #a8957a; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.72em; }
+.cofre-moneda b { font-size: 1.6em; color: #9fe8ff; text-shadow: 0 0 10px #9fe8ff66, 0 2px 0 #000; font-variant-numeric: tabular-nums; }
+.cofre-moneda.boveda { box-shadow: inset 0 1px 0 #ffffff12, 0 0 0 1px var(--tema), 0 0 18px color-mix(in srgb, var(--tema) 25%, transparent); }
+.cofre-moneda.boveda b { color: var(--tema); text-shadow: 0 0 10px color-mix(in srgb, var(--tema) 60%, transparent), 0 2px 0 #000; }
+
+/* Pozo y armería */
+.panel.tienda .pisos button { min-height: 3.6em; }
+.panel.tienda .kit-recluta { padding: 0.5em 0.8em; margin: 0.5em 0; border: 1px dashed var(--tema); border-radius: 6px; background: #1a120c; }
+
+/* Pantallas angostas: la bolsa baja debajo del cartel */
+@media (max-width: 900px) {
+  .cabecera-tienda { grid-template-columns: auto 1fr; }
+  .bolsa { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+}
+.panel.tienda .grilla:empty::after { content: "Nada por aquí todavía."; color: #a8957a; font-style: italic; grid-column: 1 / -1; padding: 0.4em; }

@@ -45,10 +45,12 @@ export function precioEquipo(o: ObjetoEquipo): number {
 /** Seis piezas: dos armas, tres de armadura y una joya. Rareza y nivel según el piso más hondo alcanzado. */
 export function generarStockArmero(azar: Azar, pisoMaximo: number): ArticuloArmero[] {
   const piso = Math.max(1, Math.min(10, pisoMaximo));
-  const minima: Rareza = piso >= 6 ? 1 : 0;
+  // El armero nunca vende Míticos: esos solo salen del Pozo.
+  const minima: Rareza = piso >= 7 ? 2 : piso >= 3 ? 1 : 0;
   const tipos = ["arma", "arma", elegirUno(azar, ARMADURAS), elegirUno(azar, ARMADURAS), elegirUno(azar, ARMADURAS), elegirUno(azar, ACCESORIOS)] as const;
   return tipos.map((t) => {
-    const equipo = generarEquipo(azar, piso, minima, t);
+    let equipo = generarEquipo(azar, piso, minima, t);
+    for (let k = 0; k < 8 && equipo.rareza >= 5; k++) equipo = generarEquipo(azar, piso, minima, t);
     return { equipo, precio: precioEquipo(equipo) };
   });
 }

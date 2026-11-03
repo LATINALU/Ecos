@@ -30,6 +30,12 @@ export interface AtaqueJugador {
   readonly lanzar?: boolean;
   /** Golpe cuerpo a cuerpo (sostiene en el aire, cuenta para el estilo). */
   readonly cuerpoACuerpo?: boolean;
+  /** Efectos elementales de habilidades de alma (cada "hielo" suma una carga de frío). */
+  readonly elementos?: readonly ("hielo" | "veneno")[];
+  /** Golpe de una Definitiva (no carga la Definitiva). */
+  readonly definitiva?: boolean;
+  /** Golpe doble de la pasiva (no vuelve a disparar pasivas de golpe). */
+  readonly eco?: boolean;
 }
 
 /** Zona de peligro anunciada (raíces que brotan, lluvia de huesos): avisa y después daña. */

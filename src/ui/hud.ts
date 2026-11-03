@@ -1,6 +1,9 @@
 // HUD dibujado en el canvas: vida, éter, experiencia, forma/técnica, frascos, esquirlas, minimapa y jefe.
 
-import { INFO_TECNICA, alma } from "../contenido/almas.ts";
+import { hd } from "../motor/texto-hd.ts";
+import { alma } from "../contenido/almas.ts";
+import { TECLA_RANURA_ALMA, grimorio, type FormaHabilidad } from "../contenido/grimorio.ts";
+import { CARGA_DEFINITIVA } from "../dominio/partida.ts";
 import { bioma } from "../contenido/biomas.ts";
 import { OBJ_ETER, OBJ_POCION } from "../contenido/objetos.ts";
 import { SUBARMAS } from "../contenido/subarmas.ts";
@@ -22,13 +25,8 @@ function barra(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: 
   g.fillRect(x, y, Math.round(w * Math.max(0, Math.min(1, frac))), 1);
 }
 
-function texto(g: CanvasRenderingContext2D, t: string, x: number, y: number, color = "#ffffff", alinear: CanvasTextAlign = "left"): void {
-  g.textAlign = alinear;
-  g.fillStyle = "#000000";
-  g.fillText(t, x + 1, y + 1);
-  g.fillStyle = color;
-  g.fillText(t, x, y);
-  g.textAlign = "left";
+function texto(g: CanvasRenderingContext2D, t: string, x: number, y: number, color = "#ffffff", alinear: CanvasTextAlign = "left", tam = 8): void {
+  hd.texto(g, t, x, y, { color, alinear, tam });
 }
 
 export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
@@ -55,16 +53,14 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
   barra(g, 30, 22, 80, 2, n.porcentaje / 100, "#ffe27a");
   texto(g, `Nv ${n.nivel}`, 114, 27, "#ffe27a");
 
-  // Técnica
+  // Forma y su pasiva de ataques básicos
   if (a !== null && forma !== null) {
-    const tec = INFO_TECNICA[a.tecnica];
-    const costo = p.costoTecnica(tec.costo);
-    const puede = p.mp >= costo;
-    texto(g, `L · ${tec.nombre} (${costo})`, 6, 38, puede ? "#ffffff" : "#777788");
-    texto(g, `${a.nombre} ${estrellas(forma)}`, 6, 48, a.colorSec);
+    texto(g, `${a.nombre} ${estrellas(forma)}`, 6, 38, a.colorSec);
+    texto(g, `Básicos: ${grimorio(forma.personaje).pasivas[0].nombre}`, 6, 48, "#d8d0e8", "left", 7);
   } else {
-    texto(g, "Sin Forma (I para equipar)", 6, 38, "#777788");
+    texto(g, "Sin Forma (I → Cartas)", 6, 38, "#777788");
   }
+  dibujarBarraHabilidades(g, juego);
 
   // Puntos sin gastar
   const libres = p.puntos.disponibles + p.puntosTalento();
@@ -110,6 +106,74 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
     const x = 240 - w / 2;
     texto(g, jefe.nombre, 240, 236, "#ffd0d0", "center");
     barra(g, x, 240, w, 5, jefe.hp / jefe.hpMax, jefe.hp / jefe.hpMax < 0.5 ? "#ff3d3d" : "#d83a5a", "#2a0a10");
+  }
+}
+
+/** Barra de habilidades del mazo de almas: L, U, O y la Definitiva (P) con su carga. */
+function dibujarBarraHabilidades(g: CanvasRenderingContext2D, juego: Juego): void {
+  const p = juego.partida;
+  const j = juego.jugador;
+  const y = 230;
+  ([1, 2, 3, 4] as const).forEach((r, k) => {
+    const x = 246 + k * 25;
+    const h = p.habilidad(r);
+    const definitiva = r === 4;
+    g.fillStyle = "#000000bb";
+    g.fillRect(x - 1, y - 1, 22, 22);
+    if (h === null) {
+      g.strokeStyle = "#3a3448";
+      g.strokeRect(x + 0.5, y + 0.5, 19, 19);
+      texto(g, TECLA_RANURA_ALMA[r], x + 10, y + 13, "#555066", "center", 7);
+      return;
+    }
+    const color = h.def.color;
+    const listo = definitiva ? p.cargaDefinitiva >= CARGA_DEFINITIVA : j.enfriamiento(r) <= 0 && p.mp >= h.costo;
+    // Fondo y relleno de carga (Definitiva) o de enfriamiento.
+    g.fillStyle = "#1a1622";
+    g.fillRect(x, y, 20, 20);
+    g.globalAlpha = listo ? 0.55 : 0.25;
+    g.fillStyle = color;
+    if (definitiva) {
+      const f = Math.min(1, p.cargaDefinitiva / CARGA_DEFINITIVA);
+      g.fillRect(x, y + 20 - Math.round(20 * f), 20, Math.round(20 * f));
+    } else {
+      g.fillRect(x, y, 20, 20);
+    }
+    g.globalAlpha = 1;
+    dibujarIconoHabilidad(g, h.def.forma, x + 10, y + 10, listo ? "#ffffff" : "#8a84a0");
+    if (!definitiva && j.enfriamiento(r) > 0) {
+      const f = j.enfriamiento(r) / Math.max(0.1, h.cd);
+      g.fillStyle = "#000000aa";
+      g.fillRect(x, y, 20, Math.round(20 * f));
+      texto(g, `${Math.ceil(j.enfriamiento(r))}`, x + 10, y + 14, "#ffffff", "center", 8);
+    }
+    const borde = definitiva ? (listo && Math.floor(performance.now() / 250) % 2 === 0 ? "#ffffff" : "#ffd27a") : listo ? color : "#4a4458";
+    g.strokeStyle = borde;
+    g.lineWidth = 1;
+    g.strokeRect(x + 0.5, y + 0.5, 19, 19);
+    texto(g, TECLA_RANURA_ALMA[r], x + 1, y - 2, definitiva ? "#ffd27a" : "#d8d0e8", "left", 6);
+    if (!definitiva) texto(g, `${h.costo}`, x + 19, y + 19, p.mp >= h.costo ? "#8ad8ff" : "#ff6a6a", "right", 5);
+    else if (!listo) texto(g, `${Math.floor(p.cargaDefinitiva)}%`, x + 10, y + 19, "#ffd27a", "center", 5);
+  });
+  if (j.buffActivo) texto(g, "Aura activa", 296, y - 3, "#ffe08a", "center", 6);
+}
+
+/** Iconos simples de cada forma de habilidad. */
+function dibujarIconoHabilidad(g: CanvasRenderingContext2D, forma: FormaHabilidad, cx: number, cy: number, color: string): void {
+  g.fillStyle = color;
+  const r = (dx: number, dy: number, w: number, h: number): void => g.fillRect(cx + dx, cy + dy, w, h);
+  switch (forma) {
+    case "proyectil": r(-5, -1, 6, 3); r(1, -2, 3, 5); r(4, -1, 2, 3); break;
+    case "boomerang": r(-5, -4, 3, 3); r(-3, -2, 3, 3); r(-1, 0, 3, 3); r(2, -2, 3, 3); r(4, -4, 2, 3); break;
+    case "embestida": r(-6, -1, 10, 2); r(2, -3, 2, 6); r(4, -2, 2, 4); r(-6, -4, 3, 1); r(-6, 3, 3, 1); break;
+    case "garras": r(-4, -5, 1, 9); r(-1, -5, 1, 9); r(2, -5, 1, 9); r(-4, -5, 7, 1); break;
+    case "onda": r(-6, 3, 12, 2); r(-6, 0, 2, 3); r(4, 0, 2, 3); r(-1, -3, 2, 6); break;
+    case "salto": r(-1, -6, 2, 7); r(-3, -3, 6, 1); r(-6, 3, 12, 2); break;
+    case "rayo": r(0, -6, 2, 4); r(-2, -2, 4, 2); r(-1, 0, 2, 3); r(-3, 3, 3, 2); break;
+    case "orbita": r(-1, -6, 2, 2); r(-6, -1, 2, 2); r(4, -1, 2, 2); r(-1, 4, 2, 2); r(-1, -1, 2, 2); break;
+    case "nova": r(-1, -1, 2, 2); r(-6, -1, 3, 2); r(3, -1, 3, 2); r(-1, -6, 2, 3); r(-1, 3, 2, 3); r(-4, -4, 2, 2); r(2, 2, 2, 2); r(2, -4, 2, 2); r(-4, 2, 2, 2); break;
+    case "lluvia": r(-5, -5, 2, 4); r(-1, -3, 2, 4); r(3, -6, 2, 4); r(-3, 2, 2, 4); r(2, 2, 2, 4); break;
+    case "aura": r(-5, -5, 10, 1); r(-5, 4, 10, 1); r(-5, -5, 1, 10); r(4, -5, 1, 10); r(-2, -2, 4, 4); break;
   }
 }
 
@@ -172,23 +236,9 @@ function dibujarCombo(g: CanvasRenderingContext2D, juego: Juego): void {
   const pulso = 1 + Math.max(0, Math.sin(performance.now() / 90)) * (c.indiceRango >= 4 ? 0.15 : 0);
   g.save();
   g.textAlign = "right";
-  g.font = `bold ${Math.round(20 * pulso)}px monospace`;
-  g.fillStyle = "#000000";
-  g.fillText(r.nombre, x + 1, y + 1);
-  g.fillStyle = r.color;
-  g.fillText(r.nombre, x, y);
-  g.font = "bold 8px monospace";
-  g.fillStyle = "#000000";
-  g.fillText(r.titulo, x + 1, y + 11);
-  g.fillStyle = r.color;
-  g.fillText(r.titulo, x, y + 10);
-  if (c.golpes >= 2) {
-    g.font = "bold 11px monospace";
-    g.fillStyle = "#000000";
-    g.fillText(`${c.golpes} golpes`, x + 1, y + 24);
-    g.fillStyle = "#ffffff";
-    g.fillText(`${c.golpes} golpes`, x, y + 23);
-  }
+  hd.texto(g, r.nombre, x, y, { color: r.color, alinear: "right", tam: 20 * pulso, titulo: true });
+  hd.texto(g, r.titulo, x, y + 10, { color: r.color, alinear: "right", tam: 8 });
+  if (c.golpes >= 2) hd.texto(g, `${c.golpes} golpes`, x, y + 23, { color: "#ffffff", alinear: "right", tam: 10 });
   g.fillStyle = "#000000aa";
   g.fillRect(x - 60, y + 27, 60, 3);
   g.fillStyle = r.color;

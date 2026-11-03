@@ -1,6 +1,7 @@
 // Escena de juego: une el dominio (Partida, MapaPiso, Meta) con las entidades, la física y el render.
 // Implementa el Contexto que usan las entidades para interactuar con el mundo.
 
+import { hd } from "../motor/texto-hd.ts";
 import { AzarSistema, type Azar } from "minialu";
 import { PISOS_TOTALES, SALAS_POR_PISO, bioma, type Bioma } from "../contenido/biomas.ts";
 import { botinCofre, botinEnemigo, botinVela, type Premio } from "../dominio/botin.ts";
@@ -259,7 +260,7 @@ export class Juego implements Contexto {
       if (j.intentarEsquivaPerfecta()) this.esquivaPerfecta();
       return;
     }
-    const esquiva = (this.partida.pasiva() === "humo" ? 0.2 : 0) + this.partida.combate().esquiva;
+    const esquiva = this.partida.combate().esquiva;
     if (esquiva > 0 && this.azarCombate.siguiente() < esquiva) {
       j.invuln = 0.35;
       this.fx.texto(j.cx, j.y - 4, "Esquiva", "#b48cff");
@@ -268,7 +269,8 @@ export class Juego implements Contexto {
     }
     const s = this.partida.stats();
     const golpe = calcularGolpe(this.azarCombate, ataque, 1, s.defensa, 0);
-    const danio = Math.max(1, Math.round(golpe.danio * this.partida.multiplicadorRecibido()));
+    const danio = Math.max(1, Math.round(golpe.danio * this.partida.multiplicadorRecibido() * (1 - j.buffEscudo)));
+    this.partida.ganarCarga(3);
     const r = this.partida.recibirDanio(danio);
     if (this.cargaExtraccion > 0) {
       this.cargaExtraccion = 0;
@@ -277,12 +279,13 @@ export class Juego implements Contexto {
     if (this.combo.golpes >= 5) this.fx.texto(j.cx, j.y - 14, "Combo roto", "#8a84a0");
     this.combo.recibirDanio();
     // Espinas: devuelve parte del daño al enemigo más cercano al golpe.
-    if (this.partida.pasiva() === "espinas") {
+    const espinas = this.partida.efectoAlma("espinas");
+    if (espinas > 0) {
       const atacante = this.criaturas
         .filter((c) => !c.muerto && !("esObjeto" in c) && Math.abs(c.cx - desdeX) < 48)
         .sort((x, y) => Math.abs(x.cx - desdeX) - Math.abs(y.cx - desdeX))[0];
       if (atacante !== undefined) {
-        const reflejo = Math.max(1, Math.round(danio * 0.35));
+        const reflejo = Math.max(1, Math.round(danio * espinas));
         atacante.aplicarDanio(reflejo, this);
         this.fx.texto(atacante.cx, atacante.y - 6, `${reflejo}`, "#c4ff7a");
         this.fx.chispas(atacante.cx, atacante.cy, "#c4ff7a", 8, { velocidad: 80 });
@@ -330,8 +333,10 @@ export class Juego implements Contexto {
     const ejecutor = this.partida.tieneTalento("ejecutor") && c.hp < c.hpMax * 0.3 ? 1.35 : 1;
     const garantizado = this.jugador.criticoGarantizado;
     this.jugador.criticoGarantizado = false;
-    const g = calcularGolpe(this.azarCombate, a.potencia * this.partida.multiplicadorDanio() * ejecutor * this.combo.multiplicadorDanio, 1, c.defensa,
-      garantizado ? 100 : s.critico, 1.75 + mods.critDanio);
+    const critBasico = a.tipo === "golpe" ? this.partida.efectoAlma("golpeCritico") : 0;
+    const buff = 1 + this.jugador.buffDanio;
+    const g = calcularGolpe(this.azarCombate, a.potencia * this.partida.multiplicadorDanio() * ejecutor * this.combo.multiplicadorDanio * buff, 1, c.defensa,
+      garantizado ? 100 : s.critico + critBasico, 1.75 + mods.critDanio);
     c.aplicarDanio(g.danio, this);
     c.empujar(dirX, a.empuje * (g.critico ? 1.4 : 1));
     if (a.rompeGuardia === true && c instanceof Enemigo && c.conGuardia) {
@@ -364,10 +369,14 @@ export class Juego implements Contexto {
     if (!c.pesado) c.aturdido = Math.max(c.aturdido, a.tipo === "tecnica" ? 0.12 : 0.22);
     if (a.cuerpoACuerpo === true) this.jugador.alAcertarCuerpoACuerpo(this);
     this.sumarEstilo(this.accionDeEstilo(a));
-    const pasiva = this.partida.pasiva();
-    if (pasiva === "escarcha" && a.tipo === "golpe") c.lento = Math.max(c.lento, 1.5);
-    if (pasiva === "sombra" && g.critico) this.partida.curar(Math.max(1, Math.round(s.hp * 0.03)));
-    if (mods.robo > 0) this.partida.curar(Math.max(1, Math.round(g.danio * mods.robo)));
+    this.pasivasDeGolpe(c, g.danio, a, dirX);
+    // Carga de la Definitiva: golpes básicos cargan más que las habilidades; la Definitiva no se carga a sí misma.
+    if (a.definitiva !== true && this.partida.ganarCarga(a.tipo === "tecnica" ? 0.8 : 1.6)) {
+      this.fx.texto(this.jugador.cx, this.jugador.y - 20, "¡DEFINITIVA LISTA! (P)", "#ffd27a", true);
+      this.audio.reproducir("unico");
+    }
+    const robo = mods.robo + this.jugador.buffRobo;
+    if (robo > 0) this.partida.curar(Math.max(1, Math.round(g.danio * robo)));
     this.fx.texto(c.cx, c.y - 2, `${g.danio}`, g.critico ? "#ffe27a" : "#ffffff", g.critico);
     this.fx.chispas(c.cx, c.cy, g.critico ? "#ffe27a" : "#ffffff", g.critico ? 14 : 7, {
       velocidad: 130, angulo: dirX > 0 ? 0 : Math.PI, apertura: 1.6, vida: 0.35,
@@ -376,6 +385,31 @@ export class Juego implements Contexto {
     this.fx.congelar(g.critico ? 0.07 : 0.035);
     this.fx.sacudir(g.critico ? 3 : 1.2);
     return true;
+  }
+
+  /**
+   * Pasivas del mazo de almas que actúan en cada golpe: las de ataques básicos (ranura Forma) solo con golpes
+   * del arma; los elementos de las habilidades, en cualquier golpe que los lleve.
+   */
+  private pasivasDeGolpe(c: Criatura, danio: number, a: AtaqueJugador, dirX: number): void {
+    for (const el of a.elementos ?? []) {
+      if (el === "veneno") c.envenenar(danio * 0.1);
+      else if (c.enfriar()) this.fx.texto(c.cx, c.y - 16, c.pesado ? "Entumecido" : "¡Congelado!", "#bff3ff");
+    }
+    if (a.tipo !== "golpe" || a.eco === true || c.muerto) return;
+    const e = this.partida.efectosAlma();
+    const tira = (k: "golpeQuema" | "golpeHielo" | "golpeVeneno" | "golpeRayo" | "golpeAturde" | "golpeExtra"): boolean =>
+      (e[k] ?? 0) > 0 && this.azarCombate.siguiente() < (e[k] ?? 0);
+    if (tira("golpeQuema")) c.quemar(danio * 0.15);
+    if (tira("golpeHielo") && c.enfriar()) this.fx.texto(c.cx, c.y - 16, c.pesado ? "Entumecido" : "¡Congelado!", "#bff3ff");
+    if (tira("golpeVeneno")) c.envenenar(danio * 0.08);
+    if (tira("golpeAturde") && !c.pesado) c.aturdido = Math.max(c.aturdido, 0.6);
+    if (tira("golpeRayo")) this.encadenarRayo(c, Math.round(danio * 0.5));
+    if ((e.golpeCura ?? 0) > 0) this.partida.curar(Math.max(1, Math.round(this.partida.stats().hp * (e.golpeCura ?? 0))));
+    if (tira("golpeExtra")) {
+      this.fx.texto(c.cx, c.y - 12, "¡Doble!", "#ffe27a");
+      this.golpearCriatura(c, { ...a, potencia: a.potencia * 0.5, eco: true, cuerpoACuerpo: false }, dirX);
+    }
   }
 
   /** Daño y efecto del elemento del arma: Fuego quema, Hielo congela, Veneno se acumula, Rayo salta. */
@@ -706,19 +740,13 @@ export class Juego implements Contexto {
     g.fillRect(z.x, z.y + z.h - 6, 1, 6);
     g.fillRect(z.x + z.w - 1, z.y + z.h - 6, 1, 6);
     g.restore();
-    g.font = "bold 8px monospace";
-    g.textAlign = "center";
-    g.fillStyle = "#000000";
-    g.fillText("EXTRACCIÓN", z.x + z.w / 2 + 1, z.y - 7);
-    g.fillStyle = "#7dffb0";
-    g.fillText("EXTRACCIÓN", z.x + z.w / 2, z.y - 8);
+    hd.texto(g, "EXTRACCIÓN", z.x + z.w / 2, z.y - 8, { color: "#7dffb0", alinear: "center" });
     if (prog > 0) {
       g.fillStyle = "#000000aa";
       g.fillRect(z.x, z.y - 4, z.w, 3);
       g.fillStyle = "#7dffb0";
       g.fillRect(z.x, z.y - 4, Math.round(z.w * prog), 3);
     }
-    g.textAlign = "left";
   }
 
   private colocarVelas(sm: SalaMapa, estado: EstadoSala): void {
@@ -994,6 +1022,7 @@ export class Juego implements Contexto {
     const j = this.jugador;
     this.fx.texto(j.cx, j.y - 18, `${subio.nombre} · ${subio.titulo}`, subio.color, true);
     this.audio.reproducir(this.combo.indiceRango >= 4 ? "unico" : "nivel");
+    if (this.combo.indiceRango === 4) this.avisarMision(this.partida.registrarMision("rango"));
     if (this.combo.indiceRango >= 4) {
       this.ralentizar(0.55, 0.12);
       this.fx.destellar(subio.color, 0.25);
@@ -1096,7 +1125,7 @@ export class Juego implements Contexto {
       case "cofre": {
         obj.usado = true;
         estado.cofreAbierto = true;
-        this.avisarMision(this.partida.registrarMision("cofre"));
+        this.avisarMision(this.partida.registrarMision("cofre", this.partida.piso));
         this.audio.reproducir("cofre");
         this.fx.chispas(obj.cx, obj.y, "#ffd23d", 30, { velocidad: 120, brillo: true });
         this.soltar(botinCofre(this.partida.azar, this.partida.piso, this.partida.modificadoresBotin()), obj.cx, obj.y);
@@ -1150,6 +1179,7 @@ export class Juego implements Contexto {
   salirAlPueblo(motivo: "extraccion" | "portal"): void {
     if (this.terminado) return;
     this.terminado = true;
+    this.partida.registrarMision("extraer", this.partida.piso);
     this.meta.registro.mejorPiso = Math.max(this.meta.registro.mejorPiso, this.partida.piso);
     this.audio.silenciarAmbiente();
     this.eventos.borrarDescenso();
@@ -1176,7 +1206,7 @@ export class Juego implements Contexto {
     const estado = this.estadoDe(this.sala.mapa.id);
     if (c instanceof Vela) {
       estado.velasRotas.add(c.indice);
-      this.avisarMision(this.partida.registrarMision("vela"));
+      this.avisarMision(this.partida.registrarMision("vela", this.partida.piso));
       this.soltar(botinVela(this.partida.azar, this.partida.piso), c.cx, c.y + 4);
       return;
     }
@@ -1195,7 +1225,7 @@ export class Juego implements Contexto {
     this.meta.registro.enemigos++;
 
     if (c instanceof EcoRival) {
-      this.avisarMision(this.partida.registrarMision("eco"));
+      this.avisarMision(this.partida.registrarMision("eco", this.partida.piso));
       estado.jefeVencido = true;
       this.partida.ecosVencidos++;
       this.meta.vencerEco(c.eco.uid);
@@ -1231,8 +1261,8 @@ export class Juego implements Contexto {
       this.guardarProgreso();
       return;
     }
-    this.avisarMision(this.partida.registrarMision("matar"));
-    if (c.categoria === "elite") this.avisarMision(this.partida.registrarMision("elite"));
+    this.avisarMision(this.partida.registrarMision("matar", this.partida.piso));
+    if (c.categoria === "elite") this.avisarMision(this.partida.registrarMision("elite", this.partida.piso));
     if (this.partida.registrarMuerteEnemigo()) {
       this.fx.texto(this.jugador.cx, this.jugador.y - 10, "Corazón del Pozo", "#ff4d6d");
     }
@@ -1417,8 +1447,7 @@ export class Juego implements Contexto {
       const y = Math.round(cerca.y - 16);
       g.fillStyle = "#000000cc";
       g.fillRect(x, y, w, 12);
-      g.fillStyle = "#ffe9a8";
-      g.fillText(texto, x + 4, y + 9);
+      hd.texto(g, texto, x + 4, y + 9, { color: "#ffe9a8" });
     }
     g.restore();
 

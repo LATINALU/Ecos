@@ -10,6 +10,7 @@ import { generarEquipo } from "../src/dominio/equipo.ts";
 import { Meta } from "../src/dominio/meta.ts";
 import { Partida } from "../src/dominio/partida.ts";
 import { crearEco, premiosEco } from "../src/dominio/eco.ts";
+import { INFO_MISIONES, MISIONES, mision } from "../src/contenido/misiones.ts";
 import { ACCESORIOS, ARMADURAS, RANURAS } from "../src/dominio/tipos.ts";
 
 const posDe = (p: Partida, objeto: number) => [...p.mochila.posiciones()].find((q) => p.mochila.en(q)?.objeto === objeto)!;
@@ -108,35 +109,45 @@ describe("comercio", () => {
 });
 
 describe("misiones del tablón", () => {
-  it("aceptar, avanzar con eventos del juego y entregar (la esencia va a la Meta)", () => {
-    const meta = Meta.nueva();
-    const p = new Partida(meta, 1);
-    expect(p.misiones.aceptar(1, p.nivel()).ok).toBe(true);
-    let completa = false;
-    for (let i = 0; i < 15; i++) completa = p.registrarMision("matar") || completa;
-    expect(completa).toBe(true);
-    const esq = p.esquirlas;
-    const r = p.entregarMision(1);
-    expect(r.ok).toBe(true);
-    expect(p.esquirlas).toBe(esq + 120);
-    // La cadena sigue: la 2 pide vencer al guardián del piso 1.
-    expect(p.misiones.aceptar(2, p.nivel()).ok).toBe(true);
-    p.registrarMision("jefe", 2);
-    expect(p.misiones.completa(2)).toBe(false);
-    p.registrarMision("jefe", 1);
-    expect(p.misiones.completa(2)).toBe(true);
-    const e0 = meta.esencia;
-    p.entregarMision(2);
-    expect(meta.esencia).toBeGreaterThan(e0);
+  it("hay 120 misiones: 10 por zona y 2 encargos repetibles por zona", () => {
+    expect(MISIONES).toHaveLength(120);
+    expect(MISIONES.filter((m) => m.repetible === true)).toHaveLength(20);
+    expect(new Set(MISIONES.map((m) => m.id)).size).toBe(120);
+    for (const m of MISIONES) {
+      expect(INFO_MISIONES[m.id]?.objetivos.length).toBe(m.objetivos.length);
+      if (m.requiere !== undefined) expect(MISIONES.some((x) => x.id === m.requiere)).toBe(true);
+    }
   });
 
-  it("como mucho 3 activas y se guardan con el personaje", () => {
+  it("aceptar, avanzar con eventos del piso correcto y entregar; abre la siguiente de la línea", () => {
     const meta = Meta.nueva();
     const p = new Partida(meta, 1);
-    for (const id of [1, 100, 101]) expect(p.misiones.aceptar(id, 1).ok).toBe(true);
-    expect(p.misiones.aceptar(102, 1).ok).toBe(false);
-    const q = Partida.restaurar(meta, JSON.parse(JSON.stringify(p.serializar())));
-    expect(q.misiones.listaActivas()).toHaveLength(3);
+    expect(p.misiones.aceptar(1001, p.nivel()).ok).toBe(true);
+    const cantidad = mision(1001)!.objetivos[0].cantidad;
+    // Matar en otro piso no cuenta.
+    for (let i = 0; i < cantidad; i++) p.registrarMision("matar", 2);
+    expect(p.misiones.completa(1001)).toBe(false);
+    let completa = false;
+    for (let i = 0; i < cantidad; i++) completa = p.registrarMision("matar", 1) || completa;
+    expect(completa).toBe(true);
+    const esq = p.esquirlas;
+    expect(p.entregarMision(1001).ok).toBe(true);
+    expect(p.esquirlas).toBeGreaterThan(esq);
+    expect(p.misiones.aceptar(1002, p.nivel()).ok).toBe(true);
+    // La zona 2 se abre recién con el guardián de la zona 1.
+    expect(p.misiones.aceptar(2001, p.nivel()).ok).toBe(false);
+  });
+
+  it("como mucho 3 activas y se guardan con el personaje; los ids viejos se descartan", () => {
+    const meta = Meta.nueva();
+    const p = new Partida(meta, 1);
+    for (const id of [1001, 1004, 1007]) expect(p.misiones.aceptar(id, 1).ok).toBe(true);
+    expect(p.misiones.aceptar(1050, 1).ok).toBe(false);
+    const datos = JSON.parse(JSON.stringify(p.serializar()));
+    datos.misiones.activas.push({ id: 7, progreso: [0] });
+    datos.misiones.entregadas.push(101);
+    const q = Partida.restaurar(meta, datos);
+    expect(q.misiones.listaActivas().map((a) => a.id).sort()).toEqual([1001, 1004, 1007]);
   });
 });
 

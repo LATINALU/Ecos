@@ -132,5 +132,5 @@ export function alma(id: number): DefAlma {
   return a;
 }
 
-/** Escala de stats por estrella (nivel 0 = 1★ ... nivel 6 = 7★). */
-export const ESCALA_ESTRELLA: readonly number[] = [6, 11, 17, 25, 35, 48, 65];
+/** Escala de stats por estrella (nivel 0 = 1★ ... nivel 11 = 12★, la carta máxima). */
+export const ESCALA_ESTRELLA: readonly number[] = [6, 11, 17, 25, 35, 48, 65, 86, 112, 145, 186, 238];
