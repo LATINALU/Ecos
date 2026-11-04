@@ -6,7 +6,7 @@
 import type { Eco } from "./eco.ts";
 import { NIVEL_INICIAL_JUICIO, PISO_DESBLOQUEO_JUICIO } from "./juicio.ts";
 import { sumarPactos, type EfectosPacto } from "./templado.ts";
-import { PESO_MAX, bonoPeso, type ResumenRiesgo } from "./codicia.ts";
+import { PESO_MAX, bonoPeso } from "./codicia.ts";
 import { historia, type IdHistoria } from "../contenido/historias.ts";
 import { abrirRelicario, PIEDAD_INICIAL, tirarNivelCaja, type PiedadRelicario } from "./relicario.ts";
 import {
@@ -216,7 +216,7 @@ export class Partida {
   piedadRelicario: PiedadRelicario = PIEDAD_INICIAL;
   /** Espectro Temporal: el Eco con el que pactaste pelea a tu lado este piso y guarda tu mejor pieza. */
   pactoEco: Eco | null = null;
-  /** PESO DEL ECO: pisos seguidos sin volver al pueblo (más hallazgos raros, pero llegan los Cazadores). */
+  /** PESO DEL ECO: pisos seguidos sin volver al pueblo (más hallazgos raros y Relicarios). */
   pesoEco = 0;
   /** Misiones personales del pueblo: aceptadas ("conocida") o terminadas ("cumplida"). */
   historias: Partial<Record<IdHistoria, EstadoHistoria>> = {};
@@ -1002,24 +1002,6 @@ export class Partida {
   }
 
   /** Valor en riesgo (esquirlas + lo que valen equipo y mochila): lo que perderías si mueres ahora. */
-  /** Lo que llevas encima resumido para la emboscada de extracción (rarezas, relicarios, valor). */
-  resumenRiesgo(): ResumenRiesgo {
-    const porRareza = [0, 0, 0, 0, 0, 0];
-    for (const r of RANURAS) {
-      const o = this.equipo[r];
-      if (o !== null && o.espectral !== true) porRareza[o.rareza]++;
-    }
-    let relicarios = 0;
-    for (const pos of this.mochila.posiciones()) {
-      const p = this.mochila.en(pos);
-      if (p === null) continue;
-      const o = equipoDe(p);
-      if (o !== undefined && o.espectral !== true) porRareza[o.rareza]++;
-      if (p.objeto === OBJ_RELICARIO) relicarios += p.cantidad;
-    }
-    return { valor: this.valorEnRiesgo(), porRareza, relicarios };
-  }
-
   valorEnRiesgo(): number {
     let v = this.esquirlas;
     for (const r of RANURAS) {

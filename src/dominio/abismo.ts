@@ -43,7 +43,7 @@ export function tirarSalida(azar: Azar, prof: number, pisosSinSalida: number): b
 
 /** Salas por piso: crecen hasta 22. */
 export function salasAbismo(prof: number): number {
-  return Math.min(22, 10 + Math.floor(prof / 3));
+  return Math.min(44, 20 + Math.floor(prof / 3) * 2);
 }
 
 /** Piso más hondo desde el que se puede empezar tras vencer al guardián de `prof`. */

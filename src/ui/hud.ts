@@ -90,18 +90,18 @@ export function dibujarHud(g: CanvasRenderingContext2D, juego: Juego): void {
     const total = juego.duracionExtraccion;
     const prog = Math.min(1, juego.cargaExtraccion / total);
     const fuera = !juego.enZonaExtraccion;
-    texto(g, fuera ? `¡VUELVE A LA ZONA! ${Math.ceil(total - juego.cargaExtraccion)} s` : `RESISTE ${Math.ceil(total - juego.cargaExtraccion)} s`, 240, 200, fuera ? "#ff6a6a" : "#7dffb0", "center");
+    texto(g, fuera ? `¡VUELVE A LA ZONA! ${Math.ceil(total - juego.cargaExtraccion)} s` : `EXTRAYENDO ${Math.ceil(total - juego.cargaExtraccion)} s`, 240, 200, fuera ? "#ff6a6a" : "#7dffb0", "center");
     barra(g, 180, 204, 120, 4, prog, fuera ? "#ff6a6a" : "#7dffb0");
   }
   // Peso del Eco: pisos seguidos sin volver al pueblo.
-  if (p.pesoEco > 0) texto(g, `Peso del Eco ×${p.pesoEco} · +${p.pesoEco * 25} % hallazgos`, 476, 241, p.pesoEco >= 2 ? "#ff6a9a" : "#c9a7ff", "right");
+  if (p.pesoEco > 0) texto(g, `Peso del Eco ×${p.pesoEco} · +${p.pesoEco * 25} % hallazgos`, 476, 241, "#c9a7ff", "right");
 
   // Piso
   const b = bioma(p.piso);
   texto(g, `Piso ${p.piso} · ${b.nombre}`, 476, 262, b.acento, "right");
 
   // Mapas grandes del Pozo Profundo: celdas más chicas para que entren.
-  const celda = juego.mapa.ancho > 7 ? 8 : 9;
+  const celda = Math.max(5, Math.min(9, Math.floor(84 / juego.mapa.ancho), Math.floor(60 / juego.mapa.alto)));
   dibujarMinimapa(g, juego.mapa, juego, 478 - juego.mapa.ancho * celda - 2, 4, celda);
   dibujarCombo(g, juego);
 

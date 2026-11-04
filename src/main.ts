@@ -488,9 +488,8 @@ void sprites.cargar().then(() => {
   }
   descender(Number(q.get("piso") ?? 1), q.has("abismo"));
   if (q.has("cicatriz") && juego !== null) juego.depurarCicatriz();
-  // &peso=N → Peso del Eco; &cazador → el Cazador de Portadores llega ya.
+  // &peso=N → Peso del Eco.
   if (q.has("peso") && partida !== null) partida.pesoEco = Number(q.get("peso"));
-  if (q.has("cazador") && juego !== null) juego.depurarCazador();
   if (q.has("batalla") && juego !== null) juego.depurarBatalla();
   if (q.has("decision") && juego !== null) juego.depurarDecisionEco();
   if (q.has("cargada") && partida !== null) partida.cargaDefinitiva = 100;

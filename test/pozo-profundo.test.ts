@@ -6,7 +6,7 @@ import { AzarSemilla } from "minialu";
 import { BIOMAS, ENEMIGOS, SALAS_POR_PISO, bioma, cantidadAfijosElite, escalaEnemigo, nombreEnemigo, probElite } from "../src/contenido/biomas.ts";
 import { botinCofre } from "../src/dominio/botin.ts";
 import { Meta } from "../src/dominio/meta.ts";
-import { generarPiso } from "../src/dominio/mundo/generador.ts";
+import { dimensionesMapa, generarPiso } from "../src/dominio/mundo/generador.ts";
 import { construirSala, indice, TILE } from "../src/dominio/mundo/sala.ts";
 import { Partida } from "../src/dominio/partida.ts";
 import type { Contexto, Peligro } from "../src/juego/contexto.ts";
@@ -22,10 +22,10 @@ describe("24 pisos", () => {
     const azar = new AzarSemilla(17);
     for (let piso = 1; piso <= 24; piso++) {
       const mapa = generarPiso(azar, {
-        piso, cantidadSalas: SALAS_POR_PISO[piso - 1], ancho: piso > 10 ? 9 : 7, alto: piso > 10 ? 6 : 5,
+        piso, cantidadSalas: SALAS_POR_PISO[piso - 1], ...dimensionesMapa(SALAS_POR_PISO[piso - 1]),
         reliquiasPoseidas: [], hayEco: false,
       });
-      expect(mapa.salas.length, `piso ${piso}`).toBeGreaterThanOrEqual(Math.min(SALAS_POR_PISO[piso - 1], 6));
+      expect(mapa.salas.length, `piso ${piso}`).toBeGreaterThanOrEqual(SALAS_POR_PISO[piso - 1] * 0.9);
       const arenas = mapa.salas.filter((s) => s.tipo === "arena").length;
       if (piso >= 2 && mapa.salas.length >= 10) expect(arenas, `piso ${piso}`).toBeGreaterThanOrEqual(1);
       if (piso >= 3 && mapa.salas.length >= 10) expect(mapa.salas.some((s) => s.tipo === "boveda"), `piso ${piso}`).toBe(true);

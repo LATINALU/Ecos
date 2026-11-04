@@ -1900,10 +1900,13 @@ export class Interfaz {
   // =============================== Mapa y pausa ===============================
 
   abrirMapa(juego: Juego): void {
-    const c = h("canvas", { width: 7 * 34 + 8, height: 5 * 34 + 8, class: "mapa" });
+    // Celdas según el tamaño del piso: los mapas grandes también entran.
+    const m = juego.mapa;
+    const celda = Math.max(14, Math.min(34, Math.floor(260 / m.ancho), Math.floor(190 / m.alto)));
+    const c = h("canvas", { width: m.ancho * celda + 8, height: m.alto * celda + 8, class: "mapa" });
     const g = c.getContext("2d")!;
     g.imageSmoothingEnabled = false;
-    dibujarMinimapa(g, juego.mapa, juego, 4, 4, 34);
+    dibujarMinimapa(g, m, juego, 4, 4, celda);
     const leyenda: [string, string][] = [
       ["#ffe9a8", "Tú"], ["#ffffff", "Faro"], ["#ff3d3d", "Guardián"], ["#a07cff", "Altar"], ["#ffd23d", "Tesoro"],
       ["#7fe3ff", "Reliquia"], ["#ffb23d", "Mercader"], ["#ff8aff", "Eco"], ["#7dffb0", "Extracción"],

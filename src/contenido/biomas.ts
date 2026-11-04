@@ -532,5 +532,5 @@ export function escalaEnemigo(piso: number): { hp: number; ataque: number; defen
 
 /** Salas por piso (1 a 24): más grandes cuanto más hondo; el último es un tramo corto hasta el Corazón. */
 export const SALAS_POR_PISO: readonly number[] = [
-  9, 10, 10, 11, 11, 12, 12, 12, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 12,
+  18, 20, 20, 22, 22, 24, 24, 24, 26, 28, 28, 30, 30, 32, 32, 34, 34, 36, 36, 38, 38, 40, 40, 24,
 ];

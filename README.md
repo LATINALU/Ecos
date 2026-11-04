@@ -168,7 +168,8 @@ Escarcha, Ciudad Sumergida, Biblioteca de Ceniza… y más). Cada zona tiene su 
 
 ### El mapa de cada piso
 
-- Cada piso es una red de salas que se genera al azar al llegar. Nunca hay dos iguales.
+- Cada piso es una red de salas que se genera al azar al llegar. Nunca hay dos iguales. Los pisos son **grandes**:
+  de 18 salas en el piso 1 a 40 en los más hondos (y hasta 44 en el Abismo).
 - Las salas se conectan por puertas laterales y por pasajes verticales con **cadenas** para trepar.
 - Algunas puertas están bloqueadas por **cristales** o **muros de raíces**: se rompen con ciertas reliquias.
 - **Regla de oro:** el juego nunca te pone un obstáculo que no puedas superar. Si una puerta pide una reliquia, o ya la
@@ -191,10 +192,8 @@ Escarcha, Ciudad Sumergida, Biblioteca de Ceniza… y más). Cada zona tiene su 
 ### Riesgo y extracción
 
 - Lo que recoges en el Pozo está **"en riesgo"** (se muestra abajo a la derecha).
-- **Extraer da miedo:** al pisar la zona verde, el Pozo intenta impedir que te vayas. Tienes que **resistir dentro de
-  la zona entre 15 y 20 segundos** (salir pausa el progreso y cada golpe lo hace retroceder) mientras la música se
-  acelera, los bordes de la pantalla laten en rojo, brotan **Manos del Abismo** bajo tus pies y llegan cazadores
-  atraídos por el brillo de tu botín. **Cuanto más Legendario o Mítico lleves, más violenta es la emboscada.**
+- Para extraer, quédate **5 segundos** dentro de la zona verde. Salir o recibir un golpe reinicia la cuenta.
+- Los pisos grandes tienen hasta **3 zonas de extracción** (una cerca del inicio, otra a media distancia y otra al fondo).
 - Si lo logras, o si tomas el portal del guardián, todo pasa a ser tuyo de verdad. Si **mueres**, lo pierdes.
 - Al vencer al guardián de un piso, desde el pueblo podrás empezar a bajar **desde el piso siguiente**.
 
@@ -203,10 +202,6 @@ Escarcha, Ciudad Sumergida, Biblioteca de Ceniza… y más). Cada zona tiene su 
 Cada piso que bajas **seguido** sin volver al pueblo suma **Peso del Eco** (se ve abajo a la derecha):
 
 - Cada punto da **+25 % de hallazgos raros** (mejor botín y más Relicarios en las élites).
-- Desde Peso 2, el Pozo manda un **Cazador de Portadores**: atraviesa paredes, no se detiene al recibir golpes y te
-  **sigue de sala en sala** (entra por la puerta detrás de ti). Se puede matar, y suelta un Relicario y una pieza
-  Legendaria. Cuanto más Peso, antes llega y más resiste.
-- Con mucho Peso, la imagen misma del Pozo empieza a distorsionarse.
 - El Peso vuelve a cero cuando empiezas un descenso nuevo desde el pueblo.
 
 ### Cofres
@@ -410,6 +405,11 @@ Las reliquias **no se pierden nunca**, ni siquiera al morir. Aparecen en pisos c
 En el Pozo, en lugar de tiendas, hay **arenas**: salas donde se consigue buen equipo peleando. Son **opcionales**: en
 el centro hay una **Campana del Desafío** y nada empieza hasta que la tocas. Al tocarla se sellan las puertas y llegan
 las oleadas.
+
+**Frenesí:** mientras dura la arena, el Pozo se enfurece. La música se acelera, los bordes de la pantalla laten en
+rojo, brotan **Manos del Abismo** bajo tus pies y llegan **refuerzos** por los lados mientras quede alguien de la
+oleada en pie (con un tope, para que siempre se pueda limpiar). Es más violento cuanto más hondo el piso, cuanto más
+avanza la arena y en el Juicio. En el Duelo solo brotan manos: es un uno contra uno.
 
 | Arena | Regla | Premio especial |
 |---|---|---|

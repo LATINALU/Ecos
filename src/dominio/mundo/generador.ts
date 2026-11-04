@@ -264,6 +264,9 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
     extracciones.push(candidatas[Math.floor(candidatas.length / 2)].id);
     const fondo = candidatas[candidatas.length - 1];
     if (candidatas.length >= 3 && !extracciones.includes(fondo.id)) extracciones.push(fondo.id);
+    // Pisos grandes: una tercera salida cerca del inicio, para no tener que cruzar todo el mapa.
+    const cerca = candidatas[Math.floor(candidatas.length / 5)];
+    if (candidatas.length >= 16 && !extracciones.includes(cerca.id)) extracciones.push(cerca.id);
   } else {
     const resto = salas.filter((s) => s.tipo === "normal");
     if (resto.length > 0) extracciones.push(elegirUno(azar, resto).id);
@@ -281,6 +284,13 @@ function intentar(azar: Azar, op: OpcionesGenerador, permitirSubidas: boolean, c
   }
 
   return { piso: op.piso, ancho: op.ancho, alto: op.alto, salas, conexiones, inicio, jefe, extracciones };
+}
+
+/** Grilla que necesita un piso de `salas` salas (≈2,5 celdas por sala, más ancha que alta). */
+export function dimensionesMapa(salas: number): { ancho: number; alto: number } {
+  const celdas = salas * 2.5;
+  const ancho = Math.max(7, Math.ceil(Math.sqrt(celdas * 1.4)));
+  return { ancho, alto: Math.max(5, Math.ceil(celdas / ancho)) };
 }
 
 export function generarPiso(azar: Azar, op: OpcionesGenerador): MapaPiso {

@@ -17,12 +17,11 @@ import { PROB_ECO_AJENO, recompensaVenganza, type EcoCompartido, type ServicioEc
 import { EspectroAliado } from "./entidades/aliado.ts";
 import { HISTORIAS, type DefHistoria } from "../contenido/historias.ts";
 import { crearCarta } from "../dominio/cartas.ts";
-import { Cazador } from "./entidades/cazador.ts";
-import { PESO_CAZADOR, bonoPeso, nivelEmboscada, planEmboscada, retrasoCazador, statsCazador, type PlanEmboscada } from "../dominio/codicia.ts";
+import { bonoPeso, nivelFrenesi, planFrenesi, type PlanFrenesi } from "../dominio/codicia.ts";
 import { tecnicaEnemiga } from "./entidades/jefes.ts";
 import { alma } from "../contenido/almas.ts";
 import type { Meta } from "../dominio/meta.ts";
-import { aperturas, generarPiso, podarBarreras, type MapaPiso, type SalaMapa } from "../dominio/mundo/generador.ts";
+import { aperturas, dimensionesMapa, generarPiso, podarBarreras, type MapaPiso, type SalaMapa } from "../dominio/mundo/generador.ts";
 import {
   ALTO_SALA, ANCHO_SALA, COLS, ENEMIGOS_SPAWN, FILAS, FILAS_PUERTA, T_CRISTAL, T_PINCHOS, T_PLATAFORMA, T_RAICES, T_ROCA, T_VACIO, TILE,
   construirSala, esSolido, indice,
@@ -142,6 +141,8 @@ interface EstadoArena {
   /** Juicio (lategame): nivel de la piedra y afijos de la semana. */
   juicio?: { nivel: number; afijos: Set<AfijoJuicio> };
   relojVolcan: number;
+  /** Frenesí: Manos del Abismo y refuerzos mientras dura la arena. */
+  frenesi?: { plan: PlanFrenesi; nivel: number; cdMano: number; cdOleada: number; refuerzos: Set<Enemigo> };
 }
 
 interface EstadoSala {
@@ -340,11 +341,6 @@ export class Juego implements Contexto {
     for (let k = 0; k < 6; k++) this.particulas.sangre(j.cx + 40 + k * 25, j.y, "rgb(110, 10, 24)", 25);
   }
 
-  /** Solo para desarrollo: el Cazador de Portadores aparece ya. */
-  depurarCazador(): void {
-    this.aparecerCazador(undefined, "Un Cazador de Portadores baja por ti. No se detiene.");
-  }
-
   /** Solo para desarrollo: ir a la sala de la cicatriz del piso. */
   depurarCicatriz(): void {
     if (this.cicatriz === null) return;
@@ -487,9 +483,9 @@ export class Juego implements Contexto {
     if (agresor !== undefined) {
       this.ultimoAgresor = { a: { nombre: agresor.nombre, conducta: agresor.conducta, elite: agresor.categoria === "elite", afijos: [...agresor.afijos] }, t: this.tiempo };
     }
-    if (this.cargaExtraccion > 0 && this.emboscada !== null) {
-      this.cargaExtraccion = Math.max(0.01, this.cargaExtraccion - 0.6);
-      this.fx.texto(j.cx, j.y - 14, "−0,6 s", "#ff6a6a");
+    if (this.cargaExtraccion > 0) {
+      this.cargaExtraccion = 0;
+      this.fx.texto(j.cx, j.y - 14, "Extracción interrumpida", "#ff6a6a");
     }
     if (this.combo.golpes >= 5) this.fx.texto(j.cx, j.y - 14, "Combo roto", "#8a84a0");
     this.combo.recibirDanio();
@@ -792,8 +788,7 @@ export class Juego implements Contexto {
       this.mapa = generarPiso(this.partida.azar, {
         piso,
         cantidadSalas: salasAbismo(piso),
-        ancho: 9,
-        alto: 6,
+        ...dimensionesMapa(salasAbismo(piso)),
         reliquiasPoseidas: this.meta.listaReliquias(),
         hayEco: this.prepararEcos(piso),
         salidas: salida ? 1 : 0,
@@ -806,10 +801,9 @@ export class Juego implements Contexto {
     } else {
       this.mapa = generarPiso(this.partida.azar, {
         piso,
-        cantidadSalas: SALAS_POR_PISO[piso - 1] ?? 12,
-        // El Pozo Profundo (piso 11+) tiene mapas más grandes.
-        ancho: piso > 10 ? 9 : 7,
-        alto: piso > 10 ? 6 : 5,
+        cantidadSalas: SALAS_POR_PISO[piso - 1] ?? 24,
+        // La grilla crece con la cantidad de salas (los pisos hondos son más grandes).
+        ...dimensionesMapa(SALAS_POR_PISO[piso - 1] ?? 24),
         reliquiasPoseidas: this.meta.listaReliquias(),
         reliquiaAColocar: this.meta.reliquiaParaPiso(piso),
         hayEco: this.prepararEcos(piso),
@@ -822,7 +816,7 @@ export class Juego implements Contexto {
     this.cicatricesSala.clear();
     this.prepararCicatriz(piso);
     this.prepararHistoria(piso);
-    this.prepararCazador();
+    this.avisarPeso();
     this.avisosBarrera.clear();
     this.avisosPozo.clear();
     this.cargarSala(this.mapa.inicio, null);
@@ -885,16 +879,7 @@ export class Juego implements Contexto {
   }
 
   private cargarSala(id: number, entrada: Dir | null): void {
-    // El Cazador te sigue: si estaba vivo en la sala que dejas, entra por la puerta unos segundos después.
-    const cz = this.criaturas.find((c): c is Cazador => c instanceof Cazador && !c.muerto);
-    if (cz !== undefined) {
-      this.cazador.hp = cz.hp;
-      this.cazador.reentrada = 3;
-    }
-    if (this.emboscada !== null) {
-      this.emboscada = null;
-      this.audio.tension(false);
-    }
+    if (this.arena?.frenesi !== undefined) this.audio.tension(false);
     this.enZonaExtraccion = false;
     this.guardarEstadoSala();
     const sm = this.mapa.salas[id];
@@ -1228,6 +1213,7 @@ export class Juego implements Contexto {
       this.criaturas.push(e);
       this.fx.chispas(e.cx, e.y + e.h - 8, color, 10, { velocidad: 70, brillo: true });
     }
+    this.prepararFrenesi(a);
     this.sellarPuertas(true);
     const titulo = a.juicio !== undefined ? `Juicio +${a.juicio.nivel} · ${a.def.nombre}` : a.def.nombre;
     this.eventos.jefe(`${titulo} · oleada ${a.oleada}/${a.def.oleadas}`, a.oleada === 1 ? a.def.regla : "Nadie sale hasta que caigan todos");
@@ -1286,6 +1272,7 @@ export class Juego implements Contexto {
     const a = this.arena;
     if (a === null || !a.activa || this.terminado) return;
     this.actualizarJuicio(dt, a);
+    this.actualizarFrenesi(dt, a);
     if (a.tiempoTotal !== undefined && a.tiempo > 0) {
       a.tiempo -= dt;
       if (a.tiempo <= 0) {
@@ -1293,7 +1280,7 @@ export class Juego implements Contexto {
         this.audio.reproducir("fallo");
       }
     }
-    if (this.criaturas.some((c) => !c.muerto && !(c instanceof Vela) && !(c instanceof Cazador))) return;
+    if (this.criaturas.some((c) => !c.muerto && !(c instanceof Vela))) return;
     if (a.oleada < a.def.oleadas) {
       this.siguienteOleada();
       return;
@@ -1339,6 +1326,7 @@ export class Juego implements Contexto {
     this.avisarMision(p.registrarMision("arena", p.piso));
 
     a.estado.arena = -1;
+    if (a.frenesi !== undefined) this.audio.tension(false);
     this.arena = null;
     this.sellarPuertas(false);
     const centro = this.ubicarExtraccion();
@@ -1405,129 +1393,84 @@ export class Juego implements Contexto {
     return { x: tx * TILE, y: (ty - 2) * TILE, w: 3 * TILE, h: 3 * TILE };
   }
 
-  /** Extracción: quedarse 5 s dentro de la zona. Recibir daño reinicia la cuenta. */
-  /** Segundos que hay que resistir en la zona (con emboscada: 15~20 s según lo que llevas en riesgo). */
+  /** Segundos que hay que quedarse en la zona de extracción. */
   get duracionExtraccion(): number {
-    return this.emboscada?.plan.duracion ?? SEGUNDOS_EXTRACCION;
+    return SEGUNDOS_EXTRACCION;
   }
 
-  /**
-   * Extracción: al pisar la zona, el Pozo intenta impedir que te vayas. Hay que acumular el tiempo DENTRO de la zona
-   * (salir pausa el progreso, un golpe lo hace retroceder) mientras brotan Manos del Abismo bajo tus pies y llegan
-   * cazadores atraídos por el brillo de tu botín. Cuanto más Legendario/Mítico llevas, más violenta es.
-   */
+  /** Extracción: quedarse 5 s dentro de la zona. Salir o recibir daño reinicia la cuenta. */
   private actualizarExtraccion(dt: number): void {
     const z = this.zonaExtraccion;
     if (z === null || this.terminado) return;
     const dentro = !this.jugador.muerto && solapan(this.jugador, z);
     this.enZonaExtraccion = dentro;
-    if (dentro && this.emboscada === null) this.iniciarEmboscada();
-    const e = this.emboscada;
-    if (e === null) return;
-    if (dentro) {
-      this.cargaExtraccion += dt;
-      if (Math.random() < dt * 20) {
-        this.fx.chispas(z.x + Math.random() * z.w, z.y + z.h, "#7dffb0", 1, { velocidad: 40, gravedad: -120, vida: 0.6, brillo: true });
-      }
+    if (!dentro) {
+      this.cargaExtraccion = 0;
+      return;
     }
-    // Manos del Abismo: brotan bajo tus pies con aviso.
-    e.cdMano -= dt;
-    if (e.cdMano <= 0) {
-      e.cdMano = e.plan.cadaMano * (0.75 + Math.random() * 0.5);
-      const j = this.jugador;
-      const x = j.cx + (Math.random() - 0.5) * 30;
-      this.peligros.push({ x: x - 9, y: j.y + j.h - 34, w: 18, h: 34, aviso: 0.75, activo: 0.4, danio: Math.round(6 + this.partida.piso * 2 + e.nivel * 3), color: "#6a1aa0", golpeo: false, forma: "mano" });
+    this.cargaExtraccion += dt;
+    if (Math.random() < dt * 20) {
+      this.fx.chispas(z.x + Math.random() * z.w, z.y + z.h, "#7dffb0", 1, { velocidad: 40, gravedad: -120, vida: 0.6, brillo: true });
     }
-    // Cazadores atraídos por el brillo del botín.
-    e.cdOleada -= dt;
-    if (e.cdOleada <= 0) {
-      e.cdOleada = e.plan.cadaOleada;
-      this.oleadaEmboscada(e);
-    }
-    if (this.cargaExtraccion >= e.plan.duracion) {
-      this.emboscada = null;
-      this.audio.tension(false);
+    if (this.cargaExtraccion >= SEGUNDOS_EXTRACCION) {
       this.fx.destellar("#7dffb0", 0.9);
       this.audio.reproducir("reliquia");
       this.salirAlPueblo("extraccion");
     }
   }
 
-  private iniciarEmboscada(): void {
-    const nivel = nivelEmboscada(this.partida.resumenRiesgo());
-    this.emboscada = { plan: planEmboscada(nivel), nivel, cdMano: 1.2, cdOleada: 1.5 };
-    this.cargaExtraccion = 0.01;
-    this.audio.tension(true);
-    this.audio.reproducir("jefe");
-    this.fx.sacudir(6);
-    this.eventos.jefe("¡El Pozo no quiere dejarte ir!",
-      nivel >= 4 ? "Lo que llevas brilla demasiado: resiste en la zona" : nivel >= 2 ? "Algo huele tu botín: resiste en la zona" : "Resiste en la zona hasta que se abra el camino");
+  // ---------------- Frenesí de arena ----------------
+
+  /** Cada oleada recalcula el frenesí (más fuerte cuanto más avanza la arena). */
+  private prepararFrenesi(a: EstadoArena): void {
+    const nivel = nivelFrenesi(this.partida.piso, a.oleada, a.juicio?.nivel ?? 0);
+    const primera = a.frenesi === undefined;
+    a.frenesi = { plan: planFrenesi(nivel), nivel, cdMano: 1.5, cdOleada: 2.5, refuerzos: a.frenesi?.refuerzos ?? new Set() };
+    if (primera) {
+      this.audio.tension(true);
+      this.fx.sacudir(5);
+    }
   }
 
-  private oleadaEmboscada(e: { plan: PlanEmboscada; nivel: number }): void {
+  /** Mientras quede alguien de la oleada: Manos del Abismo bajo tus pies y refuerzos por los lados. */
+  private actualizarFrenesi(dt: number, a: EstadoArena): void {
+    const f = a.frenesi;
+    if (f === undefined) return;
+    for (const e of f.refuerzos) if (e.muerto) f.refuerzos.delete(e);
+    const quedanDeLaOleada = this.criaturas.some((c) => !c.muerto && c instanceof Enemigo && !f.refuerzos.has(c));
+    if (!quedanDeLaOleada) return;
+    f.cdMano -= dt;
+    if (f.cdMano <= 0) {
+      f.cdMano = f.plan.cadaMano * (0.75 + Math.random() * 0.5);
+      const j = this.jugador;
+      const x = j.cx + (Math.random() - 0.5) * 30;
+      this.peligros.push({ x: x - 9, y: j.y + j.h - 34, w: 18, h: 34, aviso: 0.75, activo: 0.4, danio: Math.round(6 + this.partida.piso * 2 + f.nivel * 3), color: "#6a1aa0", golpeo: false, forma: "mano" });
+    }
+    // El Duelo es un uno contra uno: solo manos, sin refuerzos.
+    if (a.def.elites === "campeon") return;
+    f.cdOleada -= dt;
+    if (f.cdOleada > 0) return;
+    f.cdOleada = f.plan.cadaOleada;
     const bases: readonly ConductaBase[] = ["caminante", "saltador", "volador"];
-    for (let k = 0; k < e.plan.porOleada; k++) {
+    const n = Math.min(f.plan.porOleada, f.plan.tope - f.refuerzos.size);
+    for (let k = 0; k < n; k++) {
       const lado = Math.random() < 0.5 ? 2 : COLS - 3;
       const x = lado * TILE + TILE / 2;
       const tipo = bases[Math.floor(Math.random() * bases.length)];
-      const elite = Math.random() < e.plan.elite;
-      const en = this.crearEnemigo(tipo, x, 14 * TILE, elite);
+      const en = this.crearEnemigo(tipo, x, 14 * TILE, Math.random() < f.plan.elite);
       if (tipo === "volador") en.y = 8 * TILE;
-      en.multAtaque *= 1 + e.nivel * 0.08;
+      en.multAtaque *= 1 + f.nivel * 0.06;
+      if (a.juicio !== undefined) this.aplicarJuicio(en, a.juicio);
+      f.refuerzos.add(en);
       this.criaturas.push(en);
       this.fx.estallar(x, 13 * TILE, { colores: ["#6a1aa0", "#2a0a3a", "#c9a7ff"], n: 12, velocidad: 90, tam: [1, 2], brillan: true, chispa: "#c9a7ff", luz: { color: "#b04dff", r: 50, dur: 0.4 } });
     }
-    if (e.nivel >= 3) this.fx.texto(this.jugador.cx, this.jugador.y - 20, "Atraídos por el brillo…", "#c9a7ff");
   }
 
-  // ---------------- Peso del Eco: el Cazador de Portadores ----------------
-
-  /** Al empezar un piso: si el Peso es alto, el reloj del Cazador empieza a correr. */
-  private prepararCazador(): void {
+  /** Al empezar un piso: avisa del Peso del Eco acumulado. */
+  private avisarPeso(): void {
     const peso = this.partida.pesoEco;
-    this.cazador = { hp: null, reloj: peso >= PESO_CAZADOR ? retrasoCazador(peso) : Infinity, reentrada: 0 };
-    if (peso >= 1) {
-      this.mensaje(`Peso del Eco ×${peso}: +${peso * 25} % de hallazgos raros.${peso >= PESO_CAZADOR ? " Algo baja detrás de ti…" : ""}`, peso >= PESO_CAZADOR ? "#ff6a9a" : "#c9a7ff");
-    }
-  }
-
-  private actualizarCazador(dt: number): void {
-    const c = this.cazador;
-    if (this.abismo && this.partida.pesoEco < PESO_CAZADOR) return;
-    const presente = this.criaturas.some((x) => x instanceof Cazador && !x.muerto);
-    if (presente || this.terminado) return;
-    if (c.hp === null) {
-      c.reloj -= dt;
-      if (c.reloj <= 0) this.aparecerCazador(undefined, "Un Cazador de Portadores baja por ti. No se detiene.");
-    } else if (c.reentrada > 0) {
-      c.reentrada -= dt;
-      if (c.reentrada <= 0) this.aparecerCazador(c.hp, "El Cazador entra tras de ti…");
-    }
-  }
-
-  private aparecerCazador(hp: number | undefined, texto: string): void {
-    const j = this.jugador;
-    const x = j.cx < ANCHO_SALA / 2 ? 1 * TILE : (COLS - 2) * TILE;
-    const cz = new Cazador(x, j.y + j.h, statsCazador(this.partida.piso, this.partida.pesoEco), hp);
-    this.criaturas.push(cz);
-    this.cazador.hp = cz.hp;
-    this.mensaje(texto, "#ff2a3d");
-    this.audio.reproducir("jefe");
-    this.fx.destellar("#2a0a24", 0.5);
-  }
-
-  /** Distorsiones del Pozo con mucho Peso: barras de interferencia en la imagen. */
-  private dibujarDistorsion(g: CanvasRenderingContext2D): void {
-    const peso = this.partida.pesoEco;
-    if (peso < 3 || Math.random() > 0.04 * (peso - 2)) return;
-    g.save();
-    g.globalCompositeOperation = "difference";
-    for (let k = 0; k < 2 + peso; k++) {
-      g.globalAlpha = 0.12 + Math.random() * 0.2;
-      g.fillStyle = Math.random() < 0.5 ? "#ff2a6a" : "#2affd0";
-      g.fillRect(0, Math.floor(Math.random() * 270), ANCHO_SALA, 1 + Math.floor(Math.random() * 3));
-    }
-    g.restore();
+    if (peso >= 1) this.mensaje(`Peso del Eco ×${peso}: +${peso * 25} % de hallazgos raros.`, "#c9a7ff");
   }
 
   /** Mano del Abismo: un círculo de aviso en el suelo y después una mano que brota y se cierra. */
@@ -1555,10 +1498,11 @@ export class Juego implements Contexto {
     g.fillRect(Math.round(cx - 1), y0 + 6, 2, 2);
   }
 
-  /** Emboscada: bordes de la pantalla oscurecidos que laten en rojo. */
-  private dibujarTensionExtraccion(g: CanvasRenderingContext2D): void {
-    if (this.emboscada === null) return;
-    const k = 0.35 + Math.sin(this.tiempo * 7) * 0.12 + this.emboscada.nivel * 0.04;
+  /** Frenesí de arena: bordes de la pantalla oscurecidos que laten en rojo. */
+  private dibujarTensionArena(g: CanvasRenderingContext2D): void {
+    const f = this.arena?.activa === true ? this.arena.frenesi : undefined;
+    if (f === undefined) return;
+    const k = 0.3 + Math.sin(this.tiempo * 7) * 0.12 + f.nivel * 0.04;
     const grad = g.createRadialGradient(ANCHO_SALA / 2, 135, 90, ANCHO_SALA / 2, 135, 280);
     grad.addColorStop(0, "rgba(0,0,0,0)");
     grad.addColorStop(0.7, `rgba(40,0,20,${k * 0.6})`);
@@ -1838,7 +1782,6 @@ export class Juego implements Contexto {
     this.aliado?.actualizar(dt, this);
     postfx.traumaMinimo(this.partida.hp < this.partida.stats().hp * 0.25 ? 0.35 : 0);
     this.actualizarDevorador(dt);
-    this.actualizarCazador(dt);
     this.ayudasDePozo();
     if (!this.terminado) this.revisarSalida(dt);
   }
@@ -2339,16 +2282,6 @@ export class Juego implements Contexto {
       }
       return;
     }
-    if (c instanceof Cazador) {
-      this.cazador.hp = null;
-      this.cazador.reloj = retrasoCazador(this.partida.pesoEco) * 1.5;
-      this.soltar([
-        { tipo: "objeto", objeto: OBJ_RELICARIO, cantidad: 1 },
-        { tipo: "equipo", equipo: generarEquipo(this.partida.azar, this.partida.piso, 4) },
-      ], c.cx, c.cy);
-      this.eventos.jefe("¡Cazador abatido!", "El Pozo tardará en mandar otro");
-      this.fx.destellar("#ff2a3d", 0.6);
-    }
     if (this.devorador !== null && c === this.devorador.e) {
       this.devorador = null;
       this.meta.cerrarCicatriz(this.partida.piso);
@@ -2530,12 +2463,8 @@ export class Juego implements Contexto {
   private ecoHistoria: { sala: number; def: DefHistoria } | null = null;
   /** Espectro Temporal (pacto con tu Eco). */
   aliado: EspectroAliado | null = null;
-  /** Emboscada de la extracción en curso (el Pozo no quiere dejarte ir). */
-  private emboscada: { plan: PlanEmboscada; nivel: number; cdMano: number; cdOleada: number } | null = null;
   /** ¿El Portador está dentro de la zona de extracción? (para el HUD). */
   enZonaExtraccion = false;
-  /** Cazador de Portadores del piso: vida que le queda (null = todavía no llegó), reloj y reentrada tras cambiar de sala. */
-  private cazador: { hp: number | null; reloj: number; reentrada: number } = { hp: null, reloj: Infinity, reentrada: 0 };
 
   resonar(r: DefResonancia, potencia: number): void {
     ejecutarResonancia(this, this.vivos, r, potencia);
@@ -2677,8 +2606,7 @@ export class Juego implements Contexto {
     for (const p of this.proyectiles) luces.push({ x: p.x, y: p.y, r: 30, fuerza: 0.75, color: p.op.color });
     for (const c of this.criaturas) {
       if (c.muerto) continue;
-      if (c instanceof Cazador) luces.push({ x: c.cx, y: c.y + 6, r: 55, fuerza: 0.85, color: "#ff2a3d" });
-      else if (c.esJefe) luces.push({ x: c.cx, y: c.cy, r: 80, fuerza: 0.6, color: b.acento, sombras: true });
+      if (c.esJefe) luces.push({ x: c.cx, y: c.cy, r: 80, fuerza: 0.6, color: b.acento, sombras: true });
       else if (c instanceof Enemigo) {
         // Los ojos de los monstruos brillan en la oscuridad (más las élites).
         const elite = c.categoria === "elite";
@@ -2889,8 +2817,7 @@ export class Juego implements Contexto {
     }
     g.restore();
     this.dibujarRelojArena(g);
-    this.dibujarTensionExtraccion(g);
-    this.dibujarDistorsion(g);
+    this.dibujarTensionArena(g);
 
     if (this.fx.destello > 0) {
       g.globalAlpha = this.fx.destello * 0.6;
